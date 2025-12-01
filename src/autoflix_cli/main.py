@@ -1,0 +1,713 @@
+from .scraping import wiflix, anime_sama, coflix, player
+from .scraping.objects import (
+    WiflixMovie,
+    WiflixSeriesSeason,
+    SamaSeries,
+    SamaSeason,
+    CoflixSeries,
+    CoflixSeason,
+    CoflixMovie,
+    Episode,
+    EpisodeAccess,
+)
+from .cli_utils import (
+    clear_screen,
+    get_user_input,
+    select_from_list,
+    print_header,
+    print_success,
+    print_error,
+    print_info,
+    print_warning,
+    console,
+)
+from . import proxy
+
+from rich.progress import Progress, SpinnerColumn, TextColumn
+
+import sys
+import subprocess
+import shutil
+import os
+import platform
+import json
+import threading
+import time
+import urllib
+
+
+def get_vlc_path():
+    """
+    Find the VLC executable path.
+
+    Returns:
+        Path to VLC executable if found, None otherwise
+    """
+    # Check PATH first
+    path = shutil.which("vlc")
+    if path:
+        return path
+
+    if platform.system() == "Windows":
+        # Check Registry
+        try:
+            import winreg
+
+            for key_path in [
+                r"SOFTWARE\VideoLAN\VLC",
+                r"SOFTWARE\WOW6432Node\VideoLAN\VLC",
+            ]:
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
+                        install_dir = winreg.QueryValueEx(key, "InstallDir")[0]
+                        exe_path = os.path.join(install_dir, "vlc.exe")
+                        if os.path.exists(exe_path):
+                            return exe_path
+                except FileNotFoundError:
+                    continue
+        except Exception:
+            pass
+
+        # Check common paths
+        common_paths = [
+            os.path.expandvars(r"%ProgramFiles%\VideoLAN\VLC\vlc.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\VideoLAN\VLC\vlc.exe"),
+        ]
+        for p in common_paths:
+            if os.path.exists(p):
+                return p
+
+    return None
+
+
+def handle_player_error(context: str = "player") -> int:
+    """
+    Handle player errors and ask user what they want to do.
+
+    Args:
+        context: Context of the error (default: "player")
+
+    Returns:
+        User's choice index: 0 = try another, 1 = back
+    """
+    return select_from_list(
+        ["Try another player", "← Back"],
+        f"The {context} failed. What would you like to do?",
+    )
+
+
+def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
+    """
+    Attempt to play a video with the chosen player.
+
+    Args:
+        url: Video player URL
+        headers: HTTP headers for the request
+        title: Title of the video to display in the player
+
+    Returns:
+        True if playback succeeded, False otherwise
+    """
+    print_info(f"Resolving stream for: [cyan]{url}[/cyan]")
+
+    if hasattr(player, "new_url") and isinstance(player.new_url, dict):
+        for old, new in player.new_url.items():
+            url = url.replace(old, new)
+
+    # Determine player configuration
+    player_config = {}
+    for player_name, config in player.players.items():
+        if player_name in url.lower():
+            player_config = config
+            break
+
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            progress.add_task(description="Getting stream URL...", total=None)
+            stream_url = player.get_hls_link(url, headers)
+            if stream_url and stream_url.startswith("/"):
+                stream_url = (
+                    "https://"
+                    + url.removeprefix("https://").removeprefix("http://").split("/")[0]
+                    + stream_url
+                )
+    except Exception as e:
+        print_error(f"Error resolving stream URL: {e}")
+        return False
+
+    if not stream_url:
+        print_error("Could not resolve stream URL.")
+        return False
+
+    print_success(f"Stream URL: [cyan]{stream_url}[/cyan]")
+
+    while True:  # Loop to allow retrying with another player
+        players = ["mpv", "vlc", "← Back"]
+        player_choice = select_from_list(players, "🎮 Select video player:")
+
+        if players[player_choice] == "← Back":
+            return False
+
+        player_name = players[player_choice]
+        player_executable = None
+
+        # --- 1. Preparation of Headers & Referer for both players ---
+        # Calculate Referer
+        try:
+            domain = url.split("/")[2].lower()
+            referer = f"https://{domain}"
+            if player_config.get("referrer") == "full":
+                referer = url
+            elif player_config.get("referrer") == "path":
+                referer = f"https://{domain}/"
+            elif isinstance(player_config.get("referrer"), str):
+                referer = player_config.get("referrer")
+
+            referer = f"{referer}/"
+        except IndexError:
+            referer = ""
+
+        default_ua = (
+            "Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0"
+        )
+        user_agent = headers.get("User-Agent", default_ua)
+
+        if player_name == "vlc":
+            player_executable = get_vlc_path()
+            if not player_executable:
+                print_error("VLC not found. Please install it or add it to your PATH.")
+                retry = handle_player_error("VLC")
+                if retry == 1:  # Back
+                    return False
+                continue
+        else:
+            player_executable = shutil.which(player_name)
+            if not player_executable:
+                print_error(f"{player_name} is not installed or not in PATH.")
+                retry = handle_player_error(player_name)
+                if retry == 1:  # Back
+                    return False
+                continue
+
+        # Determine Launch Mode from config
+        mode = player_config.get("mode", "proxy")  # Default to proxy
+
+        if mode == "proxy":
+            print_info(
+                f"Launching [bold cyan]{player_name}[/bold cyan] via Proxy ({player_executable})..."
+            )
+
+            # Construct Proxy URL
+            # We need to pass the headers to the proxy
+            # Combine all necessary headers
+            proxy_headers = headers.copy()
+            if referer:
+                proxy_headers["Referer"] = referer
+
+            # Add specific headers from config
+            if player_config.get("alt-used") is True:
+                proxy_headers["Alt-Used"] = domain
+
+            sec_headers = player_config.get("sec_headers")
+            if sec_headers:
+                # Parse sec_headers string if needed, or just add them
+                # For simplicity in this proxy implementation, we might need to parse them if they are in string format "Key:Value;Key2:Value2"
+                if isinstance(sec_headers, str):
+                    for part in sec_headers.split(";"):
+                        if ":" in part:
+                            k, v = part.split(":", 1)
+                            proxy_headers[k.strip()] = v.strip()
+
+            headers_json = json.dumps(proxy_headers)
+            encoded_url = urllib.parse.quote(stream_url)
+            encoded_headers = urllib.parse.quote(headers_json)
+
+            local_stream_url = f"http://127.0.0.1:5000/stream?url={encoded_url}&headers={encoded_headers}"
+
+            if "ext" in player_config:
+                local_stream_url += f"&ext={player_config['ext']}"
+
+            try:
+                cmd = [player_executable, local_stream_url]
+                if player_name == "vlc":
+                    cmd.append(f"--meta-title={title}")
+                elif player_name == "mpv":
+                    cmd.append(f"--title={title}")
+
+                subprocess.run(cmd, check=True)
+                print_success("Playback completed successfully!")
+                return True
+            except Exception as e:
+                print_error(f"Error running player via proxy: {e}")
+
+        elif mode == "direct":
+            print_info(
+                f"Launching [bold cyan]{player_name}[/bold cyan] directly ({player_executable})..."
+            )
+            try:
+                if player_name == "vlc":
+                    # VLC Command construction
+                    cmd = [
+                        player_executable,
+                        stream_url,
+                        f":http-referrer={referer}",
+                        f":http-user-agent={user_agent}",
+                        f"--meta-title={title}",
+                    ]
+                    subprocess.run(cmd, check=True)
+                else:
+                    # MPV Command construction
+                    headers_mpv = f"Origin: {referer.split('/')[2]}"
+                    add_default_sec_headers = False
+
+                    if player_config.get("alt-used") is True:
+                        headers_mpv = f"Alt-Used: {domain};" + headers_mpv
+
+                    sec_headers = player_config.get("sec_headers")
+                    if sec_headers:
+                        if isinstance(sec_headers, str):
+                            headers_mpv += ";" + sec_headers
+                        elif isinstance(sec_headers, bool) and sec_headers is True:
+                            add_default_sec_headers = True
+                    else:
+                        add_default_sec_headers = True
+
+                    if add_default_sec_headers:
+                        headers_mpv += ";Sec-Fetch-Dest: iframe;Sec-Fetch-Mode: navigate;Sec-Fetch-Site: same-origin"
+
+                    if player_config.get("no-header") is True:
+                        headers_mpv = ""
+
+                    print_info(f"Headers: {headers_mpv}")
+
+                    cmd = [
+                        player_executable,
+                        f'--referrer="{referer}"',
+                        f'--user-agent="{user_agent}"',
+                        f'--http-header-fields="{headers_mpv}"',
+                        f'--title="{title}"',
+                        stream_url,
+                    ]
+                    subprocess.run(cmd, check=True)
+
+                print_success("Playback completed successfully!")
+                return True
+
+            except subprocess.CalledProcessError as e:
+                print_error(f"Error running player: {e}")
+                # Retry logic below
+            except Exception as e:
+                print_error(f"An unexpected error occurred: {e}")
+                # Retry logic below
+
+        # Common retry logic
+        retry = select_from_list(
+            [
+                "Try another player",
+                "Retry with same player",
+                "← Back",
+            ],
+            "The player failed. What would you like to do?",
+        )
+        if retry == 0:  # Try another player
+            continue
+        elif retry == 1:  # Retry with same player
+            continue
+        else:  # Back
+            return False
+
+
+def select_and_play_player(supported_players: list, referer: str, title: str) -> bool:
+    """
+    Let user select a player and attempt playback with retry logic.
+
+    Args:
+        supported_players: List of supported player objects
+        referer: HTTP Referer header value
+        title: Title of the video
+
+    Returns:
+        True if playback succeeded, False otherwise
+    """
+    while True:
+        player_idx = select_from_list(
+            [p.name for p in supported_players] + ["← Back"], "🎮 Select Player:"
+        )
+
+        if player_idx == len(supported_players):  # Back
+            return False
+
+        success = play_video(
+            supported_players[player_idx].url,
+            headers={"Referer": referer},
+            title=title,
+        )
+
+        if success:
+            return True
+        else:
+            # Playback failed, ask if they want to retry
+            retry = select_from_list(
+                ["Try another server/player", "← Back to main menu"],
+                "What would you like to do?",
+            )
+            if retry == 1:  # Back
+                return False
+            # Otherwise continue the loop to choose another player
+
+
+def handle_wiflix():
+    """Handle Wiflix provider flow."""
+    print_header("🎬 Wiflix")
+    query = get_user_input("Search query")
+
+    print_info(f"Searching for: [cyan]{query}[/cyan]")
+    results = wiflix.search(query)
+
+    if not results:
+        print_warning("No results found.")
+        return
+
+    choice_idx = select_from_list(
+        [f"{r.title} ({', '.join(r.genres)})" for r in results], "📺 Search Results:"
+    )
+    selection = results[choice_idx]
+
+    print_info(f"Loading [cyan]{selection.title}[/cyan]...")
+    content = wiflix.get_content(selection.url)
+
+    if isinstance(content, WiflixMovie):
+        console.print(f"\n[bold]🎬 Movie:[/bold] [cyan]{content.title}[/cyan]\n")
+        if not content.players:
+            print_warning("No players found.")
+            return
+        supported_players = [p for p in content.players if player.is_supported(p.url)]
+        if not supported_players:
+            print_warning("No supported players found.")
+            return
+
+        select_and_play_player(supported_players, wiflix.website_origin, content.title)
+
+    elif isinstance(content, WiflixSeriesSeason):
+        console.print(
+            f"\n[bold]📺 Series:[/bold] [cyan]{content.title} - {content.season}[/cyan]\n"
+        )
+
+        # episodes is a dict {lang: [Episode]}
+        langs = list(content.episodes.keys())
+        if not langs:
+            print_warning("No episodes found.")
+            return
+
+        lang_idx = select_from_list(langs, "🌍 Select Language:")
+        selected_lang = langs[lang_idx]
+        episodes = content.episodes[selected_lang]
+
+        ep_idx = select_from_list([e.title for e in episodes], "📺 Select Episode:")
+
+        while True:
+            selected_episode = episodes[ep_idx]
+
+            if not selected_episode.players:
+                print_warning("No players found for this episode.")
+                return
+
+            supported_players = [
+                p for p in selected_episode.players if player.is_supported(p.url)
+            ]
+            if not supported_players:
+                print_warning("No supported players found.")
+                return
+
+            success = select_and_play_player(
+                supported_players,
+                wiflix.website_origin,
+                f"{content.title} - {selected_episode.title}",
+            )
+
+            if success:
+                if ep_idx + 1 < len(episodes):
+                    next_ep = episodes[ep_idx + 1]
+                    choice = select_from_list(
+                        ["Yes", "No"], f"Play next episode: {next_ep.title}?"
+                    )
+                    if choice == 0:
+                        ep_idx += 1
+                        continue
+            break
+
+
+def handle_anime_sama():
+    """Handle Anime-Sama provider flow."""
+    print_header("🎌 Anime-Sama")
+    query = get_user_input("Search query")
+
+    print_info(f"Searching for: [cyan]{query}[/cyan]")
+    results = anime_sama.search(query)
+
+    if not results:
+        print_warning("No results found.")
+        return
+
+    choice_idx = select_from_list(
+        [f"{r.title} ({', '.join(r.genres)})" for r in results], "📺 Search Results:"
+    )
+    selection = results[choice_idx]
+
+    print_info(f"Loading [cyan]{selection.title}[/cyan]...")
+    series = anime_sama.get_series(selection.url)
+
+    if not series.seasons:
+        print_warning("No seasons found.")
+        return
+
+    season_idx = select_from_list(
+        [s.title for s in series.seasons], "📺 Select Season:"
+    )
+    selected_season_access = series.seasons[season_idx]
+
+    print_info(f"Loading [cyan]{selected_season_access.title}[/cyan]...")
+    season = anime_sama.get_season(selected_season_access.url)
+
+    # episodes is dict {lang: [Episode]}
+    langs = list(season.episodes.keys())
+    if not langs:
+        print_warning("No episodes found.")
+        return
+
+    lang_idx = select_from_list(langs, "🌍 Select Language:")
+    selected_lang = langs[lang_idx]
+    episodes = season.episodes[selected_lang]
+
+    ep_idx = select_from_list([e.title for e in episodes], "📺 Select Episode:")
+
+    while True:
+        selected_episode = episodes[ep_idx]
+
+        if not selected_episode.players:
+            print_warning("No players found for this episode.")
+            return
+
+        supported_players = [
+            p for p in selected_episode.players if player.is_supported(p.url)
+        ]
+        if not supported_players:
+            print_warning("No supported players found.")
+            return
+
+        # Loop to allow retrying with another player
+        playback_success = False
+        while True:
+            player_idx = select_from_list(
+                [
+                    f"{p.name} : {p.url.split('/')[2].split('.')[-2]}"
+                    for p in supported_players
+                ]
+                + ["← Back"],
+                "🎮 Select Player:",
+            )
+
+            if player_idx == len(supported_players):  # Back
+                return
+
+            success = play_video(
+                supported_players[player_idx].url,
+                headers={"Referer": anime_sama.website_origin},
+                title=f"{series.title} - {season.title} - {selected_episode.title}",
+            )
+
+            if success:
+                playback_success = True
+                break  # Playback succeeded, exit player loop
+            else:
+                # Playback failed, ask if they want to retry
+                retry = select_from_list(
+                    ["Try another server/player", "← Back to main menu"],
+                    "What would you like to do?",
+                )
+                if retry == 1:  # Back
+                    return
+                # Otherwise continue the loop to choose another player
+
+        if playback_success:
+            if ep_idx + 1 < len(episodes):
+                next_ep = episodes[ep_idx + 1]
+                choice = select_from_list(
+                    ["Yes", "No"], f"Play next episode: {next_ep.title}?"
+                )
+                if choice == 0:
+                    ep_idx += 1
+                    continue
+            break
+
+
+def handle_coflix():
+    """Handle Coflix provider flow."""
+    print_header("🎬 Coflix")
+    query = get_user_input("Search query")
+
+    print_info(f"Searching for: [cyan]{query}[/cyan]")
+    results = coflix.search(query)
+
+    if not results:
+        print_warning("No results found.")
+        return
+
+    choice_idx = select_from_list([f"{r.title}" for r in results], "📺 Search Results:")
+    selection = results[choice_idx]
+
+    print_info(f"Loading [cyan]{selection.title}[/cyan]...")
+    content = coflix.get_content(selection.url)
+
+    if isinstance(content, CoflixMovie):
+        console.print(f"\n[bold]🎬 Movie:[/bold] [cyan]{content.title}[/cyan]\n")
+        if not content.players:
+            print_warning("No players found.")
+            return
+        supported_players = [p for p in content.players if player.is_supported(p.url)]
+        if not supported_players:
+            print_warning("No supported players found.")
+            return
+
+        # Loop to allow retrying with another player
+        while True:
+            player_idx = select_from_list(
+                [f"Player : {p.name}" for p in supported_players] + ["← Back"],
+                "🎮 Select Player:",
+            )
+
+            if player_idx == len(supported_players):  # Back
+                return
+
+            success = play_video(
+                supported_players[player_idx].url,
+                headers={
+                    "Referer": "https://lecteurvideo.com/",
+                },
+                title=content.title,
+            )
+
+            if success:
+                return  # Playback succeeded, exit
+            else:
+                # Playback failed, ask if they want to retry
+                retry = select_from_list(
+                    ["Try another server/player", "← Back to main menu"],
+                    "What would you like to do?",
+                )
+                if retry == 1:  # Back
+                    return
+                # Otherwise continue the loop to choose another player
+
+    elif isinstance(content, CoflixSeries):
+        console.print(f"\n[bold]📺 Series:[/bold] [cyan]{content.title}[/cyan]\n")
+
+        if not content.seasons:
+            print_warning("No seasons found.")
+            return
+
+        season_idx = select_from_list(
+            [s.title for s in content.seasons], "📺 Select Season:"
+        )
+        selected_season_access = content.seasons[season_idx]
+
+        print_info(f"Loading [cyan]{selected_season_access.title}[/cyan]...")
+        season = coflix.get_season(selected_season_access.url)
+
+        if not season.episodes:
+            print_warning("No episodes found.")
+            return
+
+        ep_idx = select_from_list(
+            [e.title for e in season.episodes], "📺 Select Episode:"
+        )
+
+        while True:
+            selected_episode = season.episodes[ep_idx]
+
+            # Get episode links and filter for supported players
+            links = coflix.get_episode(selected_episode.url).players
+            supported_links = [link for link in links if player.is_supported(link.url)]
+
+            if not supported_links:
+                print_warning("No supported players found.")
+                return
+
+            # Loop to allow retrying with another player
+            playback_success = False
+            while True:
+                player_idx = select_from_list(
+                    [f"Player : {link.name}" for link in supported_links] + ["← Back"],
+                    "🎮 Select Player:",
+                )
+
+                if player_idx == len(supported_links):  # Back
+                    return
+
+                success = play_video(
+                    supported_links[player_idx].url,
+                    headers={
+                        "Referer": "https://lecteurvideo.com/",
+                    },
+                    title=f"{selected_season_access.title} - {selected_episode.title}",
+                )
+
+                if success:
+                    playback_success = True
+                    break  # Playback succeeded, exit player loop
+                else:
+                    # Playback failed, ask if they want to retry
+                    retry = select_from_list(
+                        ["Try another server/player", "← Back to main menu"],
+                        "What would you like to do?",
+                    )
+                    if retry == 1:  # Back
+                        return
+                    # Otherwise continue the loop to choose another player
+
+            if playback_success:
+                if ep_idx + 1 < len(season.episodes):
+                    next_ep = season.episodes[ep_idx + 1]
+                    choice = select_from_list(
+                        ["Yes", "No"], f"Play next episode: {next_ep.title}?"
+                    )
+                    if choice == 0:
+                        ep_idx += 1
+                        continue
+                break
+
+
+def main():
+    """Main application loop."""
+    # Start proxy server
+    proxy_url = proxy.start_proxy_server()
+
+    while True:
+        clear_screen()
+        print_header("🎬 AutoFlix CLI")
+        options = ["Anime-Sama", "Coflix", "Exit"]
+        choice = select_from_list(options, "📺 Select Provider:")
+
+        if choice == 0:
+            handle_anime_sama()
+        elif choice == 1:
+            handle_coflix()
+        # elif choice == 2:
+        #     handle_wiflix()
+        elif choice == 2:
+            console.print("\n[cyan]👋 Goodbye![/cyan]\n")
+            break
+
+        input("\nPress Enter to continue...")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]⚠[/yellow] Exiting...\n")
+        sys.exit(0)

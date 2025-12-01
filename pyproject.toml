@@ -1,0 +1,33 @@
+[project]
+name = "autoflix-cli"
+version = "0.1.0"
+description = "Stream movies, series, and anime in French (VF & VOSTFR) directly from your terminal. Inspired by ani-cli."
+readme = "README.md"
+requires-python = ">=3.9.2"
+license = {text = "MIT"}
+license-files = ["LICENSE"]
+authors = [{name = "PaulExplorer"}]
+keywords = ["autoflix", "anime", "movies", "series", "VF", "VOSTFR"]
+
+# Dependencies
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "curl-cffi>=0.13.0",
+    "flask>=3.1.2",
+    "html5lib>=1.1",
+    "inquirer>=3.4.1",
+    "jsbeautifier>=1.15.4",
+    "rich>=14.2.0",
+]
+
+# Project URLs
+[project.urls]
+Homepage = "https://github.com/PaulExplorer/autoflix-cli"
+Repository = "https://github.com/PaulExplorer/autoflix-cli.git"
+
+[project.scripts]
+autoflix = "autoflix_cli.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
