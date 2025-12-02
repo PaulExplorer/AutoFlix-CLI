@@ -64,12 +64,12 @@ def requests_retry_session(url, headers, retries=3, backoff_factor=0.5):
             time.sleep(backoff_factor * (i + 1))
 
 
-def safe_iter_content(response, chunk_size=8192):
+def safe_iter_content(response):
     """
     Generator that handles 'GeneratorExit' when VLC disconnects/seeks.
     """
     try:
-        iterator = response.iter_content(chunk_size=chunk_size)
+        iterator = response.iter_content()
         for chunk in iterator:
             yield chunk
     except GeneratorExit:
@@ -148,7 +148,7 @@ def get_m3u8(target_url, headers, ext=None):
         if ext == "mp4":
             proxied_headers = get_proxied_headers(response.headers)
             return Response(
-                stream_with_context(safe_iter_content(response, chunk_size=64 * 1024)),
+                stream_with_context(safe_iter_content(response)),
                 status=response.status_code,
                 headers=proxied_headers,
                 content_type=response.headers.get("Content-Type"),
@@ -156,7 +156,7 @@ def get_m3u8(target_url, headers, ext=None):
 
         # 2. Sniff content to detect M3U8
         # We read the first chunk to check for #EXTM3U
-        iterator = response.iter_content(chunk_size=8192)
+        iterator = response.iter_content()
         try:
             first_chunk = next(iterator)
         except StopIteration:
@@ -246,7 +246,7 @@ def proxy_segment():
 
         # Stream binary segment
         return Response(
-            stream_with_context(safe_iter_content(req, chunk_size=4096)),
+            stream_with_context(safe_iter_content(req)),
             content_type=req.headers.get("Content-Type"),
         )
 

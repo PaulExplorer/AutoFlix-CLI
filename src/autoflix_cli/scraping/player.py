@@ -69,7 +69,7 @@ players = {
         "no-header": True,
         "ext": "mp4",
     },
-    "sendvid": {"type": "sendvid", "mode": "direct", "ext": "mp4"},
+    "sendvid": {"type": "sendvid", "mode": "proxy", "ext": "mp4"},
     "sibnet": {
         "type": "sibnet",
         "mode": "proxy",
