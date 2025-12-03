@@ -37,7 +37,7 @@ def requests_retry_session(url, headers, retries=3, backoff_factor=0.5):
 
     # CRITICAL: Tells the server to close the socket after the request.
     # Prevents "Connection reset by peer" errors on long streams.
-    req_headers["Connection"] = "close"
+    # req_headers["Connection"] = "close"
 
     for i in range(retries):
         try:
@@ -45,13 +45,14 @@ def requests_retry_session(url, headers, retries=3, backoff_factor=0.5):
                 url,
                 headers=req_headers,
                 impersonate="chrome120",
-                timeout=15,
+                timeout=45,
                 curl_options=curl_options,
                 stream=True,
             )
 
             # If server error (5xx) or Rate Limit (429), retry
             if response.status_code in [500, 502, 503, 504, 429]:
+                response.close()
                 raise Exception(f"Status code {response.status_code}")
 
             return response
@@ -152,6 +153,7 @@ def get_m3u8(target_url, headers, ext=None):
                 status=response.status_code,
                 headers=proxied_headers,
                 content_type=response.headers.get("Content-Type"),
+                direct_passthrough=True,
             )
 
         # 2. Sniff content to detect M3U8
