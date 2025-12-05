@@ -381,7 +381,7 @@ def handle_wiflix():
     content = wiflix.get_content(selection.url)
 
     if isinstance(content, WiflixMovie):
-        console.print(f"\n[bold]🎬 Movie:[/bold] [cyan]{content.title}[/cyan]\n")
+        console.print(f"\n[bold]🎬 Movie:[/bold] [cyan]{content.title}[/cyan]")
         if not content.players:
             print_warning("No players found.")
             return
@@ -394,7 +394,7 @@ def handle_wiflix():
 
     elif isinstance(content, WiflixSeriesSeason):
         console.print(
-            f"\n[bold]📺 Series:[/bold] [cyan]{content.title} - {content.season}[/cyan]\n"
+            f"\n[bold]📺 Series:[/bold] [cyan]{content.title} - {content.season}[/cyan]"
         )
 
         # episodes is a dict {lang: [Episode]}
