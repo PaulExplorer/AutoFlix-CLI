@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 from .objects import SearchResult, SamaSeason, SamaSeries, SeasonAccess, Episode
 from .utils import parse_episodes_from_js
 
-website_origin = "https://anime-sama.org"
+website_origin = "https://anime-sama.eu"
 
 scraper = cffi_requests.Session(impersonate="chrome")
 
