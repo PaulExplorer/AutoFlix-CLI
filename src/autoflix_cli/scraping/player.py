@@ -35,6 +35,8 @@ players = {
     #     "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:cross-site",
     # },
     "ups2up": {"type": "c"},
+    "ico3c": {"type": "c"},
+    "fsvid": {"type": "c"},
     "darkibox": {"type": "d"},
     # "movearnpre": { # don't work
     #     "type": "e",
@@ -57,6 +59,7 @@ players = {
     },
     "mivalyo": {"type": "e"},
     "dingtezuni": {"type": "e"},
+    "vidzy": {"type": "f"},
     "videzz": {
         "type": "vidoza",
         "mode": "proxy",
@@ -87,6 +90,8 @@ players = {
         "referrer": "https://ico3c.com/",
         "no-header": True,
     },
+    "kakaflix": {"type": "kakaflix"},
+    # "myvidplay": {"type": "myvidplay", "referrer": "https://myvidplay.com/"},
 }
 
 # URL replacements for compatibility
@@ -97,6 +102,12 @@ new_url = {
     "vidmoly.to": "vidmoly.me",
     "lulustream": "luluvdo",
     "vidoza.net": "videzz.net",
+}
+
+# kakaflix supported players
+kakaflix_players = {
+    "moon2": "ico3c",
+    # "tokyo": "myvidplay"
 }
 
 
@@ -160,7 +171,7 @@ def get_hls_link_a(url: str, headers: dict) -> str:
 
 def get_hls_link_e(url: str, headers: dict) -> str:
     """
-    Extract HLS link from type 'a' players (most common type).
+    Extract HLS link from type 'e' players.
     Requires deobfuscation of JavaScript code.
 
     Args:
@@ -197,11 +208,35 @@ def get_hls_link_c(url: str, headers: dict) -> str:
     response = scraper.get(url, headers=headers, impersonate="chrome110")
     response.raise_for_status()
 
-    code = response.text.split("<script type='text/javascript'>")[1].split("\n")[0]
+    code = response.text.split(" type='text/javascript'>")[1].split("\n")[0]
     code = code.removesuffix("</script>")
     code = deobfuscate(code)
 
     link = code.split('file: "')[1].split('"')[0]
+
+    return link
+
+
+def get_hls_link_f(url: str, headers: dict) -> str:
+    """
+    Extract HLS link from type 'f' players.
+    Requires deobfuscation of JavaScript code.
+
+    Args:
+        url: Player URL
+        headers: HTTP headers for the request
+
+    Returns:
+        HLS stream URL
+    """
+    response = scraper.get(url, headers=headers, impersonate="chrome110")
+    response.raise_for_status()
+
+    code = response.text.split("<script type='text/javascript'>")[1].split("\n")[0]
+    code = code.removesuffix("</script>")
+    code = deobfuscate(code)
+
+    link = code.split('src: "')[1].split('"')[0]
 
     return link
 
@@ -335,6 +370,57 @@ def get_hls_link_vidoza(url: str, headers: dict) -> str:
     return link
 
 
+def get_hls_link_kakaflix(url: str, headers: dict) -> str:
+    """
+    Extract HLS link from kakaflix players.
+
+    Args:
+        url: Player URL
+        headers: HTTP headers for the request
+
+    Returns:
+        HLS stream URL
+    """
+    response = scraper.get(
+        url,
+        headers=headers,
+        impersonate="chrome110",
+    )
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    try:
+        link: str = soup.find("iframe").attrs["src"]
+    except:
+        return get_hls_link(response.url, headers)
+    else:
+        return get_hls_link(link, headers)
+
+
+def get_hls_link_myvidplay(url: str, headers: dict) -> str:
+    """
+    Extract HLS link from myvidplay players.
+
+    Args:
+        url: Player URL
+        headers: HTTP headers for the request
+
+    Returns:
+        HLS stream URL
+    """
+    response = scraper.get(
+        url,
+        headers=headers,
+        impersonate="chrome110",
+    )
+    response.raise_for_status()
+
+    link = response.text.split("vtt: '")[1].split("'")[0]
+
+    return link
+
+
 def get_hls_link(url: str, headers: dict = {}) -> str | None:
     """
     Extract HLS/video link from a player URL.
@@ -365,6 +451,8 @@ def get_hls_link(url: str, headers: dict = {}) -> str | None:
                     return get_hls_link_e(url, headers)
                 except:
                     return get_hls_link_a(url, headers)
+            elif parse_type == "f":
+                return get_hls_link_f(url, headers)
             elif parse_type == "sendvid":
                 return get_hls_link_sendvid(url)
             elif parse_type == "sibnet":
@@ -375,6 +463,10 @@ def get_hls_link(url: str, headers: dict = {}) -> str | None:
                 return get_hls_link_vidoza(url, headers)
             elif parse_type == "filemoon":
                 return get_hls_link_filemoon(url, headers)
+            elif parse_type == "kakaflix":
+                return get_hls_link_kakaflix(url, headers)
+            elif parse_type == "myvidplay":
+                return get_hls_link_myvidplay(url, headers)
 
     return None
 
@@ -390,6 +482,13 @@ def is_supported(url: str) -> bool:
         True if the player is supported, False otherwise
     """
     for player in players.keys():
-        if player in url.lower():
+        if "kakaflix" in url.lower():
+            for player in kakaflix_players.keys():
+                if player in url.lower():
+                    return True
+            return False
+
+        elif player in url.lower():
             return True
+
     return False
