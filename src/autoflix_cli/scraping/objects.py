@@ -217,3 +217,38 @@ class CoflixSeason:
 
     def __repr__(self):
         return str(self)
+
+
+class FrenchStreamMovie:
+    def __init__(
+        self,
+        title: str,
+        url: str,
+        img: str,
+        genres: list[str],
+        players: list[Player],
+    ):
+        self.title = title
+        self.url = url
+        self.img = img
+        self.genres = genres
+        self.players = players
+
+    def __str__(self):
+        return f"FrenchStreamMovie(title='{self.title}', url='{self.url}', img='{self.img}', genres={self.genres}, players={self.players})"
+
+    def __repr__(self):
+        return str(self)
+
+
+class FrenchStreamSeason:
+    def __init__(self, title: str, url: str, episodes: dict[str, list[Episode]]):
+        self.title = title
+        self.url = url
+        self.episodes = episodes
+
+    def __str__(self):
+        return f"FrenchStreamSeason(title='{self.title}', url='{self.url}', episodes={self.episodes})"
+
+    def __repr__(self):
+        return str(self)

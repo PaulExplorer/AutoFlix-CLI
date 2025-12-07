@@ -1,5 +1,5 @@
 from typing import Optional, Union, List
-import re
+import re, json
 from bs4 import BeautifulSoup
 from .objects import Player, Episode
 
@@ -90,3 +90,10 @@ def get_value_by_key(ul_html: Union[str, BeautifulSoup], key: str) -> Optional[s
                 break
 
     return node.get_text(strip=True) if node else None
+
+
+def parse_dirty_json(js_obj: str):
+    regex = r"([{,])\s*([a-zA-Z0-9_]+)\s*:"
+    json_str = re.sub(regex, r'\1"\2":', js_obj)
+    json_str = re.sub(r",(\s*})", r"\1", json_str)
+    return json.loads(json_str)

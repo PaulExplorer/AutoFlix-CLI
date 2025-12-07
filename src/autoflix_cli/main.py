@@ -1,4 +1,4 @@
-from .scraping import wiflix, anime_sama, coflix, player
+from .scraping import wiflix, anime_sama, coflix, player, french_stream
 from .scraping.objects import (
     WiflixMovie,
     WiflixSeriesSeason,
@@ -9,6 +9,8 @@ from .scraping.objects import (
     CoflixMovie,
     Episode,
     EpisodeAccess,
+    FrenchStreamMovie,
+    FrenchStreamSeason,
 )
 from .cli_utils import (
     clear_screen,
@@ -681,6 +683,85 @@ def handle_coflix():
                 break
 
 
+def handle_french_stream():
+    """Handle French-Stream provider flow."""
+    print_header("🇫🇷 French-Stream")
+    query = get_user_input("Search query")
+
+    print_info(f"Searching for: [cyan]{query}[/cyan]")
+    results = french_stream.search(query)
+
+    if not results:
+        print_warning("No results found.")
+        return
+
+    choice_idx = select_from_list([r.title for r in results], "📺 Search Results:")
+    selection = results[choice_idx]
+
+    print_info(f"Loading [cyan]{selection.title}[/cyan]...")
+    content = french_stream.get_content(selection.url)
+
+    if isinstance(content, FrenchStreamMovie):
+        console.print(f"\n[bold]🎬 Movie:[/bold] [cyan]{content.title}[/cyan]\n")
+        if not content.players:
+            print_warning("No players found.")
+            return
+        supported_players = [p for p in content.players if player.is_supported(p.url)]
+        if not supported_players:
+            print_warning("No supported players found.")
+            return
+
+        select_and_play_player(
+            supported_players, french_stream.website_origin, content.title
+        )
+
+    elif isinstance(content, FrenchStreamSeason):
+        console.print(f"\n[bold]📺 Series:[/bold] [cyan]{content.title}[/cyan]\n")
+
+        # episodes is a dict {lang: [Episode]}
+        langs = list(content.episodes.keys())
+        if not langs:
+            print_warning("No episodes found.")
+            return
+
+        lang_idx = select_from_list(langs, "🌍 Select Language:")
+        selected_lang = langs[lang_idx]
+        episodes = content.episodes[selected_lang]
+
+        ep_idx = select_from_list([e.title for e in episodes], "📺 Select Episode:")
+
+        while True:
+            selected_episode = episodes[ep_idx]
+
+            if not selected_episode.players:
+                print_warning("No players found for this episode.")
+                return
+
+            supported_players = [
+                p for p in selected_episode.players if player.is_supported(p.url)
+            ]
+            if not supported_players:
+                print_warning("No supported players found.")
+                return
+
+            success = select_and_play_player(
+                supported_players,
+                french_stream.website_origin,
+                f"{content.title} - {selected_episode.title}",
+            )
+
+            if success:
+                if ep_idx + 1 < len(episodes):
+                    next_ep = episodes[ep_idx + 1]
+                    choice = select_from_list(
+                        ["Yes", "No"], f"Play next episode: {next_ep.title}?"
+                    )
+                    if choice == 0:
+                        ep_idx += 1
+                        continue
+            break
+
+
 def main():
     """Main application loop."""
     # Start proxy server
@@ -689,16 +770,16 @@ def main():
     while True:
         clear_screen()
         print_header("🎬 AutoFlix CLI")
-        options = ["Anime-Sama", "Coflix", "Exit"]
+        options = ["Anime-Sama", "Coflix", "French-Stream", "Exit"]
         choice = select_from_list(options, "📺 Select Provider:")
 
         if choice == 0:
             handle_anime_sama()
         elif choice == 1:
             handle_coflix()
-        # elif choice == 2:
-        #     handle_wiflix()
         elif choice == 2:
+            handle_french_stream()
+        elif choice == 3:
             console.print("\n[cyan]👋 Goodbye![/cyan]\n")
             break
 
