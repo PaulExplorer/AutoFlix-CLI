@@ -2,10 +2,11 @@ from curl_cffi import requests as cffi_requests
 from bs4 import BeautifulSoup
 from .objects import SearchResult, SamaSeason, SamaSeries, SeasonAccess, Episode
 from .utils import parse_episodes_from_js
+from ..proxy import curl_options
 
 website_origin = "https://anime-sama.eu"
 
-scraper = cffi_requests.Session(impersonate="chrome")
+scraper = cffi_requests.Session(impersonate="chrome", curl_options=curl_options)
 
 # info_class = "mt-0.5 text-gray-300 font-medium text-xs truncate"
 info_class = "info-value"

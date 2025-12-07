@@ -12,9 +12,10 @@ from .objects import (
 )
 from .utils import parse_episodes_from_js
 import base64
+from ..proxy import curl_options
 
 website_origin = "https://coflix.foo"
-scraper = cffi_requests.Session(impersonate="chrome")
+scraper = cffi_requests.Session(impersonate="chrome", curl_options=curl_options)
 
 
 def search(query: str) -> list[SearchResult]:
