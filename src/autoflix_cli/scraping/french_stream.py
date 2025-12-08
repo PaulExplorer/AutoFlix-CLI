@@ -47,7 +47,10 @@ def search(query: str) -> list[SearchResult]:
             website_origin
             + result.attrs["onclick"].split("location.href='")[1].split("'")[0]
         )
-        img: str = website_origin + result.find("img").attrs["src"]
+        try:
+            img: str = website_origin + result.find("img").attrs["src"]
+        except:
+            img: str = ""
 
         genres: list[str] = []  # unknow
 
@@ -61,9 +64,13 @@ def get_movie(url: str, content: str) -> FrenchStreamMovie:
 
     title: str = soup.find("meta", {"property": "og:title"}).attrs["content"]
 
-    img: str = (
-        website_origin + soup.find("img", {"class": "dvd-thumbnail"}).attrs["src"]
-    )
+    img: str = ""
+    try:
+        img: str = (
+            website_origin + soup.find("img", {"class": "dvd-thumbnail"}).attrs["src"]
+        )
+    except:
+        img: str = ""
     genres: list[str] = []
     genres_div = soup.find("ul", {"id": "s-list"}).find_all("li")[1]
     if genres_div is not None:
