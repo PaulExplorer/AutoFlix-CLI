@@ -107,6 +107,7 @@ new_url = {
 # kakaflix supported players
 kakaflix_players = {
     "moon2": "ico3c",
+    "viper": "ico3c",
     # "tokyo": "myvidplay"
 }
 
