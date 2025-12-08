@@ -56,10 +56,8 @@ def search(query: str) -> list[SearchResult]:
     return results
 
 
-def get_movie(url: str) -> FrenchStreamMovie:
-    response = scraper.get(url)
-    response.raise_for_status()
-    soup = BeautifulSoup(response.text, "html5lib")
+def get_movie(url: str, content: str) -> FrenchStreamMovie:
+    soup = BeautifulSoup(content, "html5lib")
 
     title: str = soup.find("meta", {"property": "og:title"}).attrs["content"]
 
@@ -76,7 +74,7 @@ def get_movie(url: str) -> FrenchStreamMovie:
     players: list[Player] = []
 
     # Handle nested divs for player selection
-    players_json = response.text.split("var playerUrls = ")[1].split(";")[0]
+    players_json = content.split("var playerUrls = ")[1].split(";")[0]
     players_json = parse_dirty_json(players_json)
     for player, links in players_json.items():
         if links["Default"]:
@@ -85,16 +83,14 @@ def get_movie(url: str) -> FrenchStreamMovie:
     return FrenchStreamMovie(title, url, img, genres, players)
 
 
-def get_series_season(url: str) -> FrenchStreamSeason:
-    response = scraper.get(url)
-    response.raise_for_status()
-    soup = BeautifulSoup(response.text, "html5lib")
+def get_series_season(url: str, content: str) -> FrenchStreamSeason:
+    soup = BeautifulSoup(content, "html5lib")
 
     title: str = soup.find("meta", {"property": "og:title"}).attrs["content"]
 
     episodes: dict[str, list[Episode]] = {}
 
-    episodes_json = response.text.split("var episodesData = ")[1].split(";")[0]
+    episodes_json = content.split("var episodesData = ")[1].split(";")[0]
     episodes_json = parse_dirty_json(episodes_json)
 
     for lang, episodes_data in episodes_json.items():
@@ -114,9 +110,13 @@ def get_series_season(url: str) -> FrenchStreamSeason:
 
 
 def get_content(url: str):
-    if "film" in url:
-        return get_movie(url)
-    return get_series_season(url)
+    response = scraper.get(url)
+    response.raise_for_status()
+    content = response.text
+
+    if "episodesData" in content:
+        return get_series_season(url, content)
+    return get_movie(url, content)
 
 
 if __name__ == "__main__":
