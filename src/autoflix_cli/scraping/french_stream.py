@@ -42,7 +42,11 @@ def search(query: str) -> list[SearchResult]:
     soup = BeautifulSoup(response.text, "html5lib")
 
     for result in soup.find_all("div", {"class": "search-item"}):
-        title: str = result.find("div", {"class": "search-title"}).text
+        try:
+            title: str = result.find("div", {"class": "search-title"}).text
+        except:
+            break  # no results
+
         link: str = (
             website_origin
             + result.attrs["onclick"].split("location.href='")[1].split("'")[0]
@@ -50,7 +54,7 @@ def search(query: str) -> list[SearchResult]:
         try:
             img: str = website_origin + result.find("img").attrs["src"]
         except:
-            img: str = ""
+            img: str = ""  # no image
 
         genres: list[str] = []  # unknow
 
