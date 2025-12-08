@@ -182,16 +182,16 @@ def get_m3u8(target_url, headers, ext=None):
                 if not line:
                     continue
 
-                # Rewrite Encryption Keys
-                if line.startswith("#EXT-X-KEY"):
+                # Rewrite Encryption Keys and Media (Subtitles, Audio)
+                if line.startswith("#EXT-X-KEY") or line.startswith("#EXT-X-MEDIA"):
 
-                    def replace_key_uri(match):
-                        key_url = match.group(1)
-                        absolute_key_url = urllib.parse.urljoin(base_url, key_url)
-                        encoded_key_url = urllib.parse.quote(absolute_key_url)
-                        return f'URI="{request.host_url}proxy?url={encoded_key_url}"'
+                    def replace_uri(match):
+                        target_url = match.group(1)
+                        absolute_target_url = urllib.parse.urljoin(base_url, target_url)
+                        encoded_target_url = urllib.parse.quote(absolute_target_url)
+                        return f'URI="{request.host_url}proxy?url={encoded_target_url}"'
 
-                    line = re.sub(r'URI="(.*?)"', replace_key_uri, line)
+                    line = re.sub(r'URI="(.*?)"', replace_uri, line)
                     new_lines.append(line)
 
                 # Rewrite Segments/Links
