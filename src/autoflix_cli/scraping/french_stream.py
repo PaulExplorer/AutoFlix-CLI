@@ -44,7 +44,7 @@ def search(query: str) -> list[SearchResult]:
     for result in soup.find_all("div", {"class": "search-item"}):
         try:
             title: str = result.find("div", {"class": "search-title"}).text
-        except:
+        except AttributeError:
             break  # no results
 
         link: str = (
@@ -53,7 +53,7 @@ def search(query: str) -> list[SearchResult]:
         )
         try:
             img: str = website_origin + result.find("img").attrs["src"]
-        except:
+        except AttributeError:
             img: str = ""  # no image
 
         genres: list[str] = []  # unknow
@@ -73,7 +73,7 @@ def get_movie(url: str, content: str) -> FrenchStreamMovie:
         img: str = (
             website_origin + soup.find("img", {"class": "dvd-thumbnail"}).attrs["src"]
         )
-    except:
+    except AttributeError:
         img: str = ""
     genres: list[str] = []
     genres_div = soup.find("ul", {"id": "s-list"}).find_all("li")[1]

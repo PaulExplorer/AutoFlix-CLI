@@ -183,7 +183,12 @@ def get_m3u8(target_url, headers, ext=None):
                     continue
 
                 # Rewrite Encryption Keys and Media (Subtitles, Audio)
-                if line.startswith("#EXT-X-KEY") or line.startswith("#EXT-X-MEDIA"):
+                if (
+                    line.startswith("#EXT-X-KEY")
+                    or line.startswith("#EXT-X-MEDIA")
+                    or line.startswith("#EXT-X-MAP")
+                    or line.startswith("#EXT-X-I-FRAME-STREAM-INF")
+                ):
 
                     def replace_uri(match):
                         target_url = match.group(1)
