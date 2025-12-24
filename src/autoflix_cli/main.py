@@ -445,6 +445,8 @@ def handle_wiflix():
 
 def handle_anime_sama():
     """Handle Anime-Sama provider flow."""
+    anime_sama.get_website_url()
+
     print_header("🎌 Anime-Sama")
     query = get_user_input("Search query")
 

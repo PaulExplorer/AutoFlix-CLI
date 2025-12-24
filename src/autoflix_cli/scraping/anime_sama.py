@@ -4,12 +4,26 @@ from .objects import SearchResult, SamaSeason, SamaSeries, SeasonAccess, Episode
 from .utils import parse_episodes_from_js
 from ..proxy import curl_options
 
-website_origin = "https://anime-sama.eu"
+website_origin = ""
 
 scraper = cffi_requests.Session(impersonate="chrome", curl_options=curl_options)
 
 # info_class = "mt-0.5 text-gray-300 font-medium text-xs truncate"
 info_class = "info-value"
+
+
+def get_website_url(portal="anime-sama.pw"):
+    global website_origin
+
+    if website_origin:
+        return
+
+    response = scraper.get(portal)
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, "html5lib")
+
+    website_origin = soup.find("a", {"class": "btn-primary"}).attrs["href"]
 
 
 def search(query: str) -> list[SearchResult]:
