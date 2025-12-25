@@ -24,6 +24,7 @@ from .cli_utils import (
     console,
 )
 from . import proxy
+from .tracker import tracker
 
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
@@ -432,6 +433,17 @@ def handle_wiflix():
             )
 
             if success:
+                tracker.save_progress(
+                    provider="Wiflix",
+                    series_title=content.title,
+                    season_title=content.season,
+                    episode_title=selected_episode.title,
+                    series_url=content.url,
+                    season_url=content.url,
+                    episode_url="",
+                    logo_url=content.img,
+                )
+
                 if ep_idx + 1 < len(episodes):
                     next_ep = episodes[ep_idx + 1]
                     choice = select_from_list(
@@ -468,6 +480,20 @@ def handle_anime_sama():
     if not series.seasons:
         print_warning("No seasons found.")
         return
+
+    # Check for saved progress for this specific series
+    saved_progress = tracker.get_series_progress("Anime-Sama", series.title)
+    if saved_progress:
+        choice = select_from_list(
+            [
+                f"Resume {saved_progress['season_title']} - {saved_progress['episode_title']}",
+                "Browse Seasons",
+            ],
+            f"Found saved progress for {series.title}:",
+        )
+        if choice == 0:
+            resume_anime_sama(saved_progress)
+            return
 
     season_idx = select_from_list(
         [s.title for s in series.seasons], "📺 Select Season:"
@@ -525,6 +551,18 @@ def handle_anime_sama():
             )
 
             if success:
+                # Save progress
+                tracker.save_progress(
+                    provider="Anime-Sama",
+                    series_title=series.title,
+                    season_title=season.title,
+                    episode_title=selected_episode.title,
+                    series_url=series.url,
+                    season_url=selected_season_access.url,
+                    episode_url="",  # content.episode_url if available
+                    logo_url=series.img,
+                )
+
                 playback_success = True
                 break  # Playback succeeded, exit player loop
             else:
@@ -596,6 +634,17 @@ def handle_coflix():
             )
 
             if success:
+                tracker.save_progress(
+                    provider="Coflix",
+                    series_title=content.title,
+                    season_title="Movie",
+                    episode_title="Movie",
+                    series_url=content.url,
+                    season_url=content.url,
+                    episode_url=content.url,
+                    logo_url=content.img,
+                )
+
                 return  # Playback succeeded, exit
             else:
                 # Playback failed, ask if they want to retry
@@ -613,6 +662,20 @@ def handle_coflix():
         if not content.seasons:
             print_warning("No seasons found.")
             return
+
+        # Check for saved progress for this specific series
+        saved_progress = tracker.get_series_progress("Coflix", content.title)
+        if saved_progress:
+            choice = select_from_list(
+                [
+                    f"Resume {saved_progress['season_title']} - {saved_progress['episode_title']}",
+                    "Browse Seasons",
+                ],
+                f"Found saved progress for {content.title}:",
+            )
+            if choice == 0:
+                resume_coflix(saved_progress)
+                return
 
         season_idx = select_from_list(
             [s.title for s in content.seasons], "📺 Select Season:"
@@ -661,6 +724,17 @@ def handle_coflix():
                 )
 
                 if success:
+                    tracker.save_progress(
+                        provider="Coflix",
+                        series_title=content.title,
+                        season_title=selected_season_access.title,
+                        episode_title=selected_episode.title,
+                        series_url=content.url,
+                        season_url=selected_season_access.url,
+                        episode_url=selected_episode.url,
+                        logo_url=content.img,
+                    )
+
                     playback_success = True
                     break  # Playback succeeded, exit player loop
                 else:
@@ -726,6 +800,20 @@ def handle_french_stream():
             print_warning("No episodes found.")
             return
 
+        # Check for saved progress for this specific series
+        saved_progress = tracker.get_series_progress("French-Stream", content.title)
+        if saved_progress:
+            choice = select_from_list(
+                [
+                    f"Resume {saved_progress['season_title'].replace(content.title, '').strip()} - {saved_progress['episode_title']}",
+                    "Browse Languages",
+                ],
+                f"Found saved progress for {content.title}:",
+            )
+            if choice == 0:
+                resume_french_stream(saved_progress)
+                return
+
         lang_idx = select_from_list(langs, "🌍 Select Language:")
         selected_lang = langs[lang_idx]
         episodes = content.episodes[selected_lang]
@@ -753,6 +841,17 @@ def handle_french_stream():
             )
 
             if success:
+                tracker.save_progress(
+                    provider="French-Stream",
+                    series_title=content.title,
+                    season_title=content.title,
+                    episode_title=selected_episode.title,
+                    series_url=content.url,
+                    season_url=content.url,
+                    episode_url="",
+                    logo_url=None,
+                )
+
                 if ep_idx + 1 < len(episodes):
                     next_ep = episodes[ep_idx + 1]
                     choice = select_from_list(
@@ -764,6 +863,364 @@ def handle_french_stream():
             break
 
 
+def resume_anime_sama(data):
+    """Resume Anime-Sama playback."""
+    print_info(
+        f"Resuming [cyan]{data['series_title']} - {data['season_title']}[/cyan]..."
+    )
+
+    # We go directly to season URL (skipping series page)
+    # Check if season_url is valid, if empty fall back to series_url logic (not implemented here for simplicity)
+    if not data["season_url"]:
+        print_error("Cannot resume: missing season URL.")
+        return
+
+    season = anime_sama.get_season(data["season_url"])
+
+    langs = list(season.episodes.keys())
+    if not langs:
+        print_warning("No episodes found.")
+        return
+
+    # If only one language, pick it. If multiple, ask.
+    if len(langs) == 1:
+        selected_lang = langs[0]
+    else:
+        # Try to guess or ask?
+        # Ideally we saved language. Since we didn't, we ask.
+        lang_idx = select_from_list(langs, "🌍 Select Language:")
+        selected_lang = langs[lang_idx]
+
+    episodes = season.episodes[selected_lang]
+
+    # Find the episode index
+    start_ep_idx = 0
+    saved_ep_title = data["episode_title"]
+
+    for i, ep in enumerate(episodes):
+        if ep.title == saved_ep_title:
+            start_ep_idx = i
+            break
+
+    # Propose to continue (next episode) or watch again
+    options = [
+        (
+            f"Continue (Next: {episodes[start_ep_idx+1].title})"
+            if start_ep_idx + 1 < len(episodes)
+            else "No next episode"
+        ),
+        f"Watch again ({saved_ep_title})",
+        "Cancel",
+    ]
+    choice = select_from_list(options, "What would you like to do?")
+
+    if choice == 2:  # Cancel
+        return
+    elif choice == 0:  # Continue
+        if start_ep_idx + 1 < len(episodes):
+            start_ep_idx += 1
+        else:
+            print_warning("No next episode found.")
+            return
+    # choice 1 is watch again -> keep start_ep_idx
+
+    # Start loop
+    ep_idx = start_ep_idx
+
+    # Standard playback loop (copied from handle_anime_sama but simplified)
+    while True:
+        selected_episode = episodes[ep_idx]
+        if not selected_episode.players:
+            print_warning("No players found for this episode.")
+            return
+
+        supported_players = [
+            p for p in selected_episode.players if player.is_supported(p.url)
+        ]
+        if not supported_players:
+            print_warning("No supported players found.")
+            return
+
+        playback_success = False
+        while True:
+            player_idx = select_from_list(
+                [
+                    f"{p.name} : {p.url.split('/')[2].split('.')[-2]}"
+                    for p in supported_players
+                ]
+                + ["← Back"],
+                "🎮 Select Player:",
+            )
+
+            if player_idx == len(supported_players):
+                return
+
+            success = play_video(
+                supported_players[player_idx].url,
+                headers={"Referer": anime_sama.website_origin},
+                title=f"{data['series_title']} - {season.title} - {selected_episode.title}",
+            )
+
+            if success:
+                tracker.save_progress(
+                    provider="Anime-Sama",
+                    series_title=data["series_title"],
+                    season_title=season.title,
+                    episode_title=selected_episode.title,
+                    series_url=data["series_url"],
+                    season_url=data["season_url"],
+                    episode_url="",
+                    logo_url=data.get("logo_url"),
+                )
+                playback_success = True
+                break
+            else:
+                retry = select_from_list(
+                    ["Try another server/player", "← Back to main menu"],
+                    "What would you like to do?",
+                )
+                if retry == 1:
+                    return
+
+        if playback_success:
+            if ep_idx + 1 < len(episodes):
+                next_ep = episodes[ep_idx + 1]
+                choice = select_from_list(
+                    ["Yes", "No"], f"Play next episode: {next_ep.title}?"
+                )
+                if choice == 0:
+                    ep_idx += 1
+                    continue
+            break
+
+
+def resume_coflix(data):
+    """Resume Coflix playback."""
+    print_info(f"Resuming [cyan]{data['series_title']}[/cyan]...")
+
+    # Determine if Movie or Series based on saved data?
+    # CoflixMovie saved episode_title="Movie".
+    if data["episode_title"] == "Movie":
+        # Resume MOVIE
+        content = coflix.get_content(data["series_url"])
+        if not isinstance(content, CoflixMovie):
+            print_error("Saved data mismatch (expected Movie).")
+            return
+        # Just play it
+        if not content.players:
+            return
+        supported = [p for p in content.players if player.is_supported(p.url)]
+        if not supported:
+            return
+
+        while True:
+            idx = select_from_list(
+                [f"Player : {p.name}" for p in supported] + ["← Back"],
+                "🎮 Select Player:",
+            )
+            if idx == len(supported):
+                return
+            success = play_video(
+                supported[idx].url,
+                headers={"Referer": "https://lecteurvideo.com/"},
+                title=content.title,
+            )
+            if success:
+                return
+            if select_from_list(["Retry", "Back"], "Action?") == 1:
+                return
+
+    else:
+        # Resume SERIES
+        # We need to get season. We have season_url.
+        season = coflix.get_season(data["season_url"])
+        if not season.episodes:
+            return
+
+        start_ep_idx = 0
+        for i, ep in enumerate(season.episodes):
+            if ep.title == data["episode_title"]:
+                start_ep_idx = i
+                break
+
+        options = [
+            (
+                f"Continue (Next: {season.episodes[start_ep_idx+1].title})"
+                if start_ep_idx + 1 < len(season.episodes)
+                else "No next episode"
+            ),
+            f"Watch again ({data['episode_title']})",
+            "Cancel",
+        ]
+        choice = select_from_list(options, "What would you like to do?")
+        if choice == 2:
+            return
+        elif choice == 0:
+            if start_ep_idx + 1 < len(season.episodes):
+                start_ep_idx += 1
+            else:
+                return  # No next
+
+        ep_idx = start_ep_idx
+        while True:
+            selected_episode = season.episodes[ep_idx]
+            links = coflix.get_episode(selected_episode.url).players
+            supported = [l for l in links if player.is_supported(l.url)]
+            if not supported:
+                return
+
+            playback_success = False
+            while True:
+                idx = select_from_list(
+                    [f"Player : {l.name}" for l in supported] + ["← Back"],
+                    "🎮 Select Player:",
+                )
+                if idx == len(supported):
+                    return
+                success = play_video(
+                    supported[idx].url,
+                    headers={"Referer": "https://lecteurvideo.com/"},
+                    title=f"{data['season_title']} - {selected_episode.title}",
+                )
+                if success:
+                    tracker.save_progress(
+                        provider="Coflix",
+                        series_title=data["series_title"],
+                        season_title=data["season_title"],
+                        episode_title=selected_episode.title,
+                        series_url=data["series_url"],
+                        season_url=data["season_url"],
+                        episode_url=selected_episode.url,
+                        logo_url=data.get("logo_url"),
+                    )
+                    playback_success = True
+                    break
+                if select_from_list(["Retry", "Back"], "Action?") == 1:
+                    return
+
+            if playback_success:
+                if ep_idx + 1 < len(season.episodes):
+                    if (
+                        select_from_list(
+                            ["Yes", "No"],
+                            f"Play next: {season.episodes[ep_idx+1].title}?",
+                        )
+                        == 0
+                    ):
+                        ep_idx += 1
+                        continue
+                break
+
+
+def resume_french_stream(data):
+    """Resume French-Stream playback."""
+    print_info(f"Resuming [cyan]{data['series_title']}[/cyan]...")
+
+    # Similar to Coflix logic (Series vs Movie) but struct is different
+    # Movie doesn't have "season_url" distinct usually, but we saved it.
+
+    # We load content from SERIES URL (or movie url)
+    content = french_stream.get_content(data["series_url"])
+
+    if isinstance(content, FrenchStreamMovie):
+        if not content.players:
+            return
+        supported = [p for p in content.players if player.is_supported(p.url)]
+        select_and_play_player(supported, french_stream.website_origin, content.title)
+        return
+
+    elif isinstance(content, FrenchStreamSeason):
+        # We need to find the correct language list
+        # data['season_url'] might just be the series url.
+        # But wait, FrenchStreamSeason episodes = dict[lang, list]
+        langs = list(content.episodes.keys())
+        if not langs:
+            return
+
+        # Ask language
+        if len(langs) == 1:
+            lang = langs[0]
+        else:
+            lang = langs[select_from_list(langs, "🌍 Select Language:")]
+
+        episodes = content.episodes[lang]
+
+        start_ep_idx = 0
+        for i, ep in enumerate(episodes):
+            if ep.title == data["episode_title"]:
+                start_ep_idx = i
+                break
+
+        options = [
+            (
+                f"Continue (Next: {episodes[start_ep_idx+1].title})"
+                if start_ep_idx + 1 < len(episodes)
+                else "No next episode"
+            ),
+            f"Watch again ({data['episode_title']})",
+            "Cancel",
+        ]
+        choice = select_from_list(options, "What would you like to do?")
+        if choice == 2:
+            return
+        elif choice == 0:
+            if start_ep_idx + 1 < len(episodes):
+                start_ep_idx += 1
+            else:
+                return
+
+        ep_idx = start_ep_idx
+        while True:
+            selected_episode = episodes[ep_idx]
+            if not selected_episode.players:
+                return
+            supported = [
+                p for p in selected_episode.players if player.is_supported(p.url)
+            ]
+
+            success = select_and_play_player(
+                supported,
+                french_stream.website_origin,
+                f"{content.title} - {selected_episode.title}",
+            )
+
+            if success:
+                tracker.save_progress(
+                    provider="French-Stream",
+                    series_title=content.title,
+                    season_title=content.title,
+                    episode_title=selected_episode.title,
+                    series_url=content.url,
+                    season_url=content.url,
+                    episode_url="",
+                    logo_url=None,
+                )
+                if ep_idx + 1 < len(episodes):
+                    if (
+                        select_from_list(
+                            ["Yes", "No"], f"Play next: {episodes[ep_idx+1].title}?"
+                        )
+                        == 0
+                    ):
+                        ep_idx += 1
+                        continue
+            break
+
+
+def handle_resume(data):
+    """Dispatch resume to provider."""
+    provider = data["provider"]
+    if provider == "Anime-Sama":
+        resume_anime_sama(data)
+    elif provider == "Coflix":
+        resume_coflix(data)
+    elif provider == "French-Stream":
+        resume_french_stream(data)
+    # Wiflix resume not implemented yet or similar to French-Stream
+    elif provider == "Wiflix":
+        print_warning("Resume for Wiflix not optimized yet.")
+
+
 def main():
     """Main application loop."""
     # Start proxy server
@@ -772,16 +1229,38 @@ def main():
     while True:
         clear_screen()
         print_header("🎬 AutoFlix CLI")
-        options = ["Anime-Sama", "Coflix", "French-Stream", "Exit"]
-        choice = select_from_list(options, "📺 Select Provider:")
 
-        if choice == 0:
+        last_watch = tracker.get_last_global()
+        options = []
+        resume_idx = -1
+
+        if last_watch:
+            series = last_watch["series_title"]
+            ep = last_watch["episode_title"]
+            options.append(f"▶ Resume {series} ({ep})")
+            resume_idx = 0
+
+        options.extend(["Anime-Sama", "Coflix", "French-Stream", "Exit"])
+
+        choice_idx = select_from_list(options, "📺 Select Provider:")
+
+        if last_watch and choice_idx == resume_idx:
+            handle_resume(last_watch)
+            continue
+
+        # Adjust choice for standard options
+        if resume_idx != -1:
+            standard_choice = choice_idx - 1
+        else:
+            standard_choice = choice_idx
+
+        if standard_choice == 0:
             handle_anime_sama()
-        elif choice == 1:
+        elif standard_choice == 1:
             handle_coflix()
-        elif choice == 2:
+        elif standard_choice == 2:
             handle_french_stream()
-        elif choice == 3:
+        elif standard_choice == 3:
             console.print("\n[cyan]👋 Goodbye![/cyan]\n")
             break
 
