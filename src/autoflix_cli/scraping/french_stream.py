@@ -85,11 +85,10 @@ def get_movie(url: str, content: str) -> FrenchStreamMovie:
     players: list[Player] = []
 
     # Handle nested divs for player selection
-    players_json = content.split("var playerUrls = ")[1].split(";")[0]
-    players_json = parse_dirty_json(players_json)
-    for player, links in players_json.items():
-        if links["Default"]:
-            players.append(Player(player, links["Default"]))
+    filmDataDiv = soup.find("div", {"id": "film-data"})
+    for key, value in filmDataDiv.attrs.items():
+        if "https" in value and "affiche" not in key:
+            players.append(Player(key.replace("data-", ""), value))
 
     return FrenchStreamMovie(title, url, img, genres, players)
 
@@ -101,23 +100,37 @@ def get_series_season(url: str, content: str) -> FrenchStreamSeason:
 
     episodes: dict[str, list[Episode]] = {}
 
-    episodes_json = content.split("var episodesData = ")[1].split(";")[0]
-    episodes_json = parse_dirty_json(episodes_json)
+    voEpisodesDiv = soup.find("div", {"id": "episodes-vo-data"})
+    vostfrEpisodesDiv = soup.find("div", {"id": "episodes-vostfr-data"})
+    vfEpisodesDiv = soup.find("div", {"id": "episodes-vf-data"})
 
-    for lang, episodes_data in episodes_json.items():
-        for episode, players_data in episodes_data.items():
-            players = []
-
-            for player, link in players_data.items():
-                if link:
-                    players.append(Player(player, link))
-
-            if players:
-                episodes[lang] = episodes.get(lang, []) + [
-                    Episode(f"Episode {episode}", players)
-                ]
+    if voEpisodesDiv:
+        voEpisodes = get_episodes_from_div(voEpisodesDiv)
+        if voEpisodes:
+            episodes["vo"] = voEpisodes
+    if vostfrEpisodesDiv:
+        vostfrEpisodes = get_episodes_from_div(vostfrEpisodesDiv)
+        if vostfrEpisodes:
+            episodes["vostfr"] = vostfrEpisodes
+    if vfEpisodesDiv:
+        vfEpisodes = get_episodes_from_div(vfEpisodesDiv)
+        if vfEpisodes:
+            episodes["vf"] = vfEpisodes
 
     return FrenchStreamSeason(title, url, episodes)
+
+
+def get_episodes_from_div(div):
+    episodes: list[Episode] = []
+    for episode in div.find_all("div"):
+        players = []
+        for key, value in episode.attrs.items():
+            if "https" in value:
+                players.append(Player(key.replace("data-", ""), value))
+        if players:
+            episodes.append(Episode(f"Episode {episode.attrs["data-ep"]}", players))
+
+    return episodes
 
 
 def get_content(url: str):
@@ -125,7 +138,7 @@ def get_content(url: str):
     response.raise_for_status()
     content = response.text
 
-    if "episodesData" in content:
+    if '"episodes-' in content:
         return get_series_season(url, content)
     return get_movie(url, content)
 
