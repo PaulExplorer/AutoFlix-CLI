@@ -589,6 +589,8 @@ def handle_anime_sama():
 
 def handle_coflix():
     """Handle Coflix provider flow."""
+    coflix.get_website_url()
+
     print_header("🎬 Coflix")
     query = get_user_input("Search query")
 

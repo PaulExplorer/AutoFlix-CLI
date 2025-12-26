@@ -14,8 +14,20 @@ from .utils import parse_episodes_from_js
 import base64
 from ..proxy import curl_options
 
-website_origin = "https://coflix.foo"
+website_origin = ""
 scraper = cffi_requests.Session(impersonate="chrome", curl_options=curl_options)
+
+
+def get_website_url(portal="coflix.fans"):
+    global website_origin
+
+    if website_origin:
+        return
+
+    response = scraper.head("https://" + portal)
+    response.raise_for_status()
+
+    website_origin = response.url
 
 
 def search(query: str) -> list[SearchResult]:
