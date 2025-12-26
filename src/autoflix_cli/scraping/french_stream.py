@@ -6,7 +6,6 @@ from .objects import (
     FrenchStreamSeason,
     Episode,
 )
-from .utils import parse_dirty_json
 
 from curl_cffi import requests as cffi_requests
 from ..proxy import curl_options
