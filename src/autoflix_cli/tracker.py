@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
 from platformdirs import user_data_dir
+from urllib.parse import urlparse
 
 
 class ProgressTracker:
@@ -35,6 +36,22 @@ class ProgressTracker:
         except OSError as e:
             print(f"Warning: Could not save progress: {e}")
 
+    def _to_relative(self, url: str) -> str:
+        """Convert an absolute URL to a relative path."""
+        if not url:
+            return ""
+        try:
+            parsed = urlparse(url)
+            # If it has a scheme (http/https), return path + query
+            if parsed.scheme:
+                path = parsed.path
+                if parsed.query:
+                    path += "?" + parsed.query
+                return path
+            return url  # Already relative or invalid
+        except Exception:
+            return url
+
     def save_progress(
         self,
         provider: str,
@@ -62,6 +79,11 @@ class ProgressTracker:
         if "history" not in self.data:
             self.data["history"] = {}
 
+        # Convert URLs to relative paths (except logo which is external)
+        series_rel = self._to_relative(series_url)
+        season_rel = self._to_relative(season_url)
+        episode_rel = self._to_relative(episode_url)
+
         # Update specific series progress
         key = f"{provider}|{series_title}"
         entry = {
@@ -69,9 +91,9 @@ class ProgressTracker:
             "series_title": series_title,
             "season_title": season_title,
             "episode_title": episode_title,
-            "series_url": series_url,
-            "season_url": season_url,
-            "episode_url": episode_url,
+            "series_url": series_rel,
+            "season_url": season_rel,
+            "episode_url": episode_rel,
             "last_watched": datetime.now().isoformat(),
             "logo_url": logo_url,
         }
@@ -93,6 +115,39 @@ class ProgressTracker:
         if "history" not in self.data:
             return None
         return self.data["history"].get(f"{provider}|{series_title}")
+
+    def get_history(self) -> list[Dict[str, Any]]:
+        """Get all history entries sorted by last_watched (descending)."""
+        if "history" not in self.data:
+            return []
+
+        entries = list(self.data["history"].values())
+        # Parse date and sort
+        entries.sort(
+            key=lambda x: datetime.fromisoformat(x["last_watched"]), reverse=True
+        )
+        return entries
+
+    def delete_history_item(self, provider: str, series_title: str):
+        """Delete a specific history entry."""
+        if "history" not in self.data:
+            return
+
+        key = f"{provider}|{series_title}"
+        if key in self.data["history"]:
+            del self.data["history"][key]
+
+            # If this was the last global watched, we might want to clear it or find the next one
+            # For simplicity, we just check if it matches and clear it
+            last_global = self.data.get("last_watched_global")
+            if (
+                last_global
+                and last_global.get("provider") == provider
+                and last_global.get("series_title") == series_title
+            ):
+                self.data["last_watched_global"] = None
+
+            self._save_data()
 
 
 # Global instance

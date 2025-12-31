@@ -865,11 +865,29 @@ def handle_french_stream():
             break
 
 
+def resolve_url(url: str, base_url: str) -> str:
+    """Resolve URL: keep if absolute (http/https), else prepend base_url."""
+    if not url:
+        return ""
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    return base_url.rstrip("/") + "/" + url.lstrip("/")
+
+
 def resume_anime_sama(data):
     """Resume Anime-Sama playback."""
+    anime_sama.get_website_url()
+
     print_info(
         f"Resuming [cyan]{data['series_title']} - {data['season_title']}[/cyan]..."
     )
+
+    data["series_url"] = resolve_url(data["series_url"], anime_sama.website_origin)
+    data["season_url"] = resolve_url(data["season_url"], anime_sama.website_origin)
+    if "episode_url" in data:
+        data["episode_url"] = resolve_url(
+            data["episode_url"], anime_sama.website_origin
+        )
 
     # We go directly to season URL (skipping series page)
     # Check if season_url is valid, if empty fall back to series_url logic (not implemented here for simplicity)
@@ -998,7 +1016,14 @@ def resume_anime_sama(data):
 
 def resume_coflix(data):
     """Resume Coflix playback."""
+    coflix.get_website_url()
+
     print_info(f"Resuming [cyan]{data['series_title']}[/cyan]...")
+
+    data["series_url"] = resolve_url(data["series_url"], coflix.website_origin)
+    data["season_url"] = resolve_url(data["season_url"], coflix.website_origin)
+    if "episode_url" in data:
+        data["episode_url"] = resolve_url(data["episode_url"], coflix.website_origin)
 
     # Determine if Movie or Series based on saved data?
     # CoflixMovie saved episode_title="Movie".
@@ -1118,6 +1143,13 @@ def resume_french_stream(data):
     """Resume French-Stream playback."""
     print_info(f"Resuming [cyan]{data['series_title']}[/cyan]...")
 
+    data["series_url"] = resolve_url(data["series_url"], french_stream.website_origin)
+    data["season_url"] = resolve_url(data["season_url"], french_stream.website_origin)
+    if "episode_url" in data:
+        data["episode_url"] = resolve_url(
+            data["episode_url"], french_stream.website_origin
+        )
+
     # Similar to Coflix logic (Series vs Movie) but struct is different
     # Movie doesn't have "season_url" distinct usually, but we saved it.
 
@@ -1223,10 +1255,80 @@ def handle_resume(data):
         print_warning("Resume for Wiflix not optimized yet.")
 
 
+def handle_history():
+    """Display history list and allow resume/delete."""
+    while True:
+        clear_screen()
+        print_header("📜 My History")
+
+        history = tracker.get_history()
+        if not history:
+            print_warning("No history found.")
+            input("\nPress Enter to go back...")
+            return
+
+        options = []
+        for entry in history:
+            provider = entry["provider"]
+            series = entry["series_title"]
+            season = entry["season_title"]
+            episode = entry["episode_title"]
+
+            if provider == "Coflix":
+                if season == "Movie" or episode == "Movie":
+                    text = f"[{provider}] {series} (Movie)"
+                else:
+                    # Remove series title from season if present (e.g. "Series - Season X")
+                    clean_season = season.replace(series, "").strip(" -")
+                    # If it becomes empty (season was just series title), fallback or keep it contextually?
+                    # Ideally season should be "Season X". If empty, maybe it was just "SeriesName".
+                    if not clean_season:
+                        clean_season = season
+                    text = f"[{provider}] {series} - {clean_season} - {episode}"
+
+            elif provider == "French-Stream":
+                # Similar logic: "Series - Saison X" -> "Saison X"
+                clean_season = season.replace(series, "").strip(" -")
+                if not clean_season:
+                    clean_season = season
+                text = f"[{provider}] {series} - {clean_season} - {episode}"
+
+            else:
+                # Anime-Sama and others
+                text = f"[{provider}] {series} - {season} - {episode}"
+
+            options.append(text)
+
+        options.append("← Back")
+
+        choice_idx = select_from_list(options, "Select an item to manage:")
+
+        if choice_idx == len(options) - 1:  # Back
+            return
+
+        selected_entry = history[choice_idx]
+
+        action = select_from_list(
+            ["▶ Resume", "🗑 Delete", "← Cancel"],
+            f"Action for {selected_entry['series_title']}?",
+        )
+
+        if action == 0:  # Resume
+            handle_resume(selected_entry)
+            return
+        elif action == 1:  # Delete
+            tracker.delete_history_item(
+                selected_entry["provider"], selected_entry["series_title"]
+            )
+            print_success("Entry deleted.")
+            time.sleep(1)
+            # Loop continues to refresh list
+
+
 def main():
     """Main application loop."""
     # Start proxy server
-    proxy_url = proxy.start_proxy_server()
+    proxy.start_proxy_server()
 
     while True:
         clear_screen()
@@ -1242,31 +1344,46 @@ def main():
             options.append(f"▶ Resume {series} ({ep})")
             resume_idx = 0
 
-        options.extend(["Anime-Sama", "Coflix", "French-Stream", "Exit"])
+        options.append("📜 My History")
+        history_idx = len(options) - 1
 
-        choice_idx = select_from_list(options, "📺 Select Provider:")
+        options.append("🌍 Browse Providers")
+        browse_idx = len(options) - 1
+
+        options.append("Exit")
+        exit_idx = len(options) - 1
+
+        choice_idx = select_from_list(options, "What would you like to do?")
 
         if last_watch and choice_idx == resume_idx:
             handle_resume(last_watch)
             continue
 
-        # Adjust choice for standard options
-        if resume_idx != -1:
-            standard_choice = choice_idx - 1
-        else:
-            standard_choice = choice_idx
+        if choice_idx == history_idx:
+            handle_history()
+            continue
 
-        if standard_choice == 0:
-            handle_anime_sama()
-        elif standard_choice == 1:
-            handle_coflix()
-        elif standard_choice == 2:
-            handle_french_stream()
-        elif standard_choice == 3:
+        if choice_idx == browse_idx:
+            while True:
+                provider_choice = select_from_list(
+                    ["Anime-Sama", "Coflix", "French-Stream", "← Back"],
+                    "Select Provider:",
+                )
+                if provider_choice == 0:
+                    handle_anime_sama()
+                elif provider_choice == 1:
+                    handle_coflix()
+                elif provider_choice == 2:
+                    handle_french_stream()
+                elif provider_choice == 3:
+                    break  # Back to main menu
+
+                input("\nPress Enter to continue...")
+            continue
+
+        if choice_idx == exit_idx:
             console.print("\n[cyan]👋 Goodbye![/cyan]\n")
             break
-
-        input("\nPress Enter to continue...")
 
 
 if __name__ == "__main__":
