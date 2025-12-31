@@ -1366,7 +1366,12 @@ def main():
         if choice_idx == browse_idx:
             while True:
                 provider_choice = select_from_list(
-                    ["Anime-Sama", "Coflix", "French-Stream", "← Back"],
+                    [
+                        "Anime-Sama (Anime and animated movies)",
+                        "Coflix (Series and movies)",
+                        "French-Stream (Series and movies - Often lower quality)",
+                        "← Back",
+                    ],
                     "Select Provider:",
                 )
                 if provider_choice == 0:
