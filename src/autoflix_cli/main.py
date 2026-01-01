@@ -58,8 +58,9 @@ def main():
             resume_idx = 0
 
         # 2. Continue from AniList
-        menu_items.append("▶ Continue from AniList")
-        anilist_resume_idx = len(menu_items) - 1
+        if tracker.get_anilist_token():
+            menu_items.append("▶ Continue from AniList")
+            anilist_resume_idx = len(menu_items) - 1
 
         # 3. My History
         menu_items.append("📜 My History")
@@ -91,9 +92,15 @@ def main():
 
         if choice_idx == providers_idx:
             providers = [
-                ("🎌 Anime-Sama", anime_sama.handle_anime_sama),
-                ("🎬 Coflix", coflix.handle_coflix),
-                ("🇫🇷 French-Stream", french_stream.handle_french_stream),
+                (
+                    "🎌 Anime-Sama (Anime and animated movies)",
+                    anime_sama.handle_anime_sama,
+                ),
+                ("🎬 Coflix (Series and movies)", coflix.handle_coflix),
+                (
+                    "🇫🇷 French-Stream (Series and movies - Often lower quality)",
+                    french_stream.handle_french_stream,
+                ),
                 # ("🎬 Wiflix", wiflix.handle_wiflix),
                 ("← Back", None),
             ]
