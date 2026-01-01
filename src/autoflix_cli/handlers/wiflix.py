@@ -16,10 +16,6 @@ def handle_wiflix():
     """Handle Wiflix provider flow."""
     print_header("🎬 Wiflix")
 
-    # Wiflix doesn't need get_website_url explicitly in the handle start?
-    # Original main.py didn't call it at start of handle_wiflix,
-    # but scraping module init might. Let's stick to original.
-
     query = get_user_input("Search query")
 
     print_info(f"Searching for: [cyan]{query}[/cyan]")
