@@ -1,5 +1,6 @@
 import os
 import readchar
+import re
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.text import Text
@@ -29,18 +30,19 @@ def get_user_input(prompt: str) -> str:
     return input().strip()
 
 
-def select_from_list(options: list[str], prompt: str) -> int:
+def select_from_list(options: list[str], prompt: str, default_index: int = 0) -> int:
     """
     Display an interactive menu where users can navigate with arrow keys.
 
     Args:
         options: List of options to display
         prompt: Header text for the menu
+        default_index: Index to select by default
 
     Returns:
         Index of the selected option (0-based)
     """
-    selected_index = 0
+    selected_index = max(0, min(default_index, len(options) - 1))
     window_size = 10  # Number of items to show at once
     start_index = 0
 
@@ -152,3 +154,26 @@ def print_warning(message: str):
         message: Warning message to display
     """
     console.print(f"[yellow]⚠[/yellow] {message}")
+
+
+def clean_title(title: str) -> str:
+    """
+    Remove season and part indicators from a title to help with search.
+    Example: "One Piece Season 4" -> "One Piece"
+    """
+    # Remove Season X, S2, Part 2, etc. (case insensitive)
+    # Common patterns: Season 1, S1, Part 1, Cour 1, etc.
+    patterns = [
+        r"\s+Season\s+\d+",
+        r"\s+S\d+",
+        r"\s+Part\s+\d+",
+        r"\s+Cour\s+\d+",
+        r"\s+\d+(st|nd|rd|th)\s+Season",
+        r"\s+-\s+\d+",  # Sometimes title - 2
+    ]
+
+    cleaned = title
+    for pattern in patterns:
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+
+    return cleaned.strip()

@@ -1,11 +1,14 @@
 from ..anilist import anilist_client
 from ..tracker import tracker
+import re
 from ..cli_utils import (
     select_from_list,
     print_info,
     print_warning,
     print_error,
+    print_success,
     get_user_input,
+    clean_title,
 )
 from .anime_sama import anime_sama
 
@@ -37,7 +40,13 @@ def handle_anilist_continue():
         title = e["media"]["title"]["english"] or e["media"]["title"]["romaji"]
         progress = e["progress"] or 0
         total = e["media"]["episodes"] or "?"
-        display_options.append(f"{title} (Ep {progress+1}/{total})")
+
+        if isinstance(total, int) and progress >= total:
+            status = f"Finished {progress}/{total}"
+        else:
+            status = f"Ep {progress+1}/{total}"
+
+        display_options.append(f"{title} ({status})")
 
     display_options.append("← Back")
 
@@ -51,9 +60,18 @@ def handle_anilist_continue():
         or selected_entry["media"]["title"]["romaji"]
     )
     media_id = selected_entry["mediaId"]
-    next_episode_num = (selected_entry["progress"] or 0) + 1
+    progress = selected_entry["progress"] or 0
+    total = selected_entry["media"]["episodes"] or "?"
+    next_episode_num = progress + 1
 
-    print_info(f"Target: [cyan]{media_title}[/cyan] - Episode {next_episode_num}")
+    if isinstance(total, int) and progress >= total:
+        print_info(
+            f"Target: [cyan]{media_title}[/cyan] - [yellow]Completed ({progress}/{total})[/yellow]"
+        )
+        # Reset to last episode for easier replay or just stay at progress
+        next_episode_num = progress
+    else:
+        print_info(f"Target: [cyan]{media_title}[/cyan] - Episode {next_episode_num}")
 
     # Check for existing mapping to avoid re-searching if verified
     # Current mapping structure is Provider|SeriesTitle -> MediaId
@@ -63,10 +81,17 @@ def handle_anilist_continue():
 
     anime_sama.get_website_url()
 
+    cleaned_title = clean_title(media_title)
+
     print_info(f"Searching for '{media_title}' on Anime-Sama...")
     results = anime_sama.search(media_title)
 
-    # Fallback 1: Try Romaji if English failed and they are different
+    # Fallback 1: Try Cleaned English Title
+    if not results and cleaned_title != media_title:
+        print_info(f"No results for full title. Trying cleaned: '{cleaned_title}'...")
+        results = anime_sama.search(cleaned_title)
+
+    # Fallback 2: Try Romaji
     romaji_title = selected_entry["media"]["title"]["romaji"]
     if not results and romaji_title and romaji_title != media_title:
         print_warning(
@@ -74,7 +99,14 @@ def handle_anilist_continue():
         )
         results = anime_sama.search(romaji_title)
 
-    # Fallback 2: Manual Search
+        # Fallback 2.1: Try Cleaned Romaji
+        if not results:
+            cleaned_romaji = clean_title(romaji_title)
+            if cleaned_romaji != romaji_title:
+                print_info(f"Trying cleaned Romaji: '{cleaned_romaji}'...")
+                results = anime_sama.search(cleaned_romaji)
+
+    # Fallback 3: Manual Search
     if not results:
         print_warning("No results found on Anime-Sama.")
         choice = select_from_list(
@@ -114,12 +146,60 @@ def handle_anilist_continue():
         print_warning("No seasons found.")
         return
 
-    # ... logic continues similar to handle_anime_sama but targeted ...
-    # Simplified flow for now: Just show seasons.
+    # Try to auto-select the season if the title had a season number
+    target_season_num = None
+    # Check media_title or romaji_title for "Season X"
+    for t in [media_title, romaji_title]:
+        if not t:
+            continue
+        match = re.search(r"Season\s+(\d+)", t, re.IGNORECASE)
+        if match:
+            target_season_num = int(match.group(1))
+            break
+        match = re.search(r"\s+S(\d+)", t, re.IGNORECASE)
+        if match:
+            target_season_num = int(match.group(1))
+            break
+
+    # Also check if it's "Part X" which sometimes maps to seasons on providers
+    if target_season_num is None:
+        for t in [media_title, romaji_title]:
+            if not t:
+                continue
+            match = re.search(r"Part\s+(\d+)", t, re.IGNORECASE)
+            if match:
+                # Part 1 is usually Season 1, Part 2 could be Season 2 or just Part 2
+                target_season_num = int(match.group(1))
+                break
+
+    default_season_idx = 0
+    if target_season_num is not None:
+        # Try to find "Saison X" or "Season X" or just "X" in series.seasons
+        for i, s in enumerate(series.seasons):
+            s_match = re.search(r"(?:Saison|Season)\s+(\d+)", s.title, re.IGNORECASE)
+            if s_match and int(s_match.group(1)) == target_season_num:
+                default_season_idx = i
+                break
+            # Fallback for movie or single season if it matches "Saison 1"
+            if (
+                target_season_num == 1
+                and "Saison" not in s.title
+                and "Season" not in s.title
+            ):
+                # If it's the only season, it's probably it
+                if len(series.seasons) == 1:
+                    default_season_idx = 0
+                    break
 
     season_idx = select_from_list(
-        [s.title for s in series.seasons], "📺 Select Season:"
+        [s.title for s in series.seasons],
+        "📺 Select Season:",
+        default_index=default_season_idx,
     )
+
+    if target_season_num is not None:
+        print_info(f"AniList suggests [bold]Season {target_season_num}[/bold].")
+
     selected_season_access = series.seasons[season_idx]
 
     print_info(f"Loading [cyan]{selected_season_access.title}[/cyan]...")
@@ -138,7 +218,6 @@ def handle_anilist_continue():
     start_ep_idx = 0
     # Try to find by number (often title contains number)
     # This is rough, regex search for next_episode_num
-    import re
 
     found = False
     for i, ep in enumerate(episodes):
@@ -183,7 +262,9 @@ def handle_anilist_continue():
         playback_success = False
         while True:
             player_idx = select_from_list(
-                [f"{p.name}" for p in supported] + ["← Back"], "🎮 Select Player:"
+                [f"{p.name} : {p.url.split('/')[2].split('.')[-2]}" for p in supported]
+                + ["← Back"],
+                "🎮 Select Player:",
             )
             if player_idx == len(supported):
                 return
