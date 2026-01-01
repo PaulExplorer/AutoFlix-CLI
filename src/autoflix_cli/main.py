@@ -1287,12 +1287,7 @@ def handle_history():
                     text = f"[{provider}] {series} - {clean_season} - {episode}"
 
             elif provider == "French-Stream":
-                # Similar logic: "Series - Saison X" -> "Saison X"
-                clean_season = season.replace(series, "").strip(" -")
-                if not clean_season:
-                    clean_season = season
-                text = f"[{provider}] {series} - {clean_season} - {episode}"
-
+                text = f"[{provider}] {season} - {episode}"
             else:
                 # Anime-Sama and others
                 text = f"[{provider}] {series} - {season} - {episode}"
