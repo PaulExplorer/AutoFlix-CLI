@@ -176,9 +176,64 @@ def handle_anime_sama():
                             print_warning("No matches found on AniList.")
 
                 if media_id:
-                    # Update progress
+                    # Update progress with overflow detection
                     print_info(f"Updating AniList to episode {episode_num}...")
                     anilist_client.set_token(anilist_token)
+
+                    # Fetch media details to check total episodes
+                    media_details = anilist_client.get_media_with_relations(media_id)
+
+                    if (
+                        media_details
+                        and media_details.get("episodes")
+                        and episode_num > media_details["episodes"]
+                    ):
+                        total_eps = media_details["episodes"]
+                        print_warning(
+                            f"Episode {episode_num} exceeds max episodes ({total_eps}) for this AniList entry."
+                        )
+
+                        # Check for SEQUEL relation
+                        sequel = None
+                        relations = media_details.get("relations", {}).get("edges", [])
+                        for rel in relations:
+                            if rel["relationType"] == "SEQUEL" and rel["node"][
+                                "format"
+                            ] in ["TV", "ONA", "MOVIE"]:
+                                sequel = rel["node"]
+                                break
+
+                        if sequel:
+                            sequel_title = (
+                                sequel["title"]["english"] or sequel["title"]["romaji"]
+                            )
+                            print_info(f"Found sequel: [cyan]{sequel_title}[/cyan]")
+
+                            if (
+                                select_from_list(
+                                    ["Yes", "No"],
+                                    f"Switch AniList mapping to sequel '{sequel_title}'?",
+                                )
+                                == 0
+                            ):
+                                # Calculate new relative episode number?
+                                # Usually sequels start at 1.
+                                # If episodes are continuous (13, 14...), we might need to subtract total_eps.
+                                # Let's ask user or assume relative?
+                                # Safest is to calculate if large number.
+                                new_ep_num = episode_num
+                                if episode_num > total_eps:
+                                    new_ep_num = episode_num - total_eps
+
+                                print_info(
+                                    f"Updating mapping to use Episode {new_ep_num} on new entry..."
+                                )
+                                tracker.set_anilist_mapping(
+                                    "Anime-Sama", series.title, sequel["id"]
+                                )
+                                media_id = sequel["id"]
+                                episode_num = new_ep_num
+
                     if anilist_client.update_progress(media_id, episode_num):
                         print_success("AniList updated!")
                     else:
@@ -369,9 +424,57 @@ def resume_anime_sama(data):
                                 )
 
                 if media_id:
-                    # Update progress
+                    # Update progress with overflow detection
                     print_info(f"Updating AniList to episode {episode_num}...")
                     anilist_client.set_token(anilist_token)
+
+                    media_details = anilist_client.get_media_with_relations(media_id)
+
+                    if (
+                        media_details
+                        and media_details.get("episodes")
+                        and episode_num > media_details["episodes"]
+                    ):
+                        total_eps = media_details["episodes"]
+                        print_warning(
+                            f"Episode {episode_num} exceeds max episodes ({total_eps}) for this AniList entry."
+                        )
+
+                        sequel = None
+                        relations = media_details.get("relations", {}).get("edges", [])
+                        for rel in relations:
+                            if rel["relationType"] == "SEQUEL" and rel["node"][
+                                "format"
+                            ] in ["TV", "ONA", "MOVIE"]:
+                                sequel = rel["node"]
+                                break
+
+                        if sequel:
+                            sequel_title = (
+                                sequel["title"]["english"] or sequel["title"]["romaji"]
+                            )
+                            print_info(f"Found sequel: [cyan]{sequel_title}[/cyan]")
+
+                            if (
+                                select_from_list(
+                                    ["Yes", "No"],
+                                    f"Switch AniList mapping to sequel '{sequel_title}'?",
+                                )
+                                == 0
+                            ):
+                                new_ep_num = episode_num
+                                if episode_num > total_eps:
+                                    new_ep_num = episode_num - total_eps
+
+                                print_info(
+                                    f"Updating mapping to use Episode {new_ep_num} on new entry..."
+                                )
+                                tracker.set_anilist_mapping(
+                                    "Anime-Sama", data["series_title"], sequel["id"]
+                                )
+                                media_id = sequel["id"]
+                                episode_num = new_ep_num
+
                     if anilist_client.update_progress(media_id, episode_num):
                         print_success("AniList updated!")
                     else:

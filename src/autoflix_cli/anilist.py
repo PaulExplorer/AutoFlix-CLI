@@ -168,6 +168,40 @@ class AniListClient:
             return entries
         return []
 
+    def get_media_with_relations(self, media_id: int) -> Optional[Dict[str, Any]]:
+        """Get media details including episode count and relations (sequels)."""
+        query = """
+        query ($mediaId: Int) {
+            Media(id: $mediaId) {
+                id
+                title {
+                    romaji
+                    english
+                }
+                episodes
+                relations {
+                    edges {
+                        relationType
+                        node {
+                            id
+                            title {
+                                romaji
+                                english
+                            }
+                            episodes
+                            format
+                        }
+                    }
+                }
+            }
+        }
+        """
+        variables = {"mediaId": media_id}
+        data = self._query(query, variables)
+        if data and data.get("Media"):
+            return data["Media"]
+        return None
+
 
 # Global instance
 anilist_client = AniListClient()
