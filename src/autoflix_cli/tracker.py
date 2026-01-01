@@ -149,6 +149,33 @@ class ProgressTracker:
 
             self._save_data()
 
+    # --- AniList Integration ---
+
+    def get_anilist_token(self) -> Optional[str]:
+        """Get the stored AniList token."""
+        return self.data.get("anilist_token")
+
+    def set_anilist_token(self, token: str):
+        """Save the AniList token."""
+        self.data["anilist_token"] = token
+        self._save_data()
+
+    def get_anilist_mapping(self, provider: str, series_title: str) -> Optional[int]:
+        """Get the AniList media ID for a given series."""
+        if "anilist_mappings" not in self.data:
+            return None
+        key = f"{provider}|{series_title}"
+        return self.data["anilist_mappings"].get(key)
+
+    def set_anilist_mapping(self, provider: str, series_title: str, media_id: int):
+        """Save the mapping between a series and an AniList media ID."""
+        if "anilist_mappings" not in self.data:
+            self.data["anilist_mappings"] = {}
+
+        key = f"{provider}|{series_title}"
+        self.data["anilist_mappings"][key] = media_id
+        self._save_data()
+
 
 # Global instance
 tracker = ProgressTracker()

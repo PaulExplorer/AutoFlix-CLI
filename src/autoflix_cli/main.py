@@ -25,6 +25,9 @@ from .cli_utils import (
 )
 from . import proxy
 from .tracker import tracker
+from .anilist import anilist_client
+
+import re
 
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
@@ -575,16 +578,56 @@ def handle_anime_sama():
                     return
                 # Otherwise continue the loop to choose another player
 
-        if playback_success:
-            if ep_idx + 1 < len(episodes):
-                next_ep = episodes[ep_idx + 1]
-                choice = select_from_list(
-                    ["Yes", "No"], f"Play next episode: {next_ep.title}?"
-                )
                 if choice == 0:
                     ep_idx += 1
                     continue
             break
+
+        # --- AniList Progress Update ---
+        anilist_token = tracker.get_anilist_token()
+        if anilist_token and playback_success:
+            # Try to extract episode number
+            episode_num = 1
+            match = re.search(r"(\d+)", selected_episode.title)
+            if match:
+                episode_num = int(match.group(1))
+
+            # Check if we have a mapping
+            media_id = tracker.get_anilist_mapping("Anime-Sama", series.title)
+
+            if not media_id:
+                # Ask user if they want to link
+                link_choice = select_from_list(
+                    ["Yes", "No"],
+                    f"Link '{series.title}' to AniList for auto-tracking?",
+                )
+                if link_choice == 0:
+                    results = anilist_client.search_media(series.title)
+                    if results:
+                        media_options = [
+                            f"{m['title']['english'] or m['title']['romaji']} ({m['seasonYear']})"
+                            for m in results
+                        ] + ["Cancel"]
+                        m_idx = select_from_list(media_options, "Select AniList Match:")
+                        if m_idx < len(results):
+                            media_id = results[m_idx]["id"]
+                            tracker.set_anilist_mapping(
+                                "Anime-Sama", series.title, media_id
+                            )
+                            print_success(
+                                f"Linked to {results[m_idx]['title']['romaji']}!"
+                            )
+                    else:
+                        print_warning("No matches found on AniList.")
+
+            if media_id:
+                # Update progress
+                print_info(f"Updating AniList to episode {episode_num}...")
+                anilist_client.set_token(anilist_token)
+                if anilist_client.update_progress(media_id, episode_num):
+                    print_success("AniList updated!")
+                else:
+                    print_error("Failed to update AniList.")
 
 
 def handle_coflix():
@@ -1003,6 +1046,55 @@ def resume_anime_sama(data):
                     return
 
         if playback_success:
+
+            # --- AniList Progress Update ---
+            anilist_token = tracker.get_anilist_token()
+            if anilist_token:
+                # Try to extract episode number
+                episode_num = 1
+                match = re.search(r"(\d+)", selected_episode.title)
+                if match:
+                    episode_num = int(match.group(1))
+
+                # Check if we have a mapping
+                media_id = tracker.get_anilist_mapping(
+                    "Anime-Sama", data["series_title"]
+                )
+
+                if not media_id:
+                    # Ask user if they want to link (Logic copied from handle_anime_sama)
+                    link_choice = select_from_list(
+                        ["Yes", "No"],
+                        f"Link '{data['series_title']}' to AniList for auto-tracking?",
+                    )
+                    if link_choice == 0:
+                        results = anilist_client.search_media(data["series_title"])
+                        if results:
+                            media_options = [
+                                f"{m['title']['english'] or m['title']['romaji']} ({m['seasonYear']})"
+                                for m in results
+                            ] + ["Cancel"]
+                            m_idx = select_from_list(
+                                media_options, "Select AniList Match:"
+                            )
+                            if m_idx < len(results):
+                                media_id = results[m_idx]["id"]
+                                tracker.set_anilist_mapping(
+                                    "Anime-Sama", data["series_title"], media_id
+                                )
+                                print_success(
+                                    f"Linked to {results[m_idx]['title']['english'] or results[m_idx]['title']['romaji']}!"
+                                )
+
+                if media_id:
+                    # Update progress
+                    print_info(f"Updating AniList to episode {episode_num}...")
+                    anilist_client.set_token(anilist_token)
+                    if anilist_client.update_progress(media_id, episode_num):
+                        print_success("AniList updated!")
+                    else:
+                        print_error("Failed to update AniList.")
+
             if ep_idx + 1 < len(episodes):
                 next_ep = episodes[ep_idx + 1]
                 choice = select_from_list(
@@ -1320,6 +1412,239 @@ def handle_history():
             # Loop continues to refresh list
 
 
+def handle_anilist_continue():
+    """Handle the 'Continue from AniList' flow."""
+    token = tracker.get_anilist_token()
+    if not token:
+        print_error("Please configure your AniList token in Settings > AniList first.")
+        return
+
+    anilist_client.set_token(token)
+    print_info("Fetching your watching list from AniList...")
+
+    # Needs user ID first
+    user = anilist_client.validate_token()
+    if not user:
+        print_error("Invalid AniList token.")
+        return
+
+    entries = anilist_client.get_user_watching(user["id"])
+    if not entries:
+        print_warning("No anime currently watching found on AniList.")
+        return
+
+    # Create display options
+    display_options = []
+    for e in entries:
+        title = e["media"]["title"]["english"] or e["media"]["title"]["romaji"]
+        progress = e["progress"] or 0
+        total = e["media"]["episodes"] or "?"
+        display_options.append(f"{title} (Ep {progress+1}/{total})")
+
+    display_options.append("← Back")
+
+    choice_idx = select_from_list(display_options, "Select Anime to Continue:")
+    if choice_idx == len(entries):  # Back
+        return
+
+    selected_entry = entries[choice_idx]
+    media_title = (
+        selected_entry["media"]["title"]["english"]
+        or selected_entry["media"]["title"]["romaji"]
+    )
+    media_id = selected_entry["mediaId"]
+    next_episode_num = (selected_entry["progress"] or 0) + 1
+
+    print_info(f"Target: [cyan]{media_title}[/cyan] - Episode {next_episode_num}")
+
+    # Check for existing mapping to avoid re-searching if verified
+    # Current mapping structure is Provider|SeriesTitle -> MediaId
+    # It's one-way currently, we need to iterate or search.
+    # For now, let's search provider blindly or improve tracker map later.
+    # Actually, we can just search Anime-Sama directly.
+
+    anime_sama.get_website_url()
+
+    print_info(f"Searching for '{media_title}' on Anime-Sama...")
+    results = anime_sama.search(media_title)
+
+    # Fallback 1: Try Romaji if English failed and they are different
+    romaji_title = selected_entry["media"]["title"]["romaji"]
+    if not results and romaji_title and romaji_title != media_title:
+        print_warning(
+            f"No results for English title. Trying Romaji: '{romaji_title}'..."
+        )
+        results = anime_sama.search(romaji_title)
+
+    # Fallback 2: Manual Search
+    if not results:
+        print_warning("No results found on Anime-Sama.")
+        choice = select_from_list(
+            ["Try Manual Search", "Cancel"], "What would you like to do?"
+        )
+        if choice == 0:
+            manual_query = get_user_input("Enter search query")
+            results = anime_sama.search(manual_query)
+            if not results:
+                print_error("Still no results found.")
+                return
+        else:
+            return
+
+    # Let user confirm the match to be safe
+    r_idx = select_from_list(
+        [r.title for r in results] + ["Cancel"], "Select the matching result:"
+    )
+    if r_idx == len(results):
+        return
+
+    selection = results[r_idx]
+
+    # Save mapping for future reference (reverse map)
+    tracker.set_anilist_mapping("Anime-Sama", selection.title, media_id)
+
+    # Proceed to load series
+    print_info(f"Loading [cyan]{selection.title}[/cyan]...")
+    series = anime_sama.get_series(selection.url)
+
+    if not series.seasons:
+        print_warning("No seasons found.")
+        return
+
+    # Try to find the right season/episode automatically?
+    # This is hard because "Episode 5" might be Season 1 Episode 5 or Season 2 Episode 5 (absolute numbering).
+    # OR it might be relative to the season on AniList too.
+    # AniList usually uses absolute episode count (or relative per season if split).
+    # Anime-Sama usually has seasons.
+    # For MVP: Dump user in season selection, BUT tell them which episode they need.
+
+    print_info(f"Please find Episode {next_episode_num} (AniList count).")
+
+    # We re-use logic from handle_anime_sama but skipping search/selection
+    # Ideally we'd factor this out, but copy-paste-modify for now to keeping flow control.
+
+    season_idx = select_from_list(
+        [s.title for s in series.seasons], "📺 Select Season:"
+    )
+    selected_season_access = series.seasons[season_idx]
+
+    print_info(f"Loading [cyan]{selected_season_access.title}[/cyan]...")
+    season = anime_sama.get_season(selected_season_access.url)
+
+    langs = list(season.episodes.keys())
+    if not langs:
+        print_warning("No episodes found.")
+        return
+
+    lang_idx = select_from_list(langs, "🌍 Select Language:")
+    selected_lang = langs[lang_idx]
+    episodes = season.episodes[selected_lang]
+
+    # Try to pre-select the episode if titles match logic?
+    # Usually "Episode X".
+    pre_select_idx = 0
+    clean_titles = []
+    for idx, ep in enumerate(episodes):
+        # Extract number
+        match = re.search(r"(\d+)", ep.title)
+        if match and int(match.group(1)) == next_episode_num:
+            pre_select_idx = idx
+        clean_titles.append(ep.title)
+
+    # Show list but highlight or default to pre-select? `select_from_list` doesn't support default index visually yet.
+    # We just let user pick, but we hint.
+
+    ep_idx = select_from_list(
+        clean_titles, f"📺 Select Episode (Looking for Ep {next_episode_num}):"
+    )
+
+    # ... Continue normal flow ...
+    # Copying player loop from handle_anime_sama
+
+    while True:
+        selected_episode = episodes[ep_idx]
+
+        if not selected_episode.players:
+            print_warning("No players found for this episode.")
+            return
+
+        supported_players = [
+            p for p in selected_episode.players if player.is_supported(p.url)
+        ]
+        if not supported_players:
+            print_warning("No supported players found.")
+            return
+
+        playback_success = False
+        while True:
+            player_idx = select_from_list(
+                [
+                    f"{p.name} : {p.url.split('/')[2].split('.')[-2]}"
+                    for p in supported_players
+                ]
+                + ["← Back"],
+                "🎮 Select Player:",
+            )
+
+            if player_idx == len(supported_players):  # Back
+                return
+
+            success = play_video(
+                supported_players[player_idx].url,
+                headers={"Referer": anime_sama.website_origin},
+                title=f"{series.title} - {season.title} - {selected_episode.title}",
+            )
+
+            if success:
+                tracker.save_progress(
+                    provider="Anime-Sama",
+                    series_title=series.title,
+                    season_title=season.title,
+                    episode_title=selected_episode.title,
+                    series_url=series.url,
+                    season_url=selected_season_access.url,
+                    episode_url="",
+                    logo_url=series.img,
+                )
+                playback_success = True
+                break
+            else:
+                retry = select_from_list(
+                    ["Try another server/player", "← Back to main menu"],
+                    "What would you like to do?",
+                )
+                if retry == 1:
+                    return
+
+        # Update AniList
+        if playback_success:
+            # Logic to update anilist (same as before)
+            # We already have media_id !
+            current_ep_num = 1
+            match = re.search(r"(\d+)", selected_episode.title)
+            if match:
+                current_ep_num = int(match.group(1))
+
+            print_info(f"Updating AniList to episode {current_ep_num}...")
+            if anilist_client.update_progress(media_id, current_ep_num):
+                print_success("AniList updated!")
+            else:
+                print_error("Failed to update AniList.")
+
+            if ep_idx + 1 < len(episodes):
+                next_ep = episodes[ep_idx + 1]
+                choice = select_from_list(
+                    ["Yes", "No"], f"Play next episode: {next_ep.title}?"
+                )
+                if choice == 0:
+                    ep_idx += 1
+                    # Note: We loop back in `handle_anime_sama`, here we are in `main` recursion or need `while True`.
+                    # The structure here is linear. We need a `while True` around the episode selection.
+                    # Fix: wrapping episode selection in `while True` below.
+                    continue
+        break
+
+
 def main():
     """Main application loop."""
     # Start proxy server
@@ -1339,11 +1664,17 @@ def main():
             options.append(f"▶ Resume {series} ({ep})")
             resume_idx = 0
 
+        options.append("▶ Continue from AniList")
+        anilist_resume_idx = len(options) - 1
+
         options.append("📜 My History")
         history_idx = len(options) - 1
 
         options.append("🌍 Browse Providers")
         browse_idx = len(options) - 1
+
+        options.append("⚙️  Settings (AniList)")
+        settings_idx = len(options) - 1
 
         options.append("Exit")
         exit_idx = len(options) - 1
@@ -1352,6 +1683,10 @@ def main():
 
         if last_watch and choice_idx == resume_idx:
             handle_resume(last_watch)
+            continue
+
+        if choice_idx == anilist_resume_idx:
+            handle_anilist_continue()
             continue
 
         if choice_idx == history_idx:
@@ -1379,6 +1714,27 @@ def main():
                     break  # Back to main menu
 
                 input("\nPress Enter to continue...")
+            continue
+
+        if choice_idx == settings_idx:
+            current_token = tracker.get_anilist_token()
+            status_text = (
+                "[green]Connected[/green]"
+                if current_token
+                else "[red]Not Configured[/red]"
+            )
+
+            console.print(f"\n[bold]AniList Configuration[/bold] ({status_text})")
+
+            action = select_from_list(["Set/Update Token", "Back"], "Options:")
+            if action == 0:
+                print_info(
+                    "To get a token, retrieve an access token from AniList API (e.g. from developer settings or follow a tutorial)."
+                )
+                new_token = get_user_input("Enter AniList Token")
+                if new_token.strip():
+                    tracker.set_anilist_token(new_token.strip())
+                    print_success("Token saved!")
             continue
 
         if choice_idx == exit_idx:
