@@ -130,12 +130,6 @@ def handle_anilist_continue():
 
     selection = results[r_idx]
 
-    # Save mapping for future (Reverse mapping: MediaID -> ProviderSeriesTitle is needed or just rely on search)
-    # The current mapping in tracker is Provider|SeriesTitle -> MediaID.
-    # Since we found it, we can ensure the mapping exists if not already.
-    # But wait, we searched for it. We can save it.
-    tracker.set_anilist_mapping("Anime-Sama", selection.title, media_id)
-
     # Now just use the Anime-Sama handler logic but bypass search?
     # Or just jump into getting series...
 
@@ -204,6 +198,10 @@ def handle_anilist_continue():
 
     print_info(f"Loading [cyan]{selected_season_access.title}[/cyan]...")
     season = anime_sama.get_season(selected_season_access.url)
+
+    # Now we have the season and the series, and we know the AniList ID (media_id).
+    # We can safely create the mapping.
+    tracker.set_anilist_mapping("Anime-Sama", series.title, media_id, season.title)
 
     langs = list(season.episodes.keys())
     if not langs:

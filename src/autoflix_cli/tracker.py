@@ -160,19 +160,44 @@ class ProgressTracker:
         self.data["anilist_token"] = token
         self._save_data()
 
-    def get_anilist_mapping(self, provider: str, series_title: str) -> Optional[int]:
-        """Get the AniList media ID for a given series."""
+    def get_anilist_mapping(
+        self, provider: str, series_title: str, season_title: Optional[str] = None
+    ) -> Optional[int]:
+        """Get the AniList media ID for a given series and season."""
         if "anilist_mappings" not in self.data:
             return None
-        key = f"{provider}|{series_title}"
-        return self.data["anilist_mappings"].get(key)
 
-    def set_anilist_mapping(self, provider: str, series_title: str, media_id: int):
+        # Try specific season mapping first if provided
+        if season_title:
+            key = f"{provider}|{series_title}|{season_title}"
+            if key in self.data["anilist_mappings"]:
+                return self.data["anilist_mappings"][key]
+
+        # Fallback to series-only mapping (legacy support or if no season provided)
+        # However, for fixing the bug, we might want to be stricter?
+        # Let's keep fallback only if season_title is NOT provided.
+        if not season_title:
+            key = f"{provider}|{series_title}"
+            return self.data["anilist_mappings"].get(key)
+
+        return None
+
+    def set_anilist_mapping(
+        self,
+        provider: str,
+        series_title: str,
+        media_id: int,
+        season_title: Optional[str] = None,
+    ):
         """Save the mapping between a series and an AniList media ID."""
         if "anilist_mappings" not in self.data:
             self.data["anilist_mappings"] = {}
 
-        key = f"{provider}|{series_title}"
+        if season_title:
+            key = f"{provider}|{series_title}|{season_title}"
+        else:
+            key = f"{provider}|{series_title}"
+
         self.data["anilist_mappings"][key] = media_id
         self._save_data()
 

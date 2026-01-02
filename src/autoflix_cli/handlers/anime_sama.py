@@ -146,7 +146,9 @@ def handle_anime_sama():
                     episode_num = int(match.group(1))
 
                 # Check if we have a mapping
-                media_id = tracker.get_anilist_mapping("Anime-Sama", series.title)
+                media_id = tracker.get_anilist_mapping(
+                    "Anime-Sama", series.title, season.title
+                )
 
                 if not media_id:
                     # Ask user if they want to link
@@ -167,7 +169,7 @@ def handle_anime_sama():
                             if m_idx < len(results):
                                 media_id = results[m_idx]["id"]
                                 tracker.set_anilist_mapping(
-                                    "Anime-Sama", series.title, media_id
+                                    "Anime-Sama", series.title, media_id, season.title
                                 )
                                 print_success(
                                     f"Linked to {results[m_idx]['title']['english'] or results[m_idx]['title']['romaji']}!"
@@ -229,7 +231,10 @@ def handle_anime_sama():
                                     f"Updating mapping to use Episode {new_ep_num} on new entry..."
                                 )
                                 tracker.set_anilist_mapping(
-                                    "Anime-Sama", series.title, sequel["id"]
+                                    "Anime-Sama",
+                                    series.title,
+                                    sequel["id"],
+                                    season.title,
                                 )
                                 media_id = sequel["id"]
                                 episode_num = new_ep_num
@@ -395,7 +400,7 @@ def resume_anime_sama(data):
 
                 # Check if we have a mapping
                 media_id = tracker.get_anilist_mapping(
-                    "Anime-Sama", data["series_title"]
+                    "Anime-Sama", data["series_title"], season.title
                 )
 
                 if not media_id:
@@ -417,7 +422,10 @@ def resume_anime_sama(data):
                             if m_idx < len(results):
                                 media_id = results[m_idx]["id"]
                                 tracker.set_anilist_mapping(
-                                    "Anime-Sama", data["series_title"], media_id
+                                    "Anime-Sama",
+                                    data["series_title"],
+                                    media_id,
+                                    season.title,
                                 )
                                 print_success(
                                     f"Linked to {results[m_idx]['title']['english'] or results[m_idx]['title']['romaji']}!"
@@ -470,7 +478,10 @@ def resume_anime_sama(data):
                                     f"Updating mapping to use Episode {new_ep_num} on new entry..."
                                 )
                                 tracker.set_anilist_mapping(
-                                    "Anime-Sama", data["series_title"], sequel["id"]
+                                    "Anime-Sama",
+                                    data["series_title"],
+                                    sequel["id"],
+                                    season.title,
                                 )
                                 media_id = sequel["id"]
                                 episode_num = new_ep_num
