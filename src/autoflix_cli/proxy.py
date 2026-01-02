@@ -21,6 +21,7 @@ app = Flask(__name__)
 
 # Global variables to store current stream configuration
 current_config = {"url": None, "headers": {}}
+PROXY_URL = None
 
 
 def get_base_url(url):
@@ -261,10 +262,26 @@ def proxy_segment():
         return f"Proxy error: {str(e)}", 500
 
 
-def start_proxy_server(port=5000):
+def find_free_port():
+    """Find a free port on localhost."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        return s.getsockname()[1]
+
+
+def start_proxy_server(port=0):
     """Starts the Flask server in a background thread."""
+    global PROXY_URL
     log = logging.getLogger("werkzeug")
     log.setLevel(logging.ERROR)
+
+    if port == 0:
+        port = find_free_port()
+
+    PROXY_URL = f"http://127.0.0.1:{port}"
 
     def run():
         app.run(
@@ -273,7 +290,7 @@ def start_proxy_server(port=5000):
 
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
-    return f"http://127.0.0.1:{port}"
+    return PROXY_URL
 
 
 if __name__ == "__main__":

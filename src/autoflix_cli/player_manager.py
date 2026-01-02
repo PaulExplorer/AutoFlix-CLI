@@ -13,6 +13,7 @@ from .cli_utils import (
     console,
 )
 from .scraping import player
+from . import proxy
 
 
 def get_vlc_path():
@@ -204,7 +205,13 @@ def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
             encoded_url = urllib.parse.quote(stream_url)
             encoded_headers = urllib.parse.quote(headers_json)
 
-            local_stream_url = f"http://127.0.0.1:5000/stream?url={encoded_url}&headers={encoded_headers}"
+            if not proxy.PROXY_URL:
+                print_error("Proxy server not initialized.")
+                return False
+
+            local_stream_url = (
+                f"{proxy.PROXY_URL}/stream?url={encoded_url}&headers={encoded_headers}"
+            )
 
             if "ext" in player_config:
                 local_stream_url += f"&ext={player_config['ext']}"
