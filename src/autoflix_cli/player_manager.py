@@ -16,6 +16,11 @@ from .scraping import player
 from . import proxy
 
 
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0"
+)
+
+
 def get_vlc_path():
     """
     Find the VLC executable path.
@@ -151,10 +156,7 @@ def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
         except IndexError:
             referer = ""
 
-        default_ua = (
-            "Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0"
-        )
-        user_agent = headers.get("User-Agent", default_ua)
+        user_agent = headers.get("User-Agent", DEFAULT_USER_AGENT)
 
         if player_name == "vlc":
             player_executable = get_vlc_path()
