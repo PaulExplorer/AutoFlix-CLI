@@ -8,8 +8,8 @@ from ..cli_utils import (
     get_user_input,
     console,
 )
-from ..player_manager import play_video, select_and_play_player
 from ..tracker import tracker
+from .playback import play_episode_flow
 
 
 def resolve_url(url, base):
@@ -23,8 +23,6 @@ def resolve_url(url, base):
 
 def handle_french_stream():
     """Handle French-Stream provider flow."""
-    french_stream.get_website_url()
-
     print_header("🇫🇷 French-Stream")
     query = get_user_input("Search query")
 
@@ -51,23 +49,18 @@ def handle_french_stream():
             print_warning("No supported players found.")
             return
 
-        success = select_and_play_player(
-            supported_players, french_stream.website_origin, content.title
+        success = play_episode_flow(
+            provider_name="French-Stream",
+            series_title=content.title,
+            season_title="Movie",
+            series_url=content.url,
+            season_url=content.url,
+            logo_url=content.img,
+            headers={"Referer": french_stream.website_origin},
+            episode=content,
         )
-        if success:
-            tracker.save_progress(
-                provider="French-Stream",
-                series_title=content.title,
-                season_title="Movie",
-                episode_title="Movie",
-                series_url=content.url,
-                season_url=content.url,
-                episode_url=content.url,
-                logo_url=content.img,
-            )
 
     elif isinstance(content, FrenchStreamSeason):
-        # ... logic for series similar to main.py ...
         console.print(f"\n[bold]📺 Series:[/bold] [cyan]{content.title}[/cyan]")
 
         # Check for saved progress
@@ -111,23 +104,17 @@ def handle_french_stream():
                 print_warning("No supported players found.")
                 return
 
-            success = select_and_play_player(
-                supported,
-                french_stream.website_origin,
-                f"{content.title} - {selected_episode.title}",
+            success = play_episode_flow(
+                provider_name="French-Stream",
+                series_title=content.title,
+                season_title=content.title,
+                series_url=content.url,
+                season_url=content.url,
+                headers={"Referer": french_stream.website_origin},
+                episode=selected_episode,
             )
 
             if success:
-                tracker.save_progress(
-                    provider="French-Stream",
-                    series_title=content.title,
-                    season_title=content.title,
-                    episode_title=selected_episode.title,
-                    series_url=content.url,
-                    season_url=content.url,
-                    episode_url="",
-                    logo_url=content.img,
-                )
                 if ep_idx + 1 < len(episodes):
                     if (
                         select_from_list(
@@ -157,8 +144,20 @@ def resume_french_stream(data):
     if isinstance(content, FrenchStreamMovie):
         if not content.players:
             return
-        supported = [p for p in content.players if player.is_supported(p.url)]
-        select_and_play_player(supported, french_stream.website_origin, content.title)
+        # Movie Resume
+        if not content.players:
+            return
+
+        play_episode_flow(
+            provider_name="French-Stream",
+            series_title=content.title,
+            season_title="Movie",
+            series_url=content.url,
+            season_url=content.url,
+            logo_url=content.img,
+            headers={"Referer": french_stream.website_origin},
+            episode=content,
+        )
         return
 
     elif isinstance(content, FrenchStreamSeason):
@@ -207,23 +206,17 @@ def resume_french_stream(data):
                 p for p in selected_episode.players if player.is_supported(p.url)
             ]
 
-            success = select_and_play_player(
-                supported,
-                french_stream.website_origin,
-                f"{content.title} - {selected_episode.title}",
+            success = play_episode_flow(
+                provider_name="French-Stream",
+                series_title=content.title,
+                season_title=content.title,
+                series_url=content.url,
+                season_url=content.url,
+                headers={"Referer": french_stream.website_origin},
+                episode=selected_episode,
             )
 
             if success:
-                tracker.save_progress(
-                    provider="French-Stream",
-                    series_title=content.title,
-                    season_title=content.title,
-                    episode_title=selected_episode.title,
-                    series_url=content.url,
-                    season_url=content.url,
-                    episode_url="",
-                    logo_url=None,
-                )
                 if ep_idx + 1 < len(episodes):
                     if (
                         select_from_list(

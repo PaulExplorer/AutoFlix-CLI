@@ -10,6 +10,7 @@ from ..cli_utils import (
 )
 from ..player_manager import play_video
 from ..tracker import tracker
+from .playback import play_episode_flow
 
 
 def handle_coflix():
@@ -42,46 +43,17 @@ def handle_coflix():
             print_warning("No supported players found.")
             return
 
-        # Loop to allow retrying with another player
-        while True:
-            player_idx = select_from_list(
-                [f"Player : {p.name}" for p in supported_players] + ["← Back"],
-                "🎮 Select Player:",
-            )
-
-            if player_idx == len(supported_players):  # Back
-                return
-
-            success = play_video(
-                supported_players[player_idx].url,
-                headers={
-                    "Referer": "https://lecteurvideo.com/",
-                },
-                title=content.title,
-            )
-
-            if success:
-                tracker.save_progress(
-                    provider="Coflix",
-                    series_title=content.title,
-                    season_title="Movie",
-                    episode_title="Movie",
-                    series_url=content.url,
-                    season_url=content.url,
-                    episode_url=content.url,
-                    logo_url=content.img,
-                )
-
-                return  # Playback succeeded, exit
-            else:
-                # Playback failed, ask if they want to retry
-                retry = select_from_list(
-                    ["Try another server/player", "← Back to main menu"],
-                    "What would you like to do?",
-                )
-                if retry == 1:  # Back
-                    return
-                # Otherwise continue the loop to choose another player
+        headers = {"Referer": "https://lecteurvideo.com/"}
+        play_episode_flow(
+            provider_name="Coflix",
+            series_title=content.title,
+            season_title="Movie",
+            series_url=content.url,
+            season_url=content.url,
+            logo_url=content.img,
+            headers=headers,
+            episode=content,  # Movie object should behave like Episode if it has players
+        )
 
     elif isinstance(content, CoflixSeries):
         console.print(f"\n[bold]📺 Series:[/bold] [cyan]{content.title}[/cyan]\n")
@@ -122,59 +94,23 @@ def handle_coflix():
 
         while True:
             selected_episode = season.episodes[ep_idx]
+            headers = {"Referer": "https://lecteurvideo.com/"}
 
-            # Get episode links and filter for supported players
-            links = coflix.get_episode(selected_episode.url).players
-            supported_links = [link for link in links if player.is_supported(link.url)]
+            # Fetch players for the episode
+            ep_details = coflix.get_episode(selected_episode.url)
 
-            if not supported_links:
-                print_warning("No supported players found.")
-                return
+            success = play_episode_flow(
+                provider_name="Coflix",
+                series_title=content.title,
+                season_title=selected_season_access.title,
+                episode=ep_details,
+                series_url=content.url,
+                season_url=selected_season_access.url,
+                logo_url=content.img,
+                headers=headers,
+            )
 
-            # Loop to allow retrying with another player
-            playback_success = False
-            while True:
-                player_idx = select_from_list(
-                    [f"Player : {link.name}" for link in supported_links] + ["← Back"],
-                    "🎮 Select Player:",
-                )
-
-                if player_idx == len(supported_links):  # Back
-                    return
-
-                success = play_video(
-                    supported_links[player_idx].url,
-                    headers={
-                        "Referer": "https://lecteurvideo.com/",
-                    },
-                    title=f"{selected_season_access.title} - {selected_episode.title}",
-                )
-
-                if success:
-                    tracker.save_progress(
-                        provider="Coflix",
-                        series_title=content.title,
-                        season_title=selected_season_access.title,
-                        episode_title=selected_episode.title,
-                        series_url=content.url,
-                        season_url=selected_season_access.url,
-                        episode_url=selected_episode.url,
-                        logo_url=content.img,
-                    )
-
-                    playback_success = True
-                    break  # Playback succeeded, exit player loop
-                else:
-                    # Playback failed, ask if they want to retry
-                    retry = select_from_list(
-                        ["Try another server/player", "← Back to main menu"],
-                        "What would you like to do?",
-                    )
-                    if retry == 1:  # Back
-                        return
-                    # Otherwise continue the loop to choose another player
-
-            if playback_success:
+            if success:
                 if ep_idx + 1 < len(season.episodes):
                     next_ep = season.episodes[ep_idx + 1]
                     choice = select_from_list(
@@ -184,6 +120,8 @@ def handle_coflix():
                         ep_idx += 1
                         continue
                 break
+            else:
+                return
 
 
 def resume_coflix(data):
@@ -238,47 +176,24 @@ def resume_coflix(data):
 
     while True:
         selected_episode = season.episodes[ep_idx]
-        links = coflix.get_episode(selected_episode.url).players
-        supported = [link for link in links if player.is_supported(link.url)]
+        headers = {"Referer": "https://lecteurvideo.com/"}
+        ep_details = coflix.get_episode(selected_episode.url)
 
-        if not supported:
+        success = play_episode_flow(
+            provider_name="Coflix",
+            series_title=data["series_title"],
+            season_title=data["season_title"],
+            episode=ep_details,
+            series_url=data["series_url"],
+            season_url=data["season_url"],
+            logo_url=data.get("logo_url"),
+            headers=headers,
+        )
+
+        if success:
+            playback_success = True
+        else:
             return
-
-        playback_success = False
-        for idx in range(len(supported)):
-            # Auto try logic or list? Let's use list for consistency if previous failed
-            # But here we might want to just pick first valid?
-            # Let's show list to be safe or just try first.
-            # Showing list is safer.
-            player_idx = select_from_list(
-                [f"Player : {link.name}" for link in supported] + ["← Back"],
-                "🎮 Select Player:",
-            )
-
-            if player_idx == len(supported):
-                return
-
-            success = play_video(
-                supported[player_idx].url,
-                headers={"Referer": "https://lecteurvideo.com/"},
-                title=f"{data['season_title']} - {selected_episode.title}",
-            )
-            if success:
-                tracker.save_progress(
-                    provider="Coflix",
-                    series_title=data["series_title"],
-                    season_title=data["season_title"],
-                    episode_title=selected_episode.title,
-                    series_url=data["series_url"],
-                    season_url=data["season_url"],
-                    episode_url=selected_episode.url,
-                    logo_url=data.get("logo_url"),
-                )
-                playback_success = True
-                break
-
-            if select_from_list(["Retry", "Back"], "Action?") == 1:
-                return
 
         if playback_success:
             if ep_idx + 1 < len(season.episodes):
