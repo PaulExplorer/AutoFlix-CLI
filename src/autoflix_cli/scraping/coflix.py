@@ -108,7 +108,13 @@ def get_episode(url: str) -> Episode:
     content = response.text
     soup = BeautifulSoup(content, "html5lib")
 
-    title: str = soup.find("span").text.strip()
+    title: str = ""
+    episodes_div = soup.find("div", {"class": "episodes"})
+    for episode in episodes_div.find_all("div", class_="episode"):
+        if episode.find("a").attrs["href"] == url:
+            title = episode.find("span", class_="fwb link-co").text.strip()
+            break
+
     players_url = soup.find("iframe").attrs["src"]
 
     players = get_players(players_url)
