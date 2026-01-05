@@ -4,6 +4,8 @@
 
 **Autoflix** is a CLI inspired by `ani-cli`. It scrapes links from popular streaming sites (**Coflix** and **Anime‑Sama**) to let you stream content without opening a browser.
 
+> ⚠️ **Warning:** This project was developed very quickly with heavy use of AI. The main goal was functionality over code cleanliness or optimization. I apologize for the "spaghetti code", I just wanted it to work!
+
 ## ✨ Features
 
 - 🎬 Movies & Series from Coflix
