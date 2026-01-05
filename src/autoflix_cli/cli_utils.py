@@ -30,6 +30,11 @@ def get_user_input(prompt: str) -> str:
     return input().strip()
 
 
+def pause():
+    """Wait for user input before continuing."""
+    console.input("\n[dim]Press Enter to continue...[/dim]")
+
+
 def select_from_list(options: list[str], prompt: str, default_index: int = 0) -> int:
     """
     Display an interactive menu where users can navigate with arrow keys.

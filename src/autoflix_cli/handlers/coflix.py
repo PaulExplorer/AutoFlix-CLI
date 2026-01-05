@@ -4,9 +4,12 @@ from ..cli_utils import (
     select_from_list,
     print_header,
     print_info,
+    print_error,
     print_warning,
     get_user_input,
+    get_user_input,
     console,
+    pause,
 )
 from ..player_manager import play_video
 from ..tracker import tracker
@@ -18,31 +21,195 @@ def handle_coflix():
     coflix.get_website_url()
 
     print_header("🎬 Coflix")
-    query = get_user_input("Search query")
 
-    print_info(f"Searching for: [cyan]{query}[/cyan]")
-    results = coflix.search(query)
+    while True:
+        query = get_user_input("Search query (or 'exit' to back)")
+        if query.lower() == "exit":
+            break
 
-    if not results:
-        print_warning("No results found.")
-        return
+        print_info(f"Searching for: [cyan]{query}[/cyan]")
+        results = coflix.search(query)
 
-    choice_idx = select_from_list([f"{r.title}" for r in results], "📺 Search Results:")
-    selection = results[choice_idx]
+        if not results:
+            print_warning("No results found.")
+            pause()
+            continue
 
-    print_info(f"Loading [cyan]{selection.title}[/cyan]...")
-    content = coflix.get_content(selection.url)
+        options = [f"{r.title}" for r in results] + ["← Back"]
+        choice_idx = select_from_list(options, "📺 Search Results:")
 
-    if isinstance(content, CoflixMovie):
-        console.print(f"\n[bold]🎬 Movie:[/bold] [cyan]{content.title}[/cyan]\n")
-        if not content.players:
-            print_warning("No players found.")
+        if choice_idx == len(results):
+            continue
+
+        selection = results[choice_idx]
+
+        print_info(f"Loading [cyan]{selection.title}[/cyan]...")
+        try:
+            content = coflix.get_content(selection.url)
+        except Exception as e:
+            print_error(f"Error loading content: {e}")
+            pause()
+            continue
+
+        if isinstance(content, CoflixMovie):
+            console.print(f"\n[bold]🎬 Movie:[/bold] [cyan]{content.title}[/cyan]\n")
+
+            # Check for saved progress (Movie Resume Fix)
+            saved_progress = tracker.get_series_progress("Coflix", content.title)
+            if saved_progress:
+                choice = select_from_list(
+                    ["Watch again/Resume", "Cancel"],
+                    f"Found saved progress for {content.title}:",
+                )
+                if choice == 0:
+                    resume_coflix(saved_progress)
+                    continue
+
+            if not content.players:
+                print_warning("No players found.")
+                pause()
+                continue
+            supported_players = [
+                p for p in content.players if player.is_supported(p.url)
+            ]
+            if not supported_players:
+                print_warning("No supported players found.")
+                pause()
+                continue
+
+            headers = {"Referer": "https://lecteurvideo.com/"}
+            play_episode_flow(
+                provider_name="Coflix",
+                series_title=content.title,
+                season_title="Movie",
+                series_url=content.url,
+                season_url=content.url,
+                logo_url=content.img,
+                headers=headers,
+                episode=content,  # Movie object should behave like Episode if it has players
+            )
+
+        elif isinstance(content, CoflixSeries):
+            console.print(f"\n[bold]📺 Series:[/bold] [cyan]{content.title}[/cyan]\n")
+
+            if not content.seasons:
+                print_warning("No seasons found.")
+                pause()
+                continue
+
+            # Check for saved progress for this specific series
+            saved_progress = tracker.get_series_progress("Coflix", content.title)
+            if saved_progress:
+                choice = select_from_list(
+                    [
+                        f"Resume {saved_progress['season_title']} - {saved_progress['episode_title']}",
+                        "Browse Seasons",
+                    ],
+                    f"Found saved progress for {content.title}:",
+                )
+                if choice == 0:
+                    resume_coflix(saved_progress)
+                    continue
+
+            season_idx = select_from_list(
+                [s.title for s in content.seasons], "📺 Select Season:"
+            )
+            selected_season_access = content.seasons[season_idx]
+
+            print_info(f"Loading [cyan]{selected_season_access.title}[/cyan]...")
+            try:
+                season = coflix.get_season(selected_season_access.url)
+            except Exception as e:
+                print_error(f"Error loading season: {e}")
+                pause()
+                continue
+
+            if not season.episodes:
+                print_warning("No episodes found.")
+                pause()
+                continue
+
+            ep_idx = select_from_list(
+                [e.title for e in season.episodes], "📺 Select Episode:"
+            )
+
+            while True:
+                selected_episode = season.episodes[ep_idx]
+                headers = {"Referer": "https://lecteurvideo.com/"}
+
+                # Fetch players for the episode
+                try:
+                    ep_details = coflix.get_episode(selected_episode.url)
+                except Exception as e:
+                    print_error(f"Error loading episode: {e}")
+                    pause()
+                    break
+
+                success = play_episode_flow(
+                    provider_name="Coflix",
+                    series_title=content.title,
+                    season_title=selected_season_access.title,
+                    episode=ep_details,
+                    series_url=content.url,
+                    season_url=selected_season_access.url,
+                    logo_url=content.img,
+                    headers=headers,
+                )
+
+                if success:
+                    if ep_idx + 1 < len(season.episodes):
+                        next_ep = season.episodes[ep_idx + 1]
+                        choice = select_from_list(
+                            ["Yes", "No"], f"Play next episode: {next_ep.title}?"
+                        )
+                        if choice == 0:
+                            ep_idx += 1
+                            continue
+                    break
+                else:
+                    break
+
+
+def resume_coflix(data):
+    """Resume Coflix playback."""
+    # Ensure origin is set so we can resolve relative URLs
+    coflix.get_website_url()
+
+    def resolve_url(u):
+        if not u:
+            return ""
+        if u.startswith("http"):
+            return u
+        return coflix.website_origin.rstrip("/") + "/" + u.lstrip("/")
+
+    # Resolve URLs in data
+    data["series_url"] = resolve_url(data["series_url"])
+    data["season_url"] = resolve_url(data["season_url"])
+
+    print_info(f"Resuming [cyan]{data['series_title']}[/cyan]...")
+
+    # Handle Movie
+    if data["season_title"] == "Movie":
+        print_info(f"Loading Movie: {data['series_url']}")
+        try:
+            content = coflix.get_content(data["series_url"])
+        except Exception as e:
+            print_error(f"Could not load movie: {e}")
+            pause()
             return
-        supported_players = [p for p in content.players if player.is_supported(p.url)]
-        if not supported_players:
-            print_warning("No supported players found.")
+
+        if not isinstance(content, CoflixMovie):
+            print_error("Expected a Movie but got something else.")
+            pause()
             return
 
+        options = ["Watch again", "Cancel"]
+        choice = select_from_list(options, "What would you like to do?")
+
+        if choice == 1:
+            return
+
+        # Watch again
         headers = {"Referer": "https://lecteurvideo.com/"}
         play_episode_flow(
             provider_name="Coflix",
@@ -52,96 +219,22 @@ def handle_coflix():
             season_url=content.url,
             logo_url=content.img,
             headers=headers,
-            episode=content,  # Movie object should behave like Episode if it has players
+            episode=content,
         )
+        return
 
-    elif isinstance(content, CoflixSeries):
-        console.print(f"\n[bold]📺 Series:[/bold] [cyan]{content.title}[/cyan]\n")
-
-        if not content.seasons:
-            print_warning("No seasons found.")
-            return
-
-        # Check for saved progress for this specific series
-        saved_progress = tracker.get_series_progress("Coflix", content.title)
-        if saved_progress:
-            choice = select_from_list(
-                [
-                    f"Resume {saved_progress['season_title']} - {saved_progress['episode_title']}",
-                    "Browse Seasons",
-                ],
-                f"Found saved progress for {content.title}:",
-            )
-            if choice == 0:
-                resume_coflix(saved_progress)
-                return
-
-        season_idx = select_from_list(
-            [s.title for s in content.seasons], "📺 Select Season:"
-        )
-        selected_season_access = content.seasons[season_idx]
-
-        print_info(f"Loading [cyan]{selected_season_access.title}[/cyan]...")
-        season = coflix.get_season(selected_season_access.url)
-
-        if not season.episodes:
-            print_warning("No episodes found.")
-            return
-
-        ep_idx = select_from_list(
-            [e.title for e in season.episodes], "📺 Select Episode:"
-        )
-
-        while True:
-            selected_episode = season.episodes[ep_idx]
-            headers = {"Referer": "https://lecteurvideo.com/"}
-
-            # Fetch players for the episode
-            ep_details = coflix.get_episode(selected_episode.url)
-
-            success = play_episode_flow(
-                provider_name="Coflix",
-                series_title=content.title,
-                season_title=selected_season_access.title,
-                episode=ep_details,
-                series_url=content.url,
-                season_url=selected_season_access.url,
-                logo_url=content.img,
-                headers=headers,
-            )
-
-            if success:
-                if ep_idx + 1 < len(season.episodes):
-                    next_ep = season.episodes[ep_idx + 1]
-                    choice = select_from_list(
-                        ["Yes", "No"], f"Play next episode: {next_ep.title}?"
-                    )
-                    if choice == 0:
-                        ep_idx += 1
-                        continue
-                break
-            else:
-                return
-
-
-def resume_coflix(data):
-    """Resume Coflix playback."""
-    print_info(f"Resuming [cyan]{data['series_title']}[/cyan]...")
-
-    # For Coflix, we need to re-fetch the SEASON page to get episode list,
-    # OR re-fetch the EPISODE page directly if we have the URL?
-    # Coflix episodes have dedicated URLs.
-    # But to play "Next", we need the season list.
-    # data['season_url'] should be the season page.
-
+    # Handle Series (Existing Logic)
     print_info(f"Loading Season: {data['season_url']}")
     try:
         season = coflix.get_season(data["season_url"])
     except Exception as e:
         print_error(f"Could not load season: {e}")
+        pause()
         return
 
     if not season.episodes:
+        print_warning("No episodes found in season.")
+        pause()
         return
 
     # Find episode index
@@ -177,7 +270,13 @@ def resume_coflix(data):
     while True:
         selected_episode = season.episodes[ep_idx]
         headers = {"Referer": "https://lecteurvideo.com/"}
-        ep_details = coflix.get_episode(selected_episode.url)
+
+        try:
+            ep_details = coflix.get_episode(selected_episode.url)
+        except Exception as e:
+            print_error(f"Error loading episode: {e}")
+            pause()
+            break
 
         success = play_episode_flow(
             provider_name="Coflix",
