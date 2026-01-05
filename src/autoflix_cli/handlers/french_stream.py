@@ -25,7 +25,9 @@ def resolve_url(url, base):
 def handle_french_stream():
     """Handle French-Stream provider flow."""
     print_header("🇫🇷 French-Stream")
-    query = get_user_input("Search query")
+    query = get_user_input("Search query (or 'exit' to back)")
+    if not query or query.lower() == "exit":
+        return
 
     print_info(f"Searching for: [cyan]{query}[/cyan]")
     results = french_stream.search(query)

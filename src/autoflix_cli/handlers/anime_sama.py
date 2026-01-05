@@ -123,7 +123,9 @@ def handle_anime_sama():
     anime_sama.get_website_url()
 
     print_header("🎌 Anime-Sama")
-    query = get_user_input("Search query")
+    query = get_user_input("Search query (or 'exit' to back)")
+    if not query or query.lower() == "exit":
+        return
 
     print_info(f"Searching for: [cyan]{query}[/cyan]")
     results = anime_sama.search(query)

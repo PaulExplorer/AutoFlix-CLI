@@ -16,7 +16,9 @@ def handle_wiflix():
     """Handle Wiflix provider flow."""
     print_header("🎬 Wiflix")
 
-    query = get_user_input("Search query")
+    query = get_user_input("Search query (or 'exit' to back)")
+    if not query or query.lower() == "exit":
+        return
 
     print_info(f"Searching for: [cyan]{query}[/cyan]")
     results = wiflix.search(query)

@@ -24,7 +24,7 @@ def handle_coflix():
 
     while True:
         query = get_user_input("Search query (or 'exit' to back)")
-        if query.lower() == "exit":
+        if not query or query.lower() == "exit":
             break
 
         print_info(f"Searching for: [cyan]{query}[/cyan]")
