@@ -93,11 +93,12 @@ def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
     Returns:
         True if playback succeeded, False otherwise
     """
-    print_info(f"Resolving stream for: [cyan]{url}[/cyan]")
 
     if hasattr(player, "new_url") and isinstance(player.new_url, dict):
         for old, new in player.new_url.items():
             url = url.replace(old, new)
+
+    print_info(f"Resolving stream for: [cyan]{url}[/cyan]")
 
     # Determine player configuration
     player_config = {}
