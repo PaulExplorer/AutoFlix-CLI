@@ -337,6 +337,37 @@ def get_hls_link_myvidplay(url: str, headers: dict) -> str:
     return link
 
 
+def get_hls_link_vidmoly(url: str, headers: dict) -> str:
+    """
+    Dedicated parser for Vidmoly to bypass transitional page.
+    Mimics an iframe request behavior.
+    """
+    # Specific headers observed in browser iframe test
+    vidmoly_headers = {
+        "Sec-Fetch-Dest": "iframe",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "cross-site",
+        "Upgrade-Insecure-Requests": "1",
+        # Explicitly removing Referer as data: URL worked without it
+        "Referer": "",
+    }
+
+    # Merge but prioritize our specific headers
+    final_headers = {**headers, **vidmoly_headers}
+    # Ensure Referer is actually removed if we mapped it to empty string/None
+    if "Referer" in final_headers and not final_headers["Referer"]:
+        del final_headers["Referer"]
+
+    response = scraper.get(
+        url,
+        headers=final_headers,
+        impersonate="chrome110",
+    )
+    response.raise_for_status()
+
+    return response.text.split('sources: [{file:"')[1].split('"')[0]
+
+
 def get_hls_link(url: str, headers: dict = {}) -> str | None:
     """
     Extract HLS/video link from a player URL.
@@ -383,6 +414,8 @@ def get_hls_link(url: str, headers: dict = {}) -> str | None:
                 return get_hls_link_kakaflix(url, headers)
             elif parse_type == "myvidplay":
                 return get_hls_link_myvidplay(url, headers)
+            elif parse_type == "vidmoly":
+                return get_hls_link_vidmoly(url, headers)
 
     return None
 

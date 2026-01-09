@@ -13,7 +13,7 @@ DEFAULT_PLAYERS = {
     "hailindihg": {"type": "a"},
     "gradehgplus": {"type": "a"},
     "taylorplayer": {"type": "a"},
-    "vidmoly": {"type": "b"},
+    "vidmoly": {"type": "vidmoly"},
     "oneupload": {"type": "b"},
     "tipfly": {"type": "b"},
     # "luluvdoo": {
