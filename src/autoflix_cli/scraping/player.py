@@ -2,114 +2,29 @@ from curl_cffi import requests
 from .deobfuscate import deobfuscate
 from bs4 import BeautifulSoup
 from ..proxy import curl_options
+from ..config_loader import load_remote_jsonc
+from ..defaults import DEFAULT_PLAYERS, DEFAULT_NEW_URL, DEFAULT_KAKAFLIX_PLAYERS
 
 scraper = requests.Session(curl_options=curl_options)
 
 # Player mapping: domain name -> parser type
 # Player mapping and configuration
-players = {
-    "wishonly": {
-        "type": "a",
-        "referrer": "full",
-        "alt-used": True,
-        "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:cross-site;Content-Cache: no-cache",
-        "mode": "proxy",
-    },
-    "hgbazooka": {"type": "a"},
-    "hailindihg": {"type": "a"},
-    "gradehgplus": {"type": "a"},
-    "taylorplayer": {"type": "a"},
-    "vidmoly": {"type": "b"},
-    "oneupload": {"type": "b"},
-    "tipfly": {"type": "b"},
-    # "luluvdoo": {
-    #     "type": "b",
-    #     "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:cross-site",
-    # },
-    # "luluvdo": {
-    #     "type": "b",
-    #     "sec_headers": False,
-    # },
-    # "lulustream": {
-    #     "type": "b",
-    #     "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:cross-site",
-    # },
-    "ups2up": {"type": "c"},
-    "ico3c": {"type": "c"},
-    "fsvid": {"type": "c"},
-    "darkibox": {"type": "d"},
-    # "movearnpre": { # don't work
-    #     "type": "e",
-    #     "referrer": "full",
-    #     "alt-used": False,
-    #     "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:same-origin",
-    # },
-    "smoothpre": {
-        "type": "e",
-        "referrer": "full",
-        "alt-used": True,
-        "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:cross-site;Content-Cache: no-cache",
-    },
-    "vidhideplus": {"type": "e"},
-    "dinisglows": {
-        "type": "e",
-        "referrer": "full",
-        "alt-used": True,
-        "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:same-origin",
-    },
-    "mivalyo": {"type": "e"},
-    "dingtezuni": {"type": "e"},
-    "vidzy": {"type": "f"},
-    "videzz": {
-        "type": "vidoza",
-        "mode": "proxy",
-        "no-header": True,
-        "ext": "mp4",
-    },
-    "vidoza": {
-        "type": "vidoza",
-        "mode": "proxy",
-        "no-header": True,
-        "ext": "mp4",
-    },
-    "sendvid": {"type": "sendvid", "mode": "proxy", "ext": "mp4"},
-    "sibnet": {
-        "type": "sibnet",
-        "mode": "proxy",
-        "ext": "mp4",
-        "referrer": "full",
-        "no-header": True,
-    },
-    "uqload": {
-        "type": "uqload",
-        "sec_headers": "Sec-Fetch-Dest:video;Sec-Fetch-Mode:no-cors;Sec-Fetch-Site:same-site",
-        "ext": "mp4",
-    },
-    "filemoon": {
-        "type": "filemoon",
-        "referrer": "https://ico3c.com/",
-        "no-header": True,
-    },
-    "kakaflix": {"type": "kakaflix"},
-    # "myvidplay": {"type": "myvidplay", "referrer": "https://myvidplay.com/"},
-}
+players = load_remote_jsonc(
+    "https://raw.githubusercontent.com/PaulExplorer/AutoFlix-CLI/refs/heads/main/data/players_info.jsonc",
+    DEFAULT_PLAYERS,
+)
 
 # URL replacements for compatibility
-new_url = {
-    "mivalyo": "dinisglows",
-    "vidhideplus": "dinisglows",
-    "dingtezuni": "dinisglows",
-    "vidmoly.to": "vidmoly.me",
-    "lulustream": "luluvdo",
-    "vidoza.net": "videzz.net",
-}
+new_url = load_remote_jsonc(
+    "https://raw.githubusercontent.com/PaulExplorer/AutoFlix-CLI/refs/heads/main/data/new_url.jsonc",
+    DEFAULT_NEW_URL,
+)
 
 # kakaflix supported players
-kakaflix_players = {
-    "moon2": "ico3c",
-    "viper": "ico3c",
-    # "tokyo": "myvidplay"
-}
+kakaflix_players = load_remote_jsonc(
+    "https://raw.githubusercontent.com/PaulExplorer/AutoFlix-CLI/refs/heads/main/data/kakaflix_players.jsonc",
+    DEFAULT_KAKAFLIX_PLAYERS,
+)
 
 
 def get_hls_link_b(url: str, headers: dict) -> str:
