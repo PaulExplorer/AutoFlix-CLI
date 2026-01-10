@@ -14,7 +14,7 @@ DEFAULT_PLAYERS = {
     "gradehgplus": {"type": "default"},
     "taylorplayer": {"type": "default"},
     "vidmoly": {"type": "vidmoly"},
-    "oneupload": {"type": "default"},
+    # "oneupload": {"type": "default"},
     "tipfly": {"type": "default"},
     # "luluvdoo": {
     #     "type": "b",
