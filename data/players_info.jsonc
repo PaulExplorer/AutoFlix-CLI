@@ -1,18 +1,18 @@
 {
   "wishonly": {
-    "type": "a",
+    "type": "default",
     "referrer": "full",
     "alt-used": true,
     "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:cross-site;Content-Cache: no-cache",
     "mode": "proxy"
   },
-  "hgbazooka": { "type": "a" },
-  "hailindihg": { "type": "a" },
-  "gradehgplus": { "type": "a" },
-  "taylorplayer": { "type": "a" },
+  "hgbazooka": { "type": "default" },
+  "hailindihg": { "type": "default" },
+  "gradehgplus": { "type": "default" },
+  "taylorplayer": { "type": "default" },
   "vidmoly": { "type": "vidmoly" },
-  "oneupload": { "type": "b" },
-  "tipfly": { "type": "b" },
+  // "oneupload": { "type": "default" },
+  "tipfly": { "type": "default" },
   // "luluvdoo": {
   //     "type": "b",
   //     "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:cross-site",
@@ -22,35 +22,35 @@
   //     "sec_headers": False,
   // },
   // "lulustream": {
-  //     "type": "b",
-  //     "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:cross-site",
+  //   "type": "b",
+  //   "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:cross-site"
   // },
-  "ups2up": { "type": "c" },
-  "ico3c": { "type": "c" },
-  "fsvid": { "type": "c" },
-  "darkibox": { "type": "d" },
-  // "movearnpre": { // don't work
-  //     "type": "e",
-  //     "referrer": "full",
-  //     "alt-used": False,
-  //     "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:same-origin",
-  // },
+  "ups2up": { "type": "default" },
+  "ico3c": { "type": "default" },
+  "fsvid": { "type": "default" },
+  "darkibox": { "type": "default" },
+  "movearnpre": {
+    "type": "default",
+    "referrer": "full",
+    "alt-used": false,
+    "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:same-origin"
+  },
   "smoothpre": {
-    "type": "e",
+    "type": "default",
     "referrer": "full",
     "alt-used": true,
     "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:cross-site;Content-Cache: no-cache"
   },
-  "vidhideplus": { "type": "e" },
+  "vidhideplus": { "type": "default" },
   "dinisglows": {
-    "type": "e",
+    "type": "default",
     "referrer": "full",
     "alt-used": true,
     "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:same-origin"
   },
-  "mivalyo": { "type": "e" },
-  "dingtezuni": { "type": "e" },
-  "vidzy": { "type": "f" },
+  "mivalyo": { "type": "default" },
+  "dingtezuni": { "type": "default" },
+  "vidzy": { "type": "default" },
   "videzz": {
     "type": "vidoza",
     "mode": "proxy",

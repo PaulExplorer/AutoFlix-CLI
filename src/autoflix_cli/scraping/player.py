@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 from ..proxy import curl_options
 from ..config_loader import load_remote_jsonc
 from ..defaults import DEFAULT_PLAYERS, DEFAULT_NEW_URL, DEFAULT_KAKAFLIX_PLAYERS
+import re
 
 scraper = requests.Session(curl_options=curl_options)
 
@@ -27,134 +28,27 @@ kakaflix_players = load_remote_jsonc(
 )
 
 
-def get_hls_link_b(url: str, headers: dict) -> str:
-    """
-    Extract HLS link from type 'b' players (vidmoly, luluvdoo, etc.).
+def extract_hls_url(unpacked_code):
+    pattern = r'["\'](https?://[^"\']*master\.txt[^"\']*)["\']'
+    match = re.search(pattern, unpacked_code)
+    if match:
+        return match.group(1)
 
-    Args:
-        url: Player URL
-        headers: HTTP headers for the request
+    pattern = r'["\'](https?://[^"\']*master\.m3u8[^"\']*)["\']'
+    match = re.search(pattern, unpacked_code)
+    if match:
+        return match.group(1)
 
-    Returns:
-        HLS stream URL
-    """
+    return None
+
+
+def get_hls_link_default(url: str, headers: dict) -> str:
     response = scraper.get(url, headers=headers, impersonate="chrome110")
     response.raise_for_status()
 
-    return response.text.split('sources: [{file:"')[1].split('"')[0]
+    code = deobfuscate(response.text)
 
-
-def get_hls_link_d(url: str, headers: dict) -> str:
-    """
-    Extract HLS link from type 'd' players.
-
-    Args:
-        url: Player URL
-        headers: HTTP headers for the request
-
-    Returns:
-        HLS stream URL
-    """
-    response = scraper.get(url, headers=headers, impersonate="chrome110")
-    response.raise_for_status()
-
-    return response.text.split('sources: [{src: "')[1].split('"')[0]
-
-
-def get_hls_link_a(url: str, headers: dict) -> str:
-    """
-    Extract HLS link from type 'a' players (most common type).
-    Requires deobfuscation of JavaScript code.
-
-    Args:
-        url: Player URL
-        headers: HTTP headers for the request
-
-    Returns:
-        HLS stream URL
-    """
-    response = scraper.get(url, headers=headers, impersonate="chrome110")
-    response.raise_for_status()
-
-    code = response.text.split("<script type='text/javascript'>")[1].split("\n")[0]
-    code = code.removesuffix("</script>")
-    code = deobfuscate(code)
-
-    link = code.split('"hls2": "')[1].split('"')[0]
-
-    return link
-
-
-def get_hls_link_e(url: str, headers: dict) -> str:
-    """
-    Extract HLS link from type 'e' players.
-    Requires deobfuscation of JavaScript code.
-
-    Args:
-        url: Player URL
-        headers: HTTP headers for the request
-
-    Returns:
-        HLS stream URL
-    """
-    response = scraper.get(url, headers=headers, impersonate="chrome110")
-    response.raise_for_status()
-
-    code = response.text.split("<script type='text/javascript'>")[1].split("\n")[0]
-    code = code.removesuffix("</script>")
-    code = deobfuscate(code)
-
-    link = code.split('"hls3": "')[1].split('"')[0]
-
-    return link
-
-
-def get_hls_link_c(url: str, headers: dict) -> str:
-    """
-    Extract HLS link from type 'c' players (ups2up).
-    Requires deobfuscation of JavaScript code.
-
-    Args:
-        url: Player URL
-        headers: HTTP headers for the request
-
-    Returns:
-        HLS stream URL
-    """
-    response = scraper.get(url, headers=headers, impersonate="chrome110")
-    response.raise_for_status()
-
-    code = response.text.split(" type='text/javascript'>")[1].split("\n")[0]
-    code = code.removesuffix("</script>")
-    code = deobfuscate(code)
-
-    link = code.split('file: "')[1].split('"')[0]
-
-    return link
-
-
-def get_hls_link_f(url: str, headers: dict) -> str:
-    """
-    Extract HLS link from type 'f' players.
-    Requires deobfuscation of JavaScript code.
-
-    Args:
-        url: Player URL
-        headers: HTTP headers for the request
-
-    Returns:
-        HLS stream URL
-    """
-    response = scraper.get(url, headers=headers, impersonate="chrome110")
-    response.raise_for_status()
-
-    code = response.text.split("<script type='text/javascript'>")[1].split("\n")[0]
-    code = code.removesuffix("</script>")
-    code = deobfuscate(code)
-
-    link = code.split('src: "')[1].split('"')[0]
-
-    return link
+    return extract_hls_url(code)
 
 
 def get_hls_link_uqload(url: str, headers: dict) -> str:
@@ -385,21 +279,8 @@ def get_hls_link(url: str, headers: dict = {}) -> str | None:
     for player_name, config in players.items():
         if player_name in url.lower():
             parse_type = config["type"]
-            if parse_type == "a":
-                return get_hls_link_a(url, headers)
-            elif parse_type == "b":
-                return get_hls_link_b(url.lower(), headers)
-            elif parse_type == "c":
-                return get_hls_link_c(url, headers)
-            elif parse_type == "d":
-                return get_hls_link_d(url, headers)
-            elif parse_type == "e":
-                try:
-                    return get_hls_link_e(url, headers)
-                except:
-                    return get_hls_link_a(url, headers)
-            elif parse_type == "f":
-                return get_hls_link_f(url, headers)
+            if parse_type == "default":
+                return get_hls_link_default(url, headers)
             elif parse_type == "sendvid":
                 return get_hls_link_sendvid(url)
             elif parse_type == "sibnet":
