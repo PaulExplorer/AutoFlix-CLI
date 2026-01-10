@@ -32,6 +32,7 @@ DEFAULT_PLAYERS = {
     "ico3c": {"type": "default"},
     "fsvid": {"type": "default"},
     "darkibox": {"type": "default"},
+    "minochinos": {"type": "default"},
     "movearnpre": {
         "type": "default",
         "referrer": "full",
@@ -88,15 +89,20 @@ DEFAULT_PLAYERS = {
     "kakaflix": {"type": "kakaflix"},
     # "myvidplay": {"type": "myvidplay", "referrer": "https://myvidplay.com/"},
     "embed4me": {"type": "embed4me"},
+    "coflix.upn": {"type": "embed4me"},
 }
 
 DEFAULT_NEW_URL = {
+    "lulustream": "luluvdo",
+    "vidoza.net": "videzz.net",
+    "oneupload.to": "oneupload.net",
+    # Dinisglows Player
     "mivalyo": "dinisglows",
     "vidhideplus": "dinisglows",
     "dingtezuni": "dinisglows",
-    "vidmoly.to": "vidmoly.me",
-    "lulustream": "luluvdo",
-    "vidoza.net": "videzz.net",
+    # Vidmoly Player
+    "vidmoly.to": "vidmoly.net",
+    "vidmoly.me": "vidmoly.net",
 }
 
 DEFAULT_KAKAFLIX_PLAYERS = {

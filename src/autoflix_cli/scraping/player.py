@@ -87,9 +87,10 @@ def get_hls_link_embed4me(embed_url: str) -> str:
         return None
 
     video_id = match.group(1)
-    api_url = f"https://lpayer.embed4me.com/api/v1/video?id={video_id}&w=1920&h=1080&r=https://lpayer.embed4me.com/"
+    url_root = "https://" + embed_url.split("/")[2]
+    api_url = f"{url_root}/api/v1/video?id={video_id}&w=1920&h=1080&r={url_root}"
 
-    headers = {"Referer": "https://lpayer.embed4me.com/"}
+    headers = {"Referer": url_root}
 
     r = scraper.get(api_url, headers=headers, impersonate="chrome110", timeout=10)
     r.raise_for_status()
