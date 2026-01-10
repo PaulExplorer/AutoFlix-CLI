@@ -6,6 +6,11 @@ from ..config_loader import load_remote_jsonc
 from ..defaults import DEFAULT_PLAYERS, DEFAULT_NEW_URL, DEFAULT_KAKAFLIX_PLAYERS
 import re
 
+import json
+import binascii
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
+
 scraper = requests.Session(curl_options=curl_options)
 
 # Player mapping: domain name -> parser type
@@ -49,6 +54,55 @@ def get_hls_link_default(url: str, headers: dict) -> str:
     code = deobfuscate(response.text)
 
     return extract_hls_url(code)
+
+
+def get_hls_link_embed4me(embed_url: str) -> str:
+    """
+    Extract HLS link from embed4me player.
+    Code adapted from: https://github.com/SertraFurr/Anime-Sama-Downloader/blob/main/src/utils/extract/extract_embed4me_video_source.py
+
+    Args:
+        embed_url: The embed URL of the player.
+
+    Returns:
+        The HLS stream URL or None if not found.
+    """
+
+    KEY = b"kiemtienmua911ca"
+    IV = b"1234567890oiuytr"
+
+    def _decrypt_data(hex_str):
+        try:
+            data = binascii.unhexlify(hex_str)
+            cipher = AES.new(KEY, AES.MODE_CBC, IV)
+            decrypted = unpad(cipher.decrypt(data), AES.block_size)
+            return decrypted.decode("utf-8")
+        except Exception:
+            return None
+
+    match = re.search(r"#([a-zA-Z0-9]+)", embed_url)
+    if not match:
+        match = re.search(r"[?&]id=([a-zA-Z0-9]+)", embed_url)
+    if not match:
+        return None
+
+    video_id = match.group(1)
+    api_url = f"https://lpayer.embed4me.com/api/v1/video?id={video_id}&w=1920&h=1080&r=https://lpayer.embed4me.com/"
+
+    headers = {"Referer": "https://lpayer.embed4me.com/"}
+
+    r = scraper.get(api_url, headers=headers, impersonate="chrome110", timeout=10)
+    r.raise_for_status()
+
+    hex_data = r.text.strip()
+    if hex_data.startswith('"') and hex_data.endswith('"'):
+        hex_data = hex_data[1:-1]
+
+    decrypted = _decrypt_data(hex_data)
+
+    data = json.loads(decrypted)
+    source = data.get("source")
+    return source
 
 
 def get_hls_link_uqload(url: str, headers: dict) -> str:
@@ -297,6 +351,8 @@ def get_hls_link(url: str, headers: dict = {}) -> str | None:
                 return get_hls_link_myvidplay(url, headers)
             elif parse_type == "vidmoly":
                 return get_hls_link_vidmoly(url, headers)
+            elif parse_type == "embed4me":
+                return get_hls_link_embed4me(url)
 
     return None
 

@@ -19,6 +19,7 @@ dependencies = [
     "readchar>=4.2.1",
     "rich>=14.2.0",
     "platformdirs>=4.0.0",
+    "pycryptodome>=3.23.0",
 ]
 
 # Project URLs

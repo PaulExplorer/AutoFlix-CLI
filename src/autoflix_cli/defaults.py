@@ -87,6 +87,7 @@ DEFAULT_PLAYERS = {
     },
     "kakaflix": {"type": "kakaflix"},
     # "myvidplay": {"type": "myvidplay", "referrer": "https://myvidplay.com/"},
+    "embed4me": {"type": "embed4me"},
 }
 
 DEFAULT_NEW_URL = {
