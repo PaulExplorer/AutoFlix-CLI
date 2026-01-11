@@ -48,11 +48,17 @@ def select_from_list(options: list[str], prompt: str, default_index: int = 0) ->
         Index of the selected option (0-based)
     """
     selected_index = max(0, min(default_index, len(options) - 1))
-    window_size = 10  # Number of items to show at once
     start_index = 0
 
     def generate_renderable():
         nonlocal start_index
+
+        # Calculate dynamic window size based on terminal height
+        term_height = console.size.height
+        # Reserve lines for prompt (2), header/spacing (2), arrows (2) -> ~6 lines reserve
+        reserved_lines = 6
+        available_height = max(3, term_height - reserved_lines)
+        window_size = min(len(options), available_height)
 
         # Adjust start_index to keep selected_index in view
         if selected_index < start_index:
