@@ -11,6 +11,8 @@ from ..cli_utils import (
     clean_title,
 )
 from .anime_sama import anime_sama
+from ..player_manager import play_video
+from ..scraping import player
 
 
 def handle_anilist_continue():
@@ -72,12 +74,6 @@ def handle_anilist_continue():
         next_episode_num = progress
     else:
         print_info(f"Target: [cyan]{media_title}[/cyan] - Episode {next_episode_num}")
-
-    # Check for existing mapping to avoid re-searching if verified
-    # Current mapping structure is Provider|SeriesTitle -> MediaId
-    # It's one-way currently, we need to iterate or search.
-    # For now, let's search provider blindly or improve tracker map later.
-    # Actually, we can just search Anime-Sama directly.
 
     anime_sama.get_website_url()
 
@@ -237,15 +233,7 @@ def handle_anilist_continue():
             f"Found Episode {next_episode_num}: {episodes[start_ep_idx].title}"
         )
 
-    # Start playback from there...
-    # We can reuse the loop logic or create a helper.
-    # Since we are in handlers, maybe valid to reuse code?
-    # Or strict DRY.
-    # For now, let's copy the playback loop to ensure stability.
-
     ep_idx = start_ep_idx
-    from ..player_manager import play_video
-    from ..scraping import player
 
     while True:
         selected_episode = episodes[ep_idx]

@@ -74,10 +74,6 @@ def play_episode_flow(
 
         if success:
             # Save Local Progress
-            # Note: tracker.save_progress handles _to_relative conversion internally if we pass absolute URLs,
-            # but to match existing pattern, we pass whatever we got.
-            # Ideally verify urls are absolute before passing if possible,
-            # but tracker is robust.
 
             tracker.save_progress(
                 provider=provider_name,

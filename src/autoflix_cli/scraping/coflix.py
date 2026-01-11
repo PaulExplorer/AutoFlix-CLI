@@ -62,6 +62,7 @@ def get_players(players_url: str) -> list[Player]:
     Returns:
         List of Player objects
     """
+
     headers = {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "fr-FR,en-US;q=0.7,en;q=0.3",
