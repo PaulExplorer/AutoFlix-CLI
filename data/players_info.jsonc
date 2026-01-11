@@ -85,5 +85,12 @@
   "kakaflix": { "type": "kakaflix" },
   // "myvidplay": {"type": "myvidplay", "referrer": "https://myvidplay.com/"},
   "embed4me": { "type": "embed4me" },
-  "coflix.upn": { "type": "embed4me" }
+  "coflix.upn": { "type": "embed4me" },
+  // "veev": {
+  //   // don't work
+  //   "type": "veev",
+  //   "sec_headers": "Sec-Fetch-Dest:video;Sec-Fetch-Mode:cors;Sec-Fetch-Site:cross-site",
+  //   "ext": "mp4"
+  // },
+  "xtremestream": { "type": "xtremestream" }
 }
