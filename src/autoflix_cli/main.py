@@ -14,6 +14,8 @@ from .handlers import anime_sama, coflix, french_stream, wiflix, anilist
 from . import history_ui
 from . import proxy
 import sys
+import os
+import signal
 
 
 def main():
@@ -124,7 +126,8 @@ def main():
 
         # Exit
         print_success("Goodbye!")
-        sys.exit(0)
+        proxy.stop_proxy_server()
+        os._exit(0)
 
 
 if __name__ == "__main__":
@@ -132,4 +135,5 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nGoodbye!")
-        sys.exit(0)
+        proxy.stop_proxy_server()
+        os._exit(0)

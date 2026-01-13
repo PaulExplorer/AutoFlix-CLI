@@ -11,6 +11,7 @@ import m3u8
 PROXY_PORT = 0
 PROXY_HOST = "127.0.0.1"
 PROXY_URL = None
+_server_instance = None  # To store the server for shutdown
 
 app = Flask(__name__)
 
@@ -264,13 +265,16 @@ def proxy_video():
 # Server Launch
 # ---------------------------------------------------------------------------
 def run_flask(port):
+    global _server_instance
     # Disable verbose flask/werkzeug logs for performance
     import logging
+    from werkzeug.serving import make_server
 
     log = logging.getLogger("werkzeug")
     log.setLevel(logging.ERROR)
 
-    app.run(host=PROXY_HOST, port=port, threaded=True, debug=False, use_reloader=False)
+    _server_instance = make_server(PROXY_HOST, port, app, threaded=True)
+    _server_instance.serve_forever()
 
 
 def start_proxy_server(port=0):
@@ -289,6 +293,14 @@ def start_proxy_server(port=0):
 
     print(f"[*] M3U8 Proxy started on http://{PROXY_HOST}:{PROXY_PORT}")
     return port
+
+
+def stop_proxy_server():
+    """Shuts down the proxy server gracefully."""
+    global _server_instance
+    if _server_instance:
+        _server_instance.shutdown()
+        _server_instance = None
 
 
 # ---------------------------------------------------------------------------
