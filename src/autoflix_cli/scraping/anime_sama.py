@@ -2,11 +2,11 @@ from curl_cffi import requests as cffi_requests
 from bs4 import BeautifulSoup
 from .objects import SearchResult, SamaSeason, SamaSeries, SeasonAccess, Episode
 from .utils import parse_episodes_from_js
-from ..proxy import curl_options
+from ..proxy import DNS_OPTIONS
 
 website_origin = ""
 
-scraper = cffi_requests.Session(impersonate="chrome", curl_options=curl_options)
+scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS)
 
 # info_class = "mt-0.5 text-gray-300 font-medium text-xs truncate"
 info_class = "info-value"

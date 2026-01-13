@@ -1,7 +1,6 @@
 import json
 import re
 from curl_cffi import requests
-from .proxy import curl_options
 
 
 def strip_json_comments(json_str: str) -> str:

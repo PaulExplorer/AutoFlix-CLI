@@ -12,10 +12,10 @@ from .objects import (
 )
 from .utils import parse_episodes_from_js
 import base64
-from ..proxy import curl_options
+from ..proxy import DNS_OPTIONS
 
 website_origin = ""
-scraper = cffi_requests.Session(impersonate="chrome", curl_options=curl_options)
+scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS)
 
 
 def get_website_url(portal="coflix.fans"):

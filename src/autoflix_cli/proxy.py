@@ -1,317 +1,315 @@
 import threading
-import urllib.parse
+import socket
 import json
-import re
 import time
-from flask import Flask, Response, request, stream_with_context
-import logging
+import urllib.parse
+from flask import Flask, request, Response, stream_with_context
+from curl_cffi import requests, CurlOpt
+import m3u8
 
-from curl_cffi import requests as cffi_requests
-from curl_cffi.const import CurlOpt
+# Global Configuration
+PROXY_PORT = 0
+PROXY_HOST = "127.0.0.1"
+PROXY_URL = None
 
-curl_options = {
-    # Google DNS to bypass potential ISP blocks
+app = Flask(__name__)
+
+# Requested Google DNS Options
+DNS_OPTIONS = {
     CurlOpt.DOH_URL: "https://8.8.8.8/dns-query",
-    # Disable SSL verification for the DNS query itself
     CurlOpt.DOH_SSL_VERIFYPEER: 0,
     CurlOpt.DOH_SSL_VERIFYHOST: 0,
 }
 
-app = Flask(__name__)
-
-# Global variables to store current stream configuration
-current_config = {"url": None, "headers": {}}
-PROXY_URL = None
-
-
-def get_base_url(url):
-    """Get the base URL to resolve relative paths in the m3u8."""
-    parsed = urllib.parse.urlparse(url)
-    return f"{parsed.scheme}://{parsed.netloc}{'/'.join(parsed.path.split('/')[:-1])}/"
-
-
-def requests_retry_session(url, headers, retries=3, backoff_factor=0.5):
-    """
-    Wraps the request with retry logic and forces connection close.
-    """
-    req_headers = headers.copy()
-
-    # CRITICAL: Tells the server to close the socket after the request.
-    # Prevents "Connection reset by peer" errors on long streams.
-    # req_headers["Connection"] = "close"
-
-    for i in range(retries):
-        try:
-            response = cffi_requests.get(
-                url,
-                headers=req_headers,
-                impersonate="chrome120",
-                timeout=45,
-                curl_options=curl_options,
-                stream=True,
-            )
-
-            # If server error (5xx) or Rate Limit (429), retry
-            if response.status_code in [500, 502, 503, 504, 429]:
-                response.close()
-                raise Exception(f"Status code {response.status_code}")
-
-            return response
-
-        except Exception as e:
-            # If last attempt, raise the error
-            if i == retries - 1:
-                print(f"Failed after {retries} attempts: {e}")
-                raise e
-            time.sleep(backoff_factor * (i + 1))
-
-
-def safe_iter_content(response):
-    """
-    Generator that handles 'GeneratorExit' when VLC disconnects/seeks.
-    """
-    try:
-        iterator = response.iter_content()
-        for chunk in iterator:
-            yield chunk
-    except GeneratorExit:
-        # Client disconnected -> Close upstream connection immediately
-        response.close()
-    except Exception:
-        response.close()
-
-
-# --- HELPER FOR MP4 HEADERS ---
-def get_proxied_headers(response_headers):
-    """Passes necessary headers for VLC seeking."""
-    headers_to_send = {}
-    allowed = [
-        "content-type",
-        "content-length",
-        "content-range",
-        "accept-ranges",
-        "last-modified",
-    ]
-    for k, v in response_headers.items():
-        if k.lower() in allowed:
-            headers_to_send[k] = v
-    headers_to_send["Accept-Ranges"] = "bytes"
-    return headers_to_send
-
-
-@app.route("/")
-def index():
-    """Main route to check if server is running."""
-    return "Proxy server is running."
-
-
-@app.route("/stream")
-def stream_video():
-    """Route to start streaming a video."""
-    url = request.args.get("url")
-    headers_str = request.args.get("headers", "{}")
-
-    if not url:
-        return "Missing URL", 400
-
-    try:
-        headers = json.loads(headers_str)
-    except json.JSONDecodeError:
-        headers = {}
-
-    current_config["url"] = url
-    current_config["headers"] = headers
-
-    client_range = request.headers.get("Range")
-    if client_range:
-        headers["Range"] = client_range
-
-    ext = request.args.get("ext")
-    return get_m3u8(url, headers, ext=ext)
-
-
-@app.route("/playlist.m3u8")
-def proxy_m3u8():
-    """Entry point if the server is called directly for the current stream."""
-    if not current_config["url"]:
-        return "No stream configured", 404
-    return get_m3u8(current_config["url"], current_config["headers"])
-
-
-def get_m3u8(target_url, headers, ext=None):
-    try:
-        # 1. Download using the retry wrapper
-        response = requests_retry_session(target_url, headers)
-
-        # Allow 206 (Partial Content) for MP4 seeking
-        if response.status_code not in [200, 206]:
-            return f"Error retrieving: {response.status_code}", 500
-
-        if ext == "mp4":
-            proxied_headers = get_proxied_headers(response.headers)
-            return Response(
-                stream_with_context(safe_iter_content(response)),
-                status=response.status_code,
-                headers=proxied_headers,
-                content_type=response.headers.get("Content-Type"),
-                direct_passthrough=True,
-            )
-
-        # 2. Sniff content to detect M3U8
-        # We read the first chunk to check for #EXTM3U
-        iterator = response.iter_content()
-        try:
-            first_chunk = next(iterator)
-        except StopIteration:
-            return "", 200
-
-        if first_chunk.strip().startswith(b"#EXTM3U"):
-            # It is an M3U8 playlist
-            content = first_chunk + b"".join(iterator)
-
-            # Decode safely
-            try:
-                original_content = content.decode("utf-8")
-            except:
-                original_content = content.decode("latin-1")
-
-            base_url = get_base_url(target_url)
-            new_lines = []
-
-            for line in original_content.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-
-                # Rewrite Encryption Keys and Media (Subtitles, Audio)
-                if (
-                    line.startswith("#EXT-X-KEY")
-                    or line.startswith("#EXT-X-MEDIA")
-                    or line.startswith("#EXT-X-MAP")
-                    or line.startswith("#EXT-X-I-FRAME-STREAM-INF")
-                ):
-
-                    def replace_uri(match):
-                        target_url = match.group(1)
-                        absolute_target_url = urllib.parse.urljoin(base_url, target_url)
-                        encoded_target_url = urllib.parse.quote(absolute_target_url)
-                        return f'URI="{request.host_url}proxy?url={encoded_target_url}"'
-
-                    line = re.sub(r'URI="(.*?)"', replace_uri, line)
-                    new_lines.append(line)
-
-                # Rewrite Segments/Links
-                elif not line.startswith("#"):
-                    absolute_url = urllib.parse.urljoin(base_url, line)
-                    encoded_url = urllib.parse.quote(absolute_url)
-                    proxy_line = f"{request.host_url}proxy?url={encoded_url}"
-                    new_lines.append(proxy_line)
-                else:
-                    new_lines.append(line)
-
-            return Response(
-                "\n".join(new_lines), mimetype="application/vnd.apple.mpegurl"
-            )
-
-        else:
-            # It's not M3U8 (likely video segment or MP4 fallback)
-            # Reconstruct the stream
-            def generate():
-                yield first_chunk
-                yield from safe_iter_content(response)
-
-            proxied_headers = get_proxied_headers(response.headers)
-            return Response(
-                stream_with_context(generate()),
-                status=response.status_code,
-                headers=proxied_headers,
-                content_type=response.headers.get("Content-Type"),
-            )
-
-    except Exception as e:
-        return f"Server error: {str(e)}", 500
-
-
-@app.route("/proxy")
-def proxy_segment():
-    """This route downloads segments (.ts) or sub-playlists."""
-    target_url = request.args.get("url")
-
-    if not target_url:
-        return "Missing URL", 400
-
-    try:
-        headers = current_config["headers"]
-
-        # Use retry session here too (Prevents HLS segments from failing)
-        req = requests_retry_session(target_url, headers)
-
-        # Detect sub-playlist
-        if "mpegurl" in req.headers.get("Content-Type", "") or target_url.endswith(
-            ".m3u8"
-        ):
-            return get_m3u8(target_url, headers)
-
-        # Stream binary segment
-        return Response(
-            stream_with_context(safe_iter_content(req)),
-            content_type=req.headers.get("Content-Type"),
-        )
-
-    except Exception as e:
-        return f"Proxy error: {str(e)}", 500
-
 
 def find_free_port():
     """Find a free port on localhost."""
-    import socket
-
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         return s.getsockname()[1]
 
 
-def start_proxy_server(port=0):
-    """Starts the Flask server in a background thread."""
-    global PROXY_URL
+def get_base_url(url):
+    """Extracts the base URL to resolve relative paths."""
+    return url.rsplit("/", 1)[0] + "/"
+
+
+def create_session(headers_dict=None):
+    """Creates a curl_cffi session optimized for anonymity."""
+    session = requests.Session(impersonate="chrome110")
+    # Apply specific DNS options
+    session.curl_options.update(DNS_OPTIONS)
+
+    if headers_dict:
+        session.headers.update(headers_dict)
+
+    return session
+
+
+def fetch_with_retry(url, headers, method="GET", stream=False, max_retries=3):
+    """
+    Performs a request with an automatic retry system.
+    Handles timeouts and network errors to avoid breaking the stream.
+    """
+    attempt = 0
+    session = create_session(headers)
+
+    while attempt < max_retries:
+        try:
+            # Forward the Range header if present (for MP4 seeking)
+            req_headers = headers.copy() if headers else {}
+
+            # Handle the Range header coming from the client (VLC)
+            if "Range" in request.headers:
+                req_headers["Range"] = request.headers["Range"]
+
+            response = session.request(
+                method=method,
+                url=url,
+                headers=req_headers,
+                stream=stream,
+                timeout=15,  # Reasonable timeout
+            )
+
+            # If 429 error (Rate Limit) or 5xx, retry
+            if response.status_code == 429 or response.status_code >= 500:
+                raise requests.RequestsError(f"Status {response.status_code}")
+
+            return response
+
+        except Exception as e:
+            attempt += 1
+            # Simple backoff: waits 0.5s, then 1s, etc.
+            time.sleep(0.5 * attempt)
+            if attempt >= max_retries:
+                print(
+                    f"[ERROR] Failed to fetch {url} after {max_retries} attempts: {e}"
+                )
+                return None
+
+
+# ---------------------------------------------------------------------------
+# Route: /stream (For .m3u8 files)
+# ---------------------------------------------------------------------------
+@app.route("/stream")
+def proxy_stream():
+    target_url = request.args.get("url")
+    headers_str = request.args.get("headers", "{}")
+
+    if not target_url:
+        return "Missing URL parameter", 400
+
+    try:
+        headers = json.loads(headers_str)
+    except:
+        headers = {}
+
+    # 1. Fetch original M3U8 content
+    resp = fetch_with_retry(target_url, headers)
+    if not resp or resp.status_code != 200:
+        return "Error fetching upstream m3u8", 502
+
+    content = resp.text
+    base_uri = get_base_url(target_url)
+
+    # 2. Parsing with m3u8 library
+    try:
+        m3u8_obj = m3u8.loads(content, uri=target_url)
+    except Exception as e:
+        # If parsing fails, return as is (fallback)
+        return Response(content, mimetype="application/vnd.apple.mpegurl")
+
+    # Helper function to build the proxy URL to our routes
+    def make_proxy_url(endpoint, original_uri):
+        # Absolute URL resolution if relative
+        absolute_url = urllib.parse.urljoin(base_uri, original_uri)
+        encoded_url = urllib.parse.quote(absolute_url)
+        encoded_headers = urllib.parse.quote(json.dumps(headers))
+        # Points to localhost:PORT
+        return f"http://{PROXY_HOST}:{PROXY_PORT}/{endpoint}?url={encoded_url}&headers={encoded_headers}"
+
+    # 3. Rewriting segments (.ts)
+    # We directly modify the m3u8 object or perform string replace if the object is too complex.
+    # The most reliable approach is often rewriting the text, but m3u8 obj allows managing keys.
+
+    # If it's a Master Playlist (contains other playlists)
+    if m3u8_obj.playlists:
+        for p in m3u8_obj.playlists:
+            p.uri = make_proxy_url("stream", p.uri)
+
+        # Handle Media (Alternative Audio/Subtitles)
+        for m in m3u8_obj.media:
+            if m.uri:
+                m.uri = make_proxy_url("stream", m.uri)
+
+    # If it's a Media Playlist (contains segments)
+    else:
+        # Rewrite encryption keys (AES-128 etc)
+        # CRUCIAL: keys must pass through the proxy otherwise 403/CORS
+        for key in m3u8_obj.keys:
+            if key and key.uri:
+                key.uri = make_proxy_url(
+                    "ts", key.uri
+                )  # Using /ts to fetch the key (it's just a binary)
+
+        # Rewrite segments
+        for segment in m3u8_obj.segments:
+            segment.uri = make_proxy_url("ts", segment.uri)
+
+    # 4. Rebuild M3U8
+    new_content = m3u8_obj.dumps()
+
+    return Response(
+        new_content,
+        mimetype="application/vnd.apple.mpegurl",
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Route: /ts (For video segments and keys)
+# ---------------------------------------------------------------------------
+@app.route("/ts")
+def proxy_ts():
+    target_url = request.args.get("url")
+    headers_str = request.args.get("headers", "{}")
+
+    if not target_url:
+        return "Missing URL", 400
+
+    try:
+        headers = json.loads(headers_str)
+    except:
+        headers = {}
+
+    # Fetch in stream mode
+    resp = fetch_with_retry(target_url, headers, stream=True)
+    if not resp:
+        return "Error fetching segment", 502
+
+    # Force Content-Type so VLC doesn't bug if the server sends .html
+    # video/mp2t is the standard for TS segments
+    response_headers = {
+        "Content-Type": "video/mp2t",
+        "Access-Control-Allow-Origin": "*",
+    }
+
+    # Use stream_with_context to return chunks as they come
+    # This is where memory efficiency happens
+    def generate():
+        for chunk in resp.iter_content(chunk_size=8192):
+            if chunk:
+                yield chunk
+
+    return Response(
+        stream_with_context(generate()),
+        status=resp.status_code,
+        headers=response_headers,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Route: /video (For single MP4 files with Seeking)
+# ---------------------------------------------------------------------------
+@app.route("/video")
+def proxy_video():
+    target_url = request.args.get("url")
+    headers_str = request.args.get("headers", "{}")
+
+    if not target_url:
+        return "Missing URL", 400
+
+    try:
+        headers = json.loads(headers_str)
+    except:
+        headers = {}
+
+    # Fetch stream
+    resp = fetch_with_retry(target_url, headers, stream=True)
+    if not resp:
+        return "Error fetching video", 502
+
+    # Handle response headers for seeking
+    excluded_headers = [
+        "content-encoding",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+    ]
+    response_headers = [
+        (k, v) for k, v in resp.headers.items() if k.lower() not in excluded_headers
+    ]
+
+    # Forward Content-Length if available so VLC knows duration/size
+    if "Content-Length" in resp.headers:
+        response_headers.append(("Content-Length", resp.headers["Content-Length"]))
+
+    # Support for Range Request (Partial Content 206)
+    status_code = resp.status_code
+
+    def generate():
+        for chunk in resp.iter_content(
+            chunk_size=16384
+        ):  # Slightly larger chunks for MP4
+            if chunk:
+                yield chunk
+
+    return Response(
+        stream_with_context(generate()), status=status_code, headers=response_headers
+    )
+
+
+# ---------------------------------------------------------------------------
+# Server Launch
+# ---------------------------------------------------------------------------
+def run_flask(port):
+    # Disable verbose flask/werkzeug logs for performance
+    import logging
+
     log = logging.getLogger("werkzeug")
     log.setLevel(logging.ERROR)
+
+    app.run(host=PROXY_HOST, port=port, threaded=True, debug=False, use_reloader=False)
+
+
+def start_proxy_server(port=0):
+    global PROXY_PORT, PROXY_URL
 
     if port == 0:
         port = find_free_port()
 
-    PROXY_URL = f"http://127.0.0.1:{port}"
+    PROXY_PORT = port
+    PROXY_URL = f"http://{PROXY_HOST}:{PROXY_PORT}"
 
-    def run():
-        app.run(
-            host="127.0.0.1", port=port, debug=False, use_reloader=False, threaded=True
-        )
+    # Launch in a Daemon thread (stops when the main program stops)
+    t = threading.Thread(target=run_flask, args=(port,))
+    t.daemon = True
+    t.start()
 
-    thread = threading.Thread(target=run, daemon=True)
-    thread.start()
-    return PROXY_URL
+    print(f"[*] M3U8 Proxy started on http://{PROXY_HOST}:{PROXY_PORT}")
+    return port
 
 
+# ---------------------------------------------------------------------------
+# Usage Example (if run directly)
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    print(f"Server started manually.")
+    # Start the proxy
+    my_port = start_proxy_server(0)
 
-    current_config = {
-        "url": "https://x1y90gywrmdo.tnmr.org/hls2/03/02373/,8fsszo8urxx1_h,lang/fre/8fsszo8urxx1_fre,lang/eng/8fsszo8urxx1_eng,.urlset/master.m3u8?t=7ODEdPpdnrkMx0ASotRfkG0xuZ2WI1YNmhNmxHX0Q_0&s=1764533924&e=28800&f=11868918&i=0.3&sp=0&fr=8fsszo8urxx1",
-        "headers": {
-            "Referer": "https://lulustream.com/",
-            "Origin": "https://lulustream.com",
-            "Host": "x1y90gywrmdo.tnmr.org",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:145.0) Gecko/20100101 Firefox/145.0",
-            "Accept": "*/*",
-            "Accept-Language": "fr-FR,en-US;q=0.7,en;q=0.3",
-            "Accept-Encoding": "gzip, deflate, br, zstd",
-            "Sec-GPC": "1",
-            "Connection": "keep-alive",
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "cross-site",
-        },
-    }
+    # This simulates your main application
+    print("Main application running... Press Ctrl+C to quit.")
 
-    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)
+    # Example URL for VLC (only works with a real source URL)
+    # url_source = "https://example.com/master.m3u8"
+    # headers_source = {"User-Agent": "Mozilla/5.0 ...", "Referer": "https://example.com"}
+    # encoded_url = urllib.parse.quote(url_source)
+    # encoded_headers = urllib.parse.quote(json.dumps(headers_source))
+    # print(f"Link for VLC: http://127.0.0.1:{my_port}/stream?url={encoded_url}&headers={encoded_headers}")
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Stopping.")

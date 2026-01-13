@@ -8,11 +8,11 @@ from .objects import (
 )
 
 from curl_cffi import requests as cffi_requests
-from ..proxy import curl_options
+from ..proxy import DNS_OPTIONS
 
 website_origin = "https://french-stream.one"
 
-scraper = cffi_requests.Session(impersonate="chrome", curl_options=curl_options)
+scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS)
 
 
 def search(query: str) -> list[SearchResult]:

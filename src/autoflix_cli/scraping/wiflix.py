@@ -2,13 +2,13 @@ import re
 from bs4 import BeautifulSoup
 from .objects import SearchResult, WiflixMovie, Player, WiflixSeriesSeason, Episode
 from .utils import get_value_by_key, parse_episode
-from ..proxy import curl_options
+from ..proxy import DNS_OPTIONS
 
 from curl_cffi import requests as cffi_requests
 
 website_origin = "https://flemmix.one"
 
-scraper = cffi_requests.Session(impersonate="chrome", curl_options=curl_options)
+scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS)
 
 
 def search(query: str) -> list[SearchResult]:

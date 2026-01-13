@@ -212,12 +212,11 @@ def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
                 print_error("Proxy server not initialized.")
                 return False
 
-            local_stream_url = (
-                f"{proxy.PROXY_URL}/stream?url={encoded_url}&headers={encoded_headers}"
-            )
+            endpoint = "stream"
+            if "ext" in player_config and player_config["ext"] == "mp4":
+                endpoint = "video"
 
-            if "ext" in player_config:
-                local_stream_url += f"&ext={player_config['ext']}"
+            local_stream_url = f"{proxy.PROXY_URL}/{endpoint}?url={encoded_url}&headers={encoded_headers}"
 
             try:
                 cmd = [player_executable, local_stream_url]

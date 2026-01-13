@@ -1,7 +1,7 @@
 from curl_cffi import requests
 from .deobfuscate import deobfuscate
 from bs4 import BeautifulSoup
-from ..proxy import curl_options
+from ..proxy import DNS_OPTIONS
 from ..config_loader import load_remote_jsonc
 from ..defaults import DEFAULT_PLAYERS, DEFAULT_NEW_URL, DEFAULT_KAKAFLIX_PLAYERS
 import re
@@ -11,7 +11,7 @@ import binascii
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
-scraper = requests.Session(curl_options=curl_options)
+scraper = requests.Session(curl_options=DNS_OPTIONS)
 
 # Player mapping: domain name -> parser type
 # Player mapping and configuration
