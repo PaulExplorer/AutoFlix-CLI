@@ -90,7 +90,7 @@ DEFAULT_PLAYERS = {
     # "myvidplay": {"type": "myvidplay", "referrer": "https://myvidplay.com/"},
     "embed4me": {"type": "embed4me"},
     "coflix.upn": {"type": "embed4me"},
-    # "veev": {"type": "veev"}, # don't work
+    "veev": {"type": "veev", "ext": "mp4"},
     "xtremestream": {"type": "xtremestream"},
 }
 
