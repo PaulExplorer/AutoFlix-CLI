@@ -58,7 +58,7 @@ This project uses logic adapted from the following open-source projects:
 
 ## 📜 License
 
-This project is licensed under the MIT License.
+This project is licensed under the GPL-3 License.
 
 ## ⚠️ Disclaimer
 
