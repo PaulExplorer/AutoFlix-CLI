@@ -242,7 +242,7 @@ def resume_coflix(data):
     saved_ep_title = data["episode_title"]
 
     for i, ep in enumerate(season.episodes):
-        if ep.title == saved_ep_title:
+        if ep.title.split(" ")[-1] == saved_ep_title.split(" ")[-1]:
             start_ep_idx = i
             break
 
