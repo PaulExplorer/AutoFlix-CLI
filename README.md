@@ -49,6 +49,13 @@ cd autoflix-cli
 pip install -e .
 ```
 
+## 📚 Credits
+
+This project uses logic adapted from the following open-source projects:
+
+- [Anime-Sama-Downloader](https://github.com/SertraFurr/Anime-Sama-Downloader) by [SertraFurr](https://github.com/SertraFurr) - Implementation of the `embed4me` stream extraction.
+- [cloudstream-extensions-phisher](https://github.com/phisher98/cloudstream-extensions-phisher) by [phisher98](https://github.com/phisher98) - Implementation of the `Veev` stream extraction.
+
 ## 📜 License
 
 This project is licensed under the MIT License.
