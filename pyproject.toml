@@ -1,6 +1,6 @@
 [project]
 name = "autoflix-cli"
-version = "0.4.6"
+version = "0.4.7"
 description = "Stream movies, series, and anime in French (VF & VOSTFR) directly from your terminal. Inspired by ani-cli."
 readme = "README.md"
 requires-python = ">=3.9.2"
@@ -20,6 +20,7 @@ dependencies = [
     "rich>=14.2.0",
     "platformdirs>=4.0.0",
     "pycryptodome>=3.23.0",
+    "m3u8>=6.0.0",
 ]
 
 # Project URLs
