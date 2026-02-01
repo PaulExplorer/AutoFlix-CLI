@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup
 from ..proxy import DNS_OPTIONS
 from ..config_loader import load_remote_jsonc
 from ..defaults import DEFAULT_PLAYERS, DEFAULT_NEW_URL, DEFAULT_KAKAFLIX_PLAYERS
-import re
+import re, base64
 
 import json
 import binascii
@@ -179,34 +179,96 @@ def get_hls_link_filemoon(url: str, headers: dict) -> str:
     Returns:
         HLS stream URL
     """
+
+    def decode_base64(text):
+        """Decodes URL-safe Base64 with proper padding."""
+        if not text:
+            return b""
+        # Add padding if necessary and decode
+        return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+    def try_decrypt(key, iv, full_payload):
+        """Tries to decrypt the payload using two common GCM tag positions."""
+
+        # Combination 1: Authentication Tag at the end (Standard AES-GCM)
+        try:
+            ciphertext = full_payload[:-16]
+            tag = full_payload[-16:]
+            cipher = AES.new(key, AES.MODE_GCM, nonce=iv)
+            return cipher.decrypt_and_verify(ciphertext, tag).decode("utf-8")
+        except Exception:
+            pass
+
+        # Combination 2: Authentication Tag at the beginning
+        try:
+            tag = full_payload[:16]
+            ciphertext = full_payload[16:]
+            cipher = AES.new(key, AES.MODE_GCM, nonce=iv)
+            return cipher.decrypt_and_verify(ciphertext, tag).decode("utf-8")
+        except Exception:
+            pass
+
+        return None
+
+    def solve_decryption(json_str):
+        """Parses the JSON and attempts multiple key combinations for decryption."""
+        data = json.loads(json_str)
+        playback = data.get("playback", {})
+
+        # 1. Prepare potential keys
+        key_parts = playback.get("key_parts", [])
+        decrypt_keys = playback.get("decrypt_keys", {})
+
+        potential_keys = []
+
+        # Hypothesis A: Concatenate key_parts[0] + key_parts[1]
+        if len(key_parts) >= 2:
+            part0 = decode_base64(key_parts[0])
+            part1 = decode_base64(key_parts[1])
+            potential_keys.append(part0 + part1)
+            potential_keys.append(part1 + part0)
+
+        # Hypothesis B: Concatenate edge_1 + edge_2 (16 + 16 = 32 bytes for AES-256)
+        if "edge_1" in decrypt_keys and "edge_2" in decrypt_keys:
+            edge1 = decode_base64(decrypt_keys["edge_1"])
+            edge2 = decode_base64(decrypt_keys["edge_2"])
+            potential_keys.append(edge1 + edge2)
+
+        # 2. Prepare data
+        iv = decode_base64(playback.get("iv"))
+        payload = decode_base64(playback.get("payload"))
+
+        # 3. Test all key combinations
+        for i, key in enumerate(potential_keys):
+            result = try_decrypt(key, iv, payload)
+            if result:
+                return result
+
+        print("Error: No valid decryption found.")
+        return None
+
+    code = url.split("/")[-1]
     response = scraper.get(
-        url,
-        headers={
-            **headers,
-            "Sec-Fetch-Dest": "iframe",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "cross-site",
-        },
+        "https://9n8o.com/api/videos/" + code + "/embed/playback",
         impersonate="chrome110",
+        headers={
+            "Referer": "https://9n8o.com/g1x/" + code + "/",
+            "X-Embed-Origin": headers["Referer"]
+            .removeprefix("https://")
+            .removesuffix("/"),
+            "X-Embed-Parent": "https://filemoon.sx/e/" + code,
+            "X-Embed-Referer": headers["Referer"],
+        },
     )
     response.raise_for_status()
 
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    link: str = soup.find("iframe").attrs["src"]
-
-    response = scraper.get(link, impersonate="chrome110")
-    response.raise_for_status()
-
-    code = response.text.split("<script data-cfasync='false' type='text/javascript'>")[
-        1
-    ].split("\n")[0]
-    code = code.removesuffix("</script>")
-    code = deobfuscate(code)
-
-    link = code.split('file: "')[1].split('"')[0]
-
-    return link
+    decrypted_json_str = solve_decryption(response.text)
+    if decrypted_json_str:
+        video_data = json.loads(decrypted_json_str)
+        video_url = video_data["sources"][0]["url"]
+        return video_url
+    else:
+        return get_hls_link(url, headers)
 
 
 def get_hls_link_vidoza(url: str, headers: dict) -> str:
