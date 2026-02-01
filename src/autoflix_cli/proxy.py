@@ -3,6 +3,7 @@ import socket
 import json
 import time
 import urllib.parse
+import re
 from flask import Flask, request, Response, stream_with_context
 from curl_cffi import requests, CurlOpt
 import m3u8
@@ -108,7 +109,7 @@ def proxy_stream():
 
     # 1. Fetch original M3U8 content
     resp = fetch_with_retry(target_url, headers)
-    if not resp or resp.status_code != 200:
+    if not resp or resp.status_code not in [200, 206]:
         return "Error fetching upstream m3u8", 502
 
     content = resp.text
@@ -154,6 +155,13 @@ def proxy_stream():
                     "ts", key.uri
                 )  # Using /ts to fetch the key (it's just a binary)
 
+        # Rewrite initialization segment (for fMP4 HLS)
+        # We also use a regex fallback at the end because m3u8 library sometimes fails to dump the changes to segment_map
+        if hasattr(m3u8_obj, "segment_map"):
+            for seg_map in m3u8_obj.segment_map:
+                if seg_map and seg_map.uri:
+                    seg_map.uri = make_proxy_url("ts", seg_map.uri)
+
         # Rewrite segments
         for segment in m3u8_obj.segments:
             segment.uri = make_proxy_url("ts", segment.uri)
@@ -161,11 +169,34 @@ def proxy_stream():
     # 4. Rebuild M3U8
     new_content = m3u8_obj.dumps()
 
+    # Regex Fallback for EXT-X-MAP if m3u8 library didn't update the text
+    def replace_map_uri(match):
+        original_uri = match.group(1)
+        # If already proxied (by the object manipulation), skip
+        if str(PROXY_PORT) in original_uri and "/ts?url=" in original_uri:
+            return match.group(0)
+
+        # It's an un-proxied URI provided by dumps()
+        new_uri = make_proxy_url("ts", original_uri)
+        return f'#EXT-X-MAP:URI="{new_uri}"'
+
+    new_content = re.sub(r'#EXT-X-MAP:URI="([^"]+)"', replace_map_uri, new_content)
+
     return Response(
         new_content,
         mimetype="application/vnd.apple.mpegurl",
         headers={"Access-Control-Allow-Origin": "*"},
     )
+
+
+# ---------------------------------------------------------------------------
+# Catch-all for debugging 404s
+# ---------------------------------------------------------------------------
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def catch_all(path):
+    print(f"[PROXY 404 HIT] Invalid path requested: {path}")
+    return f"Not Found: {path}", 404
 
 
 # ---------------------------------------------------------------------------
