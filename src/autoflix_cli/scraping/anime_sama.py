@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from .objects import SearchResult, SamaSeason, SamaSeries, SeasonAccess, Episode
 from .utils import parse_episodes_from_js
 from ..proxy import DNS_OPTIONS
+from random import randint
 
 website_origin = ""
 
@@ -70,7 +71,7 @@ def get_season(url: str) -> SamaSeason:
     for lang_code in lang_codes:
         nurl = (
             url.replace("vostfr", lang_code).removesuffix("/")
-            + "/episodes.js?filever=1"
+            + f"/episodes.js?filever={randint(1, 100000)}"
         )
         response = scraper.get(nurl)
 
