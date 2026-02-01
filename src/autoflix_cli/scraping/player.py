@@ -314,7 +314,7 @@ def get_hls_link_vidmoly(url: str, headers: dict) -> str:
     )
     response.raise_for_status()
 
-    return response.text.split('sources: [{file:"')[1].split('"')[0]
+    return extract_hls_url(response.text)
 
 
 def get_hls_link_veev(url):
