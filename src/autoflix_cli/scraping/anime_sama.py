@@ -68,7 +68,10 @@ def get_season(url: str) -> SamaSeason:
     episodes: dict[str, list[Episode]] = {}
     valid_lang = []
     for lang_code in lang_codes:
-        nurl = url.replace("vostfr", lang_code).removesuffix("/") + "/episodes.js"
+        nurl = (
+            url.replace("vostfr", lang_code).removesuffix("/")
+            + "/episodes.js?filever=1"
+        )
         response = scraper.get(nurl)
 
         if response.status_code == 404:
