@@ -39,7 +39,7 @@ def get_base_url(url):
 
 def create_session(headers_dict=None):
     """Creates a curl_cffi session optimized for anonymity."""
-    session = requests.Session(impersonate="chrome110")
+    session = requests.Session(impersonate="chrome")
     # Apply specific DNS options
     session.curl_options.update(DNS_OPTIONS)
 

@@ -19,7 +19,7 @@ def load_remote_jsonc(url: str, default: dict) -> dict:
     Returns the default dictionary if fetching or parsing fails.
     """
     try:
-        response = requests.get(url, impersonate="chrome110", timeout=5)
+        response = requests.get(url, impersonate="chrome", timeout=5)
         response.raise_for_status()
 
         # Simple comment stripping

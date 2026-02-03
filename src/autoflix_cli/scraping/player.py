@@ -48,7 +48,7 @@ def extract_hls_url(unpacked_code):
 
 
 def get_hls_link_default(url: str, headers: dict) -> str:
-    response = scraper.get(url, headers=headers, impersonate="chrome110")
+    response = scraper.get(url, headers=headers, impersonate="chrome")
     response.raise_for_status()
 
     code = deobfuscate(response.text)
@@ -92,7 +92,7 @@ def get_hls_link_embed4me(embed_url: str) -> str:
 
     headers = {"Referer": url_root}
 
-    r = scraper.get(api_url, headers=headers, impersonate="chrome110", timeout=10)
+    r = scraper.get(api_url, headers=headers, impersonate="chrome", timeout=10)
     r.raise_for_status()
 
     hex_data = r.text.strip()
@@ -120,7 +120,7 @@ def get_hls_link_uqload(url: str, headers: dict) -> str:
     response = scraper.get(
         url.replace("embed-", ""),
         headers={**headers, "Referer": "https://uqload.cx/"},
-        impersonate="chrome110",
+        impersonate="chrome",
     )
     response.raise_for_status()
 
@@ -139,7 +139,7 @@ def get_hls_link_sendvid(url: str) -> str:
     Returns:
         Video URL
     """
-    response = scraper.get(url, impersonate="chrome110")
+    response = scraper.get(url, impersonate="chrome")
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
@@ -159,7 +159,7 @@ def get_hls_link_sibnet(url: str) -> str:
     Returns:
         Video URL
     """
-    response = scraper.get(url, impersonate="chrome110")
+    response = scraper.get(url, impersonate="chrome")
     response.raise_for_status()
 
     relative_path = response.text.split('player.src([{src: "')[1].split('"')[0]
@@ -250,7 +250,7 @@ def get_hls_link_filemoon(url: str, headers: dict) -> str:
     code = url.split("/")[-1]
     response = scraper.get(
         "https://9n8o.com/api/videos/" + code + "/embed/playback",
-        impersonate="chrome110",
+        impersonate="chrome",
         headers={
             "Referer": "https://9n8o.com/g1x/" + code + "/",
             "X-Embed-Origin": headers["Referer"]
@@ -286,7 +286,7 @@ def get_hls_link_vidoza(url: str, headers: dict) -> str:
     response = scraper.get(
         url,
         headers=headers,
-        impersonate="chrome110",
+        impersonate="chrome",
     )
     response.raise_for_status()
 
@@ -311,7 +311,7 @@ def get_hls_link_kakaflix(url: str, headers: dict) -> str:
     response = scraper.get(
         url,
         headers=headers,
-        impersonate="chrome110",
+        impersonate="chrome",
     )
     response.raise_for_status()
 
@@ -339,7 +339,7 @@ def get_hls_link_myvidplay(url: str, headers: dict) -> str:
     response = scraper.get(
         url,
         headers=headers,
-        impersonate="chrome110",
+        impersonate="chrome",
     )
     response.raise_for_status()
 
@@ -372,7 +372,7 @@ def get_hls_link_vidmoly(url: str, headers: dict) -> str:
     response = scraper.get(
         url,
         headers=final_headers,
-        impersonate="chrome110",
+        impersonate="chrome",
     )
     response.raise_for_status()
 
@@ -402,9 +402,7 @@ def get_hls_link_veev(url):
 
     # 2. Fetch HTML
     try:
-        html = scraper.get(
-            f"https://veev.to/e/{media_id}", impersonate="chrome110"
-        ).text
+        html = scraper.get(f"https://veev.to/e/{media_id}", impersonate="chrome").text
     except Exception as e:
         print(f"Connection error: {e}")
         return None
@@ -470,7 +468,7 @@ def get_hls_link_veev(url):
         # API call to get JSON
         dl_url = f"https://veev.to/dl?op=player_api&cmd=gi&file_code={media_id}&r=https://veev.to&ch={ch}&ie=1"
         try:
-            resp = scraper.get(dl_url, impersonate="chrome110").json()
+            resp = scraper.get(dl_url, impersonate="chrome").json()
         except:
             continue
 
