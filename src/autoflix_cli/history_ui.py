@@ -75,5 +75,7 @@ def handle_history():
         if action == 0:  # Resume
             handle_resume(selected_entry)
         elif action == 1:  # Delete
-            tracker.remove_history_entry(choice_idx)
+            tracker.delete_history_item(
+                selected_entry["provider"], selected_entry["series_title"]
+            )
             print_success("Entry deleted.")
