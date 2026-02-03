@@ -103,7 +103,7 @@ def main():
                     "🇫🇷 French-Stream (Series and movies - Often lower quality)",
                     french_stream.handle_french_stream,
                 ),
-                # ("🎬 Wiflix", wiflix.handle_wiflix),
+                # ("🎬 Wiflix", wiflix.handle_wiflix), don't work anymore
                 ("← Back", None),
             ]
             p_idx = select_from_list([p[0] for p in providers], "Select a Provider:")

@@ -10,7 +10,7 @@ from .objects import (
 from curl_cffi import requests as cffi_requests
 from ..proxy import DNS_OPTIONS
 
-website_origin = "https://french-stream.one"
+website_origin = "https://french-stream.bio"
 
 scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS)
 
