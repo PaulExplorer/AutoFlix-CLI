@@ -103,8 +103,9 @@ DEFAULT_NEW_URL = {
     "vidhideplus": "dinisglows",
     "dingtezuni": "dinisglows",
     # Vidmoly Player
-    "vidmoly.to": "vidmoly.net",
-    "vidmoly.me": "vidmoly.net",
+    "vidmoly.to": "vidmoly.biz",
+    "vidmoly.me": "vidmoly.biz",
+    "vidmoly.net": "vidmoly.biz",
 }
 
 DEFAULT_KAKAFLIX_PLAYERS = {
