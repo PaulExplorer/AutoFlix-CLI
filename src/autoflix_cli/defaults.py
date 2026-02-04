@@ -86,6 +86,11 @@ DEFAULT_PLAYERS = {
         "referrer": "https://ico3c.com/",
         "no-header": True,
     },
+    "bysebuho": {
+        "type": "filemoon",
+        "referrer": "https://ico3c.com/",
+        "no-header": True,
+    },
     "kakaflix": {"type": "kakaflix"},
     # "myvidplay": {"type": "myvidplay", "referrer": "https://myvidplay.com/"},
     "embed4me": {"type": "embed4me"},
