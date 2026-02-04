@@ -30,7 +30,7 @@ DEFAULT_PLAYERS = {
     # },
     "ups2up": {"type": "default"},
     "ico3c": {"type": "default"},
-    "fsvid": {"type": "default"},
+    "fsvid": {"type": "default", "m3u8-extractor": {"no-header": True}},
     "darkibox": {"type": "default"},
     "minochinos": {"type": "default"},
     "movearnpre": {

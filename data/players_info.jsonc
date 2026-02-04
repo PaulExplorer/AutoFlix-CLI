@@ -4,7 +4,7 @@
     "referrer": "full",
     "alt-used": true,
     "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:cross-site;Content-Cache: no-cache",
-    "mode": "proxy"
+    "mode": "proxy",
   },
   "hgbazooka": { "type": "default" },
   "hailindihg": { "type": "default" },
@@ -27,27 +27,32 @@
   // },
   "ups2up": { "type": "default" },
   "ico3c": { "type": "default" },
-  "fsvid": { "type": "default" },
+  "fsvid": {
+    "type": "default",
+    "m3u8-extractor": {
+      "no-header": true,
+    },
+  },
   "darkibox": { "type": "default" },
   "minochinos": { "type": "default" },
   "movearnpre": {
     "type": "default",
     "referrer": "full",
     "alt-used": false,
-    "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:same-origin"
+    "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:same-origin",
   },
   "smoothpre": {
     "type": "default",
     "referrer": "full",
     "alt-used": true,
-    "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:cross-site;Content-Cache: no-cache"
+    "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:cross-site;Content-Cache: no-cache",
   },
   "vidhideplus": { "type": "default" },
   "dinisglows": {
     "type": "default",
     "referrer": "full",
     "alt-used": true,
-    "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:same-origin"
+    "sec_headers": "Sec-Fetch-Dest:empty;Sec-Fetch-Mode:cors;Sec-Fetch-Site:same-origin",
   },
   "mivalyo": { "type": "default" },
   "dingtezuni": { "type": "default" },
@@ -56,13 +61,13 @@
     "type": "vidoza",
     "mode": "proxy",
     "no-header": true,
-    "ext": "mp4"
+    "ext": "mp4",
   },
   "vidoza": {
     "type": "vidoza",
     "mode": "proxy",
     "no-header": true,
-    "ext": "mp4"
+    "ext": "mp4",
   },
   "sendvid": { "type": "sendvid", "mode": "proxy", "ext": "mp4" },
   "sibnet": {
@@ -70,17 +75,17 @@
     "mode": "proxy",
     "ext": "mp4",
     "referrer": "full",
-    "no-header": true
+    "no-header": true,
   },
   "uqload": {
     "type": "uqload",
     "sec_headers": "Sec-Fetch-Dest:video;Sec-Fetch-Mode:no-cors;Sec-Fetch-Site:same-site",
-    "ext": "mp4"
+    "ext": "mp4",
   },
   "filemoon": {
     "type": "filemoon",
     "referrer": "https://ico3c.com/",
-    "no-header": true
+    "no-header": true,
   },
   "kakaflix": { "type": "kakaflix" },
   // "myvidplay": {"type": "myvidplay", "referrer": "https://myvidplay.com/"},
@@ -88,7 +93,7 @@
   "coflix.upn": { "type": "embed4me" },
   "veev": {
     "type": "veev",
-    "ext": "mp4"
+    "ext": "mp4",
   },
-  "xtremestream": { "type": "xtremestream" }
+  "xtremestream": { "type": "xtremestream" },
 }

@@ -13,6 +13,7 @@ from Crypto.Util.Padding import unpad
 
 scraper = requests.Session(curl_options=DNS_OPTIONS)
 
+
 # Player mapping: domain name -> parser type
 # Player mapping and configuration
 players = load_remote_jsonc(
@@ -32,6 +33,8 @@ kakaflix_players = load_remote_jsonc(
     DEFAULT_KAKAFLIX_PLAYERS,
 )
 
+actual_player_config = None
+
 
 def extract_hls_url(unpacked_code):
     pattern = r'["\'](https?://[^"\']*master\.txt[^"\']*)["\']'
@@ -48,6 +51,15 @@ def extract_hls_url(unpacked_code):
 
 
 def get_hls_link_default(url: str, headers: dict) -> str:
+    """
+    Extract HLS link from default player.
+    """
+    global actual_player_config
+
+    if actual_player_config.get("m3u8-extractor"):
+        if actual_player_config.get("m3u8-extractor").get("no-header"):
+            headers = {}
+
     response = scraper.get(url, headers=headers, impersonate="chrome")
     response.raise_for_status()
 
@@ -518,11 +530,14 @@ def get_hls_link(url: str, headers: dict = {}) -> str | None:
     Returns:
         HLS/video stream URL if successful, None otherwise
     """
+    global actual_player_config
 
     # Find matching player and parse accordingly
     for player_name, config in players.items():
         if player_name in url.lower():
+            actual_player_config = config
             parse_type = config["type"]
+
             if parse_type == "default":
                 return get_hls_link_default(url, headers)
             elif parse_type == "sendvid":
@@ -548,6 +563,7 @@ def get_hls_link(url: str, headers: dict = {}) -> str | None:
             elif parse_type == "xtremestream":
                 return get_hls_link_xtremestream(url, headers)
 
+    actual_player_config = None
     return None
 
 
