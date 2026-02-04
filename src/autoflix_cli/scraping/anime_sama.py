@@ -24,7 +24,12 @@ def get_website_url(portal="anime-sama.pw"):
 
     soup = BeautifulSoup(response.text, "html5lib")
 
-    website_origin = soup.find("a", {"class": "btn-primary"}).attrs["href"]
+    recommanded_url = soup.find("a", {"class": "btn-primary"}).attrs["href"]
+
+    response = scraper.head(recommanded_url)
+    response.raise_for_status()
+
+    website_origin = response.url
 
 
 def search(query: str) -> list[SearchResult]:
