@@ -118,3 +118,9 @@ DEFAULT_KAKAFLIX_PLAYERS = {
     "viper": "ico3c",
     # "tokyo": "myvidplay"
 }
+
+DEFAULT_SOURCE_PORTAL = {
+    "french-stream": "french-stream.one",
+    "anime-sama": "anime-sama.pw",
+    "coflix": "coflix.fans",
+}

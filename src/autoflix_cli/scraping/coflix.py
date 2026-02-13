@@ -18,7 +18,10 @@ website_origin = ""
 scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS)
 
 
-def get_website_url(portal="coflix.fans"):
+from .config import portals
+
+
+def get_website_url(portal=portals["coflix"]):
     global website_origin
 
     if website_origin:

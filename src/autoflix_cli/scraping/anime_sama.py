@@ -13,13 +13,16 @@ scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS)
 info_class = "info-value"
 
 
-def get_website_url(portal="anime-sama.pw"):
+from .config import portals
+
+
+def get_website_url(portal=portals["anime-sama"]):
     global website_origin
 
     if website_origin:
         return
 
-    response = scraper.get(portal)
+    response = scraper.get("https://" + portal)
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html5lib")
