@@ -7,8 +7,10 @@ from .cli_utils import (
     print_info,
     print_warning,
     get_user_input,
+    pause,
     console,
 )
+from .update_checker import check_update
 from .tracker import tracker
 from .handlers import anime_sama, coflix, french_stream, wiflix, anilist
 from . import history_ui
@@ -19,6 +21,10 @@ import signal
 
 
 def main():
+    # Check for updates
+    if check_update():
+        pause()
+
     # Start Proxy Server
     proxy.start_proxy_server()
 
