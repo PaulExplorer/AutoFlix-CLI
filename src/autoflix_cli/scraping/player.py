@@ -131,7 +131,7 @@ def get_hls_link_uqload(url: str, headers: dict) -> str:
     """
     response = scraper.get(
         url.replace("embed-", ""),
-        headers={**headers, "Referer": "https://uqload.cx/"},
+        headers={**headers, "Referer": "https://uqload.is/"},
         impersonate="chrome",
     )
     response.raise_for_status()
