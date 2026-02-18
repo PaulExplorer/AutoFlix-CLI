@@ -104,38 +104,43 @@ def get_series_season(url: str, content: str) -> FrenchStreamSeason:
     soup = BeautifulSoup(content, "html5lib")
 
     title: str = soup.find("meta", {"property": "og:title"}).attrs["content"]
+    serie_id = url.split("/")[-1].split("-")[0]
+
+    serie_info_response = scraper.get(
+        f"https://french-stream.one/ep-data.php?id={serie_id}"
+    )
+    serie_info_response.raise_for_status()
+
+    serie_info = serie_info_response.json()
 
     episodes: dict[str, list[Episode]] = {}
 
-    voEpisodesDiv = soup.find("div", {"id": "episodes-vo-data"})
-    vostfrEpisodesDiv = soup.find("div", {"id": "episodes-vostfr-data"})
-    vfEpisodesDiv = soup.find("div", {"id": "episodes-vf-data"})
+    voEpisodes = get_episodes_from_lang("vo", serie_info)
+    if voEpisodes:
+        episodes["vo"] = voEpisodes
 
-    if voEpisodesDiv:
-        voEpisodes = get_episodes_from_div(voEpisodesDiv)
-        if voEpisodes:
-            episodes["vo"] = voEpisodes
-    if vostfrEpisodesDiv:
-        vostfrEpisodes = get_episodes_from_div(vostfrEpisodesDiv)
-        if vostfrEpisodes:
-            episodes["vostfr"] = vostfrEpisodes
-    if vfEpisodesDiv:
-        vfEpisodes = get_episodes_from_div(vfEpisodesDiv)
-        if vfEpisodes:
-            episodes["vf"] = vfEpisodes
+    vostfrEpisodes = get_episodes_from_lang("vostfr", serie_info)
+    if vostfrEpisodes:
+        episodes["vostfr"] = vostfrEpisodes
+
+    vfEpisodes = get_episodes_from_lang("vf", serie_info)
+    if vfEpisodes:
+        episodes["vf"] = vfEpisodes
 
     return FrenchStreamSeason(title, url, episodes)
 
 
-def get_episodes_from_div(div):
+def get_episodes_from_lang(lang: str, serie_info: dict):
+    episodes_raw = serie_info[lang]
     episodes: list[Episode] = []
-    for episode in div.find_all("div"):
-        players = []
-        for key, value in episode.attrs.items():
-            if "https" in value:
-                players.append(Player(key.replace("data-", ""), value))
-        if players:
-            episodes.append(Episode(f"Episode {episode.attrs["data-ep"]}", players))
+
+    for number, players_raw in episodes_raw.items():
+        players: list[Player] = []
+        for player_name, link in players_raw.items():
+            players.append(Player(player_name, link))
+
+        episode = Episode(f"Episode {number}", players)
+        episodes.append(episode)
 
     return episodes
 
