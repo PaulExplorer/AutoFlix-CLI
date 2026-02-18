@@ -31,6 +31,9 @@ def check_update(package_name: str = "autoflix-cli"):
         # Package not installed (e.g., dev mode), skip check
         return
 
+    if not current_version:
+        return
+
     latest_version = get_latest_version(package_name)
 
     if latest_version and latest_version > current_version:
