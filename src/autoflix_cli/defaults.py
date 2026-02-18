@@ -103,6 +103,7 @@ DEFAULT_NEW_URL = {
     "lulustream": "luluvdo",
     "vidoza.net": "videzz.net",
     "oneupload.to": "oneupload.net",
+    "uqload.cx": "uqload.is",
     # Dinisglows Player
     "mivalyo": "dinisglows",
     "vidhideplus": "dinisglows",
