@@ -55,6 +55,7 @@ DEFAULT_PLAYERS = {
     },
     "mivalyo": {"type": "default"},
     "dingtezuni": {"type": "default"},
+    "bingezove": {"type": "default"},
     "vidzy": {"type": "default"},
     "videzz": {
         "type": "vidoza",
