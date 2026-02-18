@@ -84,12 +84,18 @@ def get_movie(url: str, content: str) -> FrenchStreamMovie:
                 genres.append(genre.text)
 
     players: list[Player] = []
+    movie_id = url.split("/")[-1].split("-")[0]
 
-    # Handle nested divs for player selection
-    filmDataDiv = soup.find("div", {"id": "film-data"})
-    for key, value in filmDataDiv.attrs.items():
-        if "https" in value and "affiche" not in key:
-            players.append(Player(key.replace("data-", ""), value))
+    movie_info_response = scraper.get(
+        f"https://french-stream.one/engine/ajax/film_api.php?id={movie_id}"
+    )
+    movie_info_response.raise_for_status()
+
+    movie_info = movie_info_response.json()
+
+    for player_name, player_links in movie_info["players"].items():
+        for lang, link in player_links.items():
+            players.append(Player(player_name + " " + lang, link))
 
     return FrenchStreamMovie(title, url, img, genres, players)
 
