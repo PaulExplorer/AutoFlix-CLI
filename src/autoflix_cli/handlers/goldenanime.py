@@ -5,11 +5,13 @@ from ..cli_utils import (
     print_header,
     print_info,
     print_warning,
+    print_success,
     get_user_input,
     console,
 )
 from ..player_manager import play_video
-
+from ..tracker import tracker
+from ..anilist import anilist_client
 
 import requests
 
@@ -75,8 +77,6 @@ def handle_goldenanime():
     if query.isdigit():
         anilist_id = int(query)
         print_info(f"Fetching AniList data for ID: [cyan]{anilist_id}[/cyan]")
-        from ..anilist import anilist_client
-
         media = anilist_client.get_media_with_relations(anilist_id)
         if media:
             title = media.get("title", {}).get("english") or media.get("title", {}).get(
@@ -86,8 +86,6 @@ def handle_goldenanime():
     else:
         title = query
         print_info(f"Searching AniList by Title: [cyan]{title}[/cyan]")
-        from ..anilist import anilist_client
-
         results = anilist_client.search_media(title)
         if results:
             media_options = [
@@ -143,8 +141,6 @@ def handle_goldenanime():
         # Try to resolve title if missing
         search_title = title
         if not search_title and anilist_id:
-            from ..anilist import anilist_client
-
             media = anilist_client.get_media_with_relations(anilist_id)
             if media:
                 search_title = media.get("title", {}).get("english") or media.get(
@@ -216,10 +212,34 @@ def handle_goldenanime():
 
     is_direct = True  # Assume extract_vo returns direct URLs or handled APIs
 
-    play_video(
+    success = play_video(
         final_url,
         headers=headers,
         title=f"{display_title} - Episode {episode}",
         subtitle_url=subtitle_url,
         is_direct=is_direct,
     )
+
+    if success:
+        # Save local progress
+        tracker.save_progress(
+            provider="GoldenAnime",
+            series_title=display_title,
+            season_title="Anime",
+            episode_title=f"Episode {episode}",
+            series_url="",
+            season_url="",
+            episode_url=final_url,
+            logo_url=None,
+        )
+        print_success("Local progress saved.")
+
+        # Sync AniList if authenticated
+        if anilist_id:
+            token = tracker.get_anilist_token()
+            if token:
+                anilist_client.set_token(token)
+                if anilist_client.update_progress(anilist_id, episode):
+                    print_success(f"AniList updated to episode {episode}!")
+                else:
+                    print_warning("Could not update AniList.")
