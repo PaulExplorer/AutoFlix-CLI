@@ -7,6 +7,7 @@ from ..cli_utils import (
     print_warning,
     print_success,
     get_user_input,
+    pause,
     console,
 )
 from ..player_manager import play_video
@@ -115,10 +116,12 @@ def handle_goldenanime():
         ep_input = get_user_input("Episode number (default 1)")
         episode = int(ep_input) if ep_input and ep_input.isdigit() else 1
 
-    # To save time, if we want subs we can auto-search now, but let's do it after we get stream results
-    # so we don't block the stream search. Wait, doing it now parallelizes the thought, but it's fine
-    # doing it sequentially.
+    # Proceed to stream flow
+    _flow_goldenanime_stream(title, anilist_id, episode)
 
+
+def _flow_goldenanime_stream(title: str, anilist_id: int, episode: int):
+    """Common logic for searching streams, subtitles, and playing."""
     print_info("Searching for streams...")
     results = goldenanime.extract_vo(
         title=title, anilist_id=anilist_id, episode=episode
@@ -126,6 +129,7 @@ def handle_goldenanime():
 
     if not results:
         print_warning("No results found.")
+        pause()
         return
 
     choice_idx = select_from_list(
@@ -243,3 +247,21 @@ def handle_goldenanime():
                     print_success(f"AniList updated to episode {episode}!")
                 else:
                     print_warning("Could not update AniList.")
+
+
+def resume_goldenanime(data):
+    """Resume GoldenAnime playback from history."""
+    title = data["series_title"]
+    episode_str = data["episode_title"].replace("Episode ", "")
+    episode = int(episode_str) if episode_str.isdigit() else 1
+
+    print_info(f"Resuming [cyan]{title}[/cyan] - Episode {episode}...")
+
+    anilist_id = None
+    if title and title.startswith("AniList ID "):
+        anilist_id_str = title.replace("AniList ID ", "")
+        if anilist_id_str.isdigit():
+            anilist_id = int(anilist_id_str)
+            title = None
+
+    _flow_goldenanime_stream(title=title, anilist_id=anilist_id, episode=episode)

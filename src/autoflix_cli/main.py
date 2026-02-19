@@ -59,6 +59,8 @@ def main():
                     resume_text = f"▶ Resume: {series_name} (Movie)"
                 else:
                     resume_text = f"▶ Resume: {series_name} - {ep_name}"
+            elif last_watch["provider"] == "GoldenAnime":
+                resume_text = f"▶ Resume: {series_name} - {ep_name}"
             else:
                 resume_text = f"▶ Resume: {series_name} - {season_name} - {ep_name}"
 
