@@ -142,6 +142,22 @@ def play_video(
 
     print_success(f"Stream URL: [cyan]{stream_url}[/cyan]")
 
+    local_subtitle_path = subtitle_url
+    if subtitle_url and subtitle_url.startswith("http"):
+        print_info("Downloading subtitle file for compatibility...")
+        try:
+            import requests, tempfile
+
+            r = requests.get(subtitle_url, timeout=10)
+            sub_ext = ".vtt" if "vtt" in subtitle_url.lower() else ".srt"
+            fd, temp_sub = tempfile.mkstemp(suffix=sub_ext, prefix="autoflix_sub_")
+            with os.fdopen(fd, "wb") as f:
+                f.write(r.content)
+            local_subtitle_path = temp_sub
+            print_success("Subtitles downloaded locally.")
+        except Exception as e:
+            print_error(f"Failed to download subtitles: {e}")
+
     while True:  # Loop to allow retrying with another player
         players = ["mpv", "vlc", "← Back"]
         player_choice = select_from_list(players, "🎮 Select video player:")
@@ -233,12 +249,12 @@ def play_video(
                 cmd = [player_executable, local_stream_url]
                 if player_name == "vlc":
                     cmd.append(f"--meta-title={title}")
-                    if subtitle_url:
-                        cmd.append(f"--sub-file={subtitle_url}")
+                    if local_subtitle_path:
+                        cmd.append(f"--sub-file={local_subtitle_path}")
                 elif player_name == "mpv":
                     cmd.append(f"--title={title}")
-                    if subtitle_url:
-                        cmd.append(f"--sub-files={subtitle_url}")
+                    if local_subtitle_path:
+                        cmd.append(f"--sub-files={local_subtitle_path}")
 
                 subprocess.run(cmd, check=True)
                 print_success("Playback completed successfully!")
@@ -260,8 +276,8 @@ def play_video(
                         f":http-user-agent={user_agent}",
                         f"--meta-title={title}",
                     ]
-                    if subtitle_url:
-                        cmd.append(f"--sub-file={subtitle_url}")
+                    if local_subtitle_path:
+                        cmd.append(f"--sub-file={local_subtitle_path}")
                     subprocess.run(cmd, check=True)
                 else:
                     # MPV Command construction
@@ -295,8 +311,8 @@ def play_video(
                         f'--http-header-fields="{headers_mpv}"',
                         f'--title="{title}"',
                     ]
-                    if subtitle_url:
-                        cmd.append(f"--sub-files={subtitle_url}")
+                    if local_subtitle_path:
+                        cmd.append(f"--sub-files={local_subtitle_path}")
                     cmd.append(stream_url)
                     subprocess.run(cmd, check=True)
 
