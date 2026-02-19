@@ -70,15 +70,52 @@ def handle_goldenanime():
 
     anilist_id = None
     title = None
+    max_episodes = None
+
     if query.isdigit():
         anilist_id = int(query)
-        print_info(f"Searching by AniList ID: [cyan]{anilist_id}[/cyan]")
+        print_info(f"Fetching AniList data for ID: [cyan]{anilist_id}[/cyan]")
+        from ..anilist import anilist_client
+
+        media = anilist_client.get_media_with_relations(anilist_id)
+        if media:
+            title = media.get("title", {}).get("english") or media.get("title", {}).get(
+                "romaji"
+            )
+            max_episodes = media.get("episodes")
     else:
         title = query
-        print_info(f"Searching by Title: [cyan]{title}[/cyan]")
+        print_info(f"Searching AniList by Title: [cyan]{title}[/cyan]")
+        from ..anilist import anilist_client
 
-    ep_input = get_user_input("Episode number (default 1)")
-    episode = int(ep_input) if ep_input and ep_input.isdigit() else 1
+        results = anilist_client.search_media(title)
+        if results:
+            media_options = [
+                f"{m['title']['english'] or m['title']['romaji']} ({m.get('seasonYear', '?')}) - {m.get('episodes', '?')} eps"
+                for m in results
+            ] + ["Manual input (Skip AniList)"]
+            m_idx = select_from_list(media_options, "Select AniList Match:")
+            if m_idx < len(results):
+                match = results[m_idx]
+                anilist_id = match["id"]
+                title = match["title"]["english"] or match["title"]["romaji"]
+                max_episodes = match.get("episodes")
+
+    # Episode Selection
+    episode = 1
+    if max_episodes:
+        ep_options = [f"Episode {i}" for i in range(1, max_episodes + 1)] + [
+            "Manual input"
+        ]
+        ep_idx = select_from_list(ep_options, "📺 Select Episode:")
+        if ep_idx < max_episodes:
+            episode = ep_idx + 1
+        else:
+            ep_input = get_user_input("Episode number")
+            episode = int(ep_input) if ep_input and ep_input.isdigit() else 1
+    else:
+        ep_input = get_user_input("Episode number (default 1)")
+        episode = int(ep_input) if ep_input and ep_input.isdigit() else 1
 
     # To save time, if we want subs we can auto-search now, but let's do it after we get stream results
     # so we don't block the stream search. Wait, doing it now parallelizes the thought, but it's fine
@@ -126,10 +163,21 @@ def handle_goldenanime():
         if imdb_id:
             season = None
             if not is_movie:
-                season_input = get_user_input("Season number (default 1)")
-                season = (
-                    int(season_input) if season_input and season_input.isdigit() else 1
+                season_options = [f"Season {i}" for i in range(1, 11)] + [
+                    "Manual Input"
+                ]
+                s_idx = select_from_list(
+                    season_options, "Select Season (for subtitles mapping):"
                 )
+                if s_idx < 10:
+                    season = s_idx + 1
+                else:
+                    season_input = get_user_input("Season number (default 1)")
+                    season = (
+                        int(season_input)
+                        if season_input and season_input.isdigit()
+                        else 1
+                    )
 
             print_info("Searching for subtitles...")
             subs = subtitle_extractor.search(
