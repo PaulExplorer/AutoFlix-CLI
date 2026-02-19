@@ -82,7 +82,11 @@ def handle_player_error(context: str = "player") -> int:
 
 
 def play_video(
-    url: str, headers: dict, title: str = "AutoFlix Stream", subtitle_url: str = None
+    url: str,
+    headers: dict,
+    title: str = "AutoFlix Stream",
+    subtitle_url: str = None,
+    is_direct: bool = False,
 ) -> bool:
     """
     Attempt to play a video with the chosen player.
@@ -109,23 +113,28 @@ def play_video(
             player_config = config
             break
 
-    try:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            progress.add_task(description="Getting stream URL...", total=None)
-            stream_url = player.get_hls_link(url, headers)
-            if stream_url and stream_url.startswith("/"):
-                stream_url = (
-                    "https://"
-                    + url.removeprefix("https://").removeprefix("http://").split("/")[0]
-                    + stream_url
-                )
-    except Exception as e:
-        print_error(f"Error resolving stream URL: {e}")
-        return False
+    if is_direct:
+        stream_url = url
+    else:
+        try:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                progress.add_task(description="Getting stream URL...", total=None)
+                stream_url = player.get_hls_link(url, headers)
+                if stream_url and stream_url.startswith("/"):
+                    stream_url = (
+                        "https://"
+                        + url.removeprefix("https://")
+                        .removeprefix("http://")
+                        .split("/")[0]
+                        + stream_url
+                    )
+        except Exception as e:
+            print_error(f"Error resolving stream URL: {e}")
+            return False
 
     if not stream_url:
         print_error("Could not resolve stream URL.")
