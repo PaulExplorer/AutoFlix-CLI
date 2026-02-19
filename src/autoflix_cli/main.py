@@ -12,7 +12,7 @@ from .cli_utils import (
 )
 from .update_checker import check_update
 from .tracker import tracker
-from .handlers import anime_sama, coflix, french_stream, wiflix, anilist
+from .handlers import anime_sama, coflix, french_stream, wiflix, anilist, goldenanime
 from . import history_ui
 from . import proxy
 import sys
@@ -103,6 +103,10 @@ def main():
                 (
                     "🎌 Anime-Sama (Anime and animated movies)",
                     anime_sama.handle_anime_sama,
+                ),
+                (
+                    "✨ GoldenAnime (VO and Subtitles)",
+                    goldenanime.handle_goldenanime,
                 ),
                 ("🎬 Coflix (Series and movies)", coflix.handle_coflix),
                 (

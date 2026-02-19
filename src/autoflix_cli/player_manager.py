@@ -81,7 +81,9 @@ def handle_player_error(context: str = "player") -> int:
     )
 
 
-def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
+def play_video(
+    url: str, headers: dict, title: str = "AutoFlix Stream", subtitle_url: str = None
+) -> bool:
     """
     Attempt to play a video with the chosen player.
 
@@ -222,8 +224,12 @@ def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
                 cmd = [player_executable, local_stream_url]
                 if player_name == "vlc":
                     cmd.append(f"--meta-title={title}")
+                    if subtitle_url:
+                        cmd.append(f"--sub-file={subtitle_url}")
                 elif player_name == "mpv":
                     cmd.append(f"--title={title}")
+                    if subtitle_url:
+                        cmd.append(f"--sub-files={subtitle_url}")
 
                 subprocess.run(cmd, check=True)
                 print_success("Playback completed successfully!")
@@ -245,6 +251,8 @@ def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
                         f":http-user-agent={user_agent}",
                         f"--meta-title={title}",
                     ]
+                    if subtitle_url:
+                        cmd.append(f"--sub-file={subtitle_url}")
                     subprocess.run(cmd, check=True)
                 else:
                     # MPV Command construction
@@ -277,8 +285,10 @@ def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
                         f'--user-agent="{user_agent}"',
                         f'--http-header-fields="{headers_mpv}"',
                         f'--title="{title}"',
-                        stream_url,
                     ]
+                    if subtitle_url:
+                        cmd.append(f"--sub-files={subtitle_url}")
+                    cmd.append(stream_url)
                     subprocess.run(cmd, check=True)
 
                 print_success("Playback completed successfully!")
@@ -308,7 +318,9 @@ def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
             return False
 
 
-def select_and_play_player(supported_players: list, referer: str, title: str) -> bool:
+def select_and_play_player(
+    supported_players: list, referer: str, title: str, subtitle_url: str = None
+) -> bool:
     """
     Let user select a player and attempt playback with retry logic.
 
@@ -332,6 +344,7 @@ def select_and_play_player(supported_players: list, referer: str, title: str) ->
             supported_players[player_idx].url,
             headers={"Referer": referer},
             title=title,
+            subtitle_url=subtitle_url,
         )
 
         if success:
