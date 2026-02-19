@@ -248,6 +248,10 @@ def play_video(
             try:
                 cmd = [player_executable, local_stream_url]
                 if player_name == "vlc":
+                    if local_subtitle_path:
+                        print_warning(
+                            "Note: VLC natively struggles to sync external subtitles on HLS/M3U8 streams (subtitles may flash). Strongly recommend using MPV instead."
+                        )
                     cmd.append(f"--meta-title={title}")
                     if local_subtitle_path:
                         cmd.append(f"--sub-file={local_subtitle_path}")
@@ -277,6 +281,9 @@ def play_video(
                         f"--meta-title={title}",
                     ]
                     if local_subtitle_path:
+                        print_warning(
+                            "Note: VLC natively struggles to sync external subtitles on HLS/M3U8 streams (subtitles may flash). Strongly recommend using MPV instead."
+                        )
                         cmd.append(f"--sub-file={local_subtitle_path}")
                     subprocess.run(cmd, check=True)
                 else:
