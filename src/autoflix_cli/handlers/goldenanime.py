@@ -75,6 +75,7 @@ def handle_goldenanime():
     anilist_id = None
     title = None
     max_episodes = None
+    cover_url = None
 
     if query.isdigit():
         anilist_id = int(query)
@@ -85,6 +86,9 @@ def handle_goldenanime():
                 "romaji"
             )
             max_episodes = media.get("episodes")
+            cover_url = media.get("coverImage", {}).get("large") or media.get(
+                "coverImage", {}
+            ).get("medium")
     else:
         title = query
         print_info(f"Searching AniList by Title: [cyan]{title}[/cyan]")
@@ -100,6 +104,7 @@ def handle_goldenanime():
                 anilist_id = match["id"]
                 title = match["title"]["english"] or match["title"]["romaji"]
                 max_episodes = match.get("episodes")
+                cover_url = match.get("coverImage", {}).get("medium")
 
     # Episode Selection
     episode = 1
@@ -119,11 +124,13 @@ def handle_goldenanime():
 
     # Proceed to episode loop (handles next episode proposal)
     handle_goldenanime_episode(
-        title=title, anilist_id=anilist_id, start_episode=episode
+        title=title, anilist_id=anilist_id, start_episode=episode, cover_url=cover_url
     )
 
 
-def _flow_goldenanime_stream(title: str, anilist_id: int, episode: int):
+def _flow_goldenanime_stream(
+    title: str, anilist_id: int, episode: int, cover_url: str = None
+):
     """Common logic for searching streams, subtitles, and playing."""
     print_info("Searching for streams...")
     results = goldenanime.extract_vo(
@@ -272,16 +279,16 @@ def _flow_goldenanime_stream(title: str, anilist_id: int, episode: int):
     )
 
     if success:
-        # Save local progress
+        # Save local progress with rich metadata
         tracker.save_progress(
             provider="GoldenAnime",
             series_title=display_title,
-            season_title="Anime",
+            season_title="VO",
             episode_title=f"Episode {episode}",
-            series_url="",
+            series_url=f"anilist:{anilist_id}" if anilist_id else "",
             season_url="",
-            episode_url=final_url,
-            logo_url=None,
+            episode_url="",  # URL expires; re-search on resume
+            logo_url=cover_url,
         )
         print_success("Local progress saved.")
 
@@ -303,12 +310,14 @@ def _flow_goldenanime_stream(title: str, anilist_id: int, episode: int):
     return True
 
 
-def handle_goldenanime_episode(title: str, anilist_id: int, start_episode: int):
+def handle_goldenanime_episode(
+    title: str, anilist_id: int, start_episode: int, cover_url: str = None
+):
     """Loop: play episode, then propose next, or stop."""
     episode = start_episode
     while True:
         success = _flow_goldenanime_stream(
-            title=title, anilist_id=anilist_id, episode=episode
+            title=title, anilist_id=anilist_id, episode=episode, cover_url=cover_url
         )
         if success:
             next_ep = episode + 1
@@ -328,11 +337,18 @@ def resume_goldenanime(data):
     episode_str = data["episode_title"].replace("Episode ", "")
     episode = int(episode_str) if episode_str.isdigit() else 1
 
+    # Recover anilist_id from series_url field (stored as "anilist:12345")
     anilist_id = None
-    if title and title.startswith("AniList ID "):
-        anilist_id_str = title.replace("AniList ID ", "")
-        if anilist_id_str.isdigit():
-            anilist_id = int(anilist_id_str)
+    series_url = data.get("series_url", "")
+    if series_url.startswith("anilist:"):
+        id_str = series_url.replace("anilist:", "")
+        if id_str.isdigit():
+            anilist_id = int(id_str)
+    # Legacy fallback: title used to encode the ID
+    elif title and title.startswith("AniList ID "):
+        id_str = title.replace("AniList ID ", "")
+        if id_str.isdigit():
+            anilist_id = int(id_str)
             title = None
 
     display_title = title if title else f"AniList ID {anilist_id}"
