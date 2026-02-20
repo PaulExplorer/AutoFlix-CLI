@@ -13,6 +13,7 @@ from ..cli_utils import (
 from ..player_manager import play_video
 from ..tracker import tracker
 from ..anilist import anilist_client
+from ..scraping import player as player_scraper
 
 import requests
 
@@ -132,11 +133,40 @@ def _flow_goldenanime_stream(title: str, anilist_id: int, episode: int):
         pause()
         return
 
+    # Filter: only keep direct streams (m3u8 / master URLs) or supported embedded players
+    def _is_valid(r):
+        url = r.get("url", "")
+        return (
+            r.get("type").lower() == "m3u8"
+            or ".m3u8" in url
+            or "master" in url.lower()
+            or player_scraper.is_supported(url)
+        )
+
+    print(results)
+    valid_results = [r for r in results if _is_valid(r)]
+
+    if not valid_results:
+        print_warning(
+            "No supported streams found (no direct M3U8 or recognised players)."
+        )
+        pause()
+        return
+
+    if len(valid_results) < len(results):
+        skipped = len(results) - len(valid_results)
+        print_info(f"[dim]Skipped {skipped} unsupported stream(s).[/dim]")
+
     choice_idx = select_from_list(
-        [f"{r['source']} - {r['quality']} ({r['type']})" for r in results],
-        "📺 Search Results:",
+        [f"{r['source']} - {r['quality']} ({r['type']})" for r in valid_results]
+        + ["← Back"],
+        "📺 Select Stream:",
     )
-    selection = results[choice_idx]
+
+    if choice_idx == len(valid_results):  # Back
+        return
+
+    selection = valid_results[choice_idx]
 
     # Subtitles logic
     subtitle_url = None
@@ -214,7 +244,7 @@ def _flow_goldenanime_stream(title: str, anilist_id: int, episode: int):
         except Exception:
             pass
 
-    is_direct = True  # Assume extract_vo returns direct URLs or handled APIs
+    is_direct = selection["type"].lower() == "m3u8" or "m3u8" in final_url
 
     success = play_video(
         final_url,
@@ -247,6 +277,9 @@ def _flow_goldenanime_stream(title: str, anilist_id: int, episode: int):
                     print_success(f"AniList updated to episode {episode}!")
                 else:
                     print_warning("Could not update AniList.")
+
+    else:
+        pause()
 
 
 def resume_goldenanime(data):
