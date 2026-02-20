@@ -171,19 +171,22 @@ def play_video(
 
         # --- 1. Preparation of Headers & Referer for both players ---
         # Calculate Referer
-        try:
-            domain = url.split("/")[2].lower()
-            referer = f"https://{domain}"
-            if player_config.get("referrer") == "full":
-                referer = url
-            elif player_config.get("referrer") == "path":
-                referer = f"https://{domain}/"
-            elif isinstance(player_config.get("referrer"), str):
-                referer = player_config.get("referrer")
+        if not is_direct:
+            try:
+                domain = url.split("/")[2].lower()
+                referer = f"https://{domain}"
+                if player_config.get("referrer") == "full":
+                    referer = url
+                elif player_config.get("referrer") == "path":
+                    referer = f"https://{domain}/"
+                elif isinstance(player_config.get("referrer"), str):
+                    referer = player_config.get("referrer")
 
-            referer = f"{referer}/"
-        except IndexError:
-            referer = ""
+                referer = f"{referer}/"
+            except IndexError:
+                referer = ""
+        else:
+            referer = headers.get("Referer", "")
 
         user_agent = headers.get("User-Agent", DEFAULT_USER_AGENT)
 
