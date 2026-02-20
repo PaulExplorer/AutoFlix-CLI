@@ -87,6 +87,7 @@ def play_video(
     title: str = "AutoFlix Stream",
     subtitle_url: str = None,
     is_direct: bool = False,
+    is_mp4: bool = False,
 ) -> bool:
     """
     Attempt to play a video with the chosen player.
@@ -240,7 +241,7 @@ def play_video(
                 return False
 
             endpoint = "stream"
-            if "ext" in player_config and player_config["ext"] == "mp4":
+            if ("ext" in player_config and player_config["ext"] == "mp4") or is_mp4:
                 endpoint = "video"
 
             local_stream_url = f"{proxy.PROXY_URL}/{endpoint}?url={encoded_url}&headers={encoded_headers}"

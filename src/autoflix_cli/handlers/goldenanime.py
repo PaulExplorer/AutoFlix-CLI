@@ -138,6 +138,7 @@ def _flow_goldenanime_stream(title: str, anilist_id: int, episode: int):
         url = r.get("url", "")
         return (
             r.get("type").lower() == "m3u8"
+            or r.get("type").lower() == "mp4"
             or ".m3u8" in url
             or "master" in url.lower()
             or player_scraper.is_supported(url)
@@ -247,7 +248,11 @@ def _flow_goldenanime_stream(title: str, anilist_id: int, episode: int):
         except Exception:
             pass
 
-    is_direct = selection["type"].lower() == "m3u8" or "m3u8" in final_url
+    is_direct = (
+        selection["type"].lower() == "m3u8"
+        or "m3u8" in final_url
+        or selection["type"].lower() == "mp4"
+    )
 
     success = play_video(
         final_url,
@@ -255,6 +260,7 @@ def _flow_goldenanime_stream(title: str, anilist_id: int, episode: int):
         title=f"{display_title} - Episode {episode}",
         subtitle_url=subtitle_url,
         is_direct=is_direct,
+        is_mp4=selection["type"].lower() == "mp4",
     )
 
     if success:
