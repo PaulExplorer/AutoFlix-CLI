@@ -230,18 +230,25 @@ def _flow_goldenanime_stream(title: str, anilist_id: int, episode: int):
 
     print_info(f"Loading stream from [cyan]{selection['source']}[/cyan]...")
 
-    headers = {"User-Agent": goldenanime.user_agent, "Referer": "https://sudatchi.com/"}
+    headers = {
+        "User-Agent": goldenanime.user_agent,
+        "Referer": goldenanime.sudatchi_base + "/",
+    }
     if "Allanime" in selection["source"]:
-        headers["Referer"] = "https://allmanga.to/"
+        headers["Referer"] = goldenanime.allanime_referer + "/"
     if "Animetsu" in selection["source"]:
-        headers["Referer"] = "https://animetsu.live/"
-        headers["Origin"] = "https://animetsu.live"
+        headers["Referer"] = goldenanime.animetsu_base + "/"
+        headers["Origin"] = goldenanime.animetsu_base
 
     display_title = title if title else f"AniList ID {anilist_id}"
 
     # Handle specific API URLs that return JSON instead of M3U8 directly
     final_url = selection["url"]
-    if "sudatchi.com/api/streams" in final_url:
+    sudatchi_api_domain = goldenanime.sudatchi_base.replace("https://", "")
+    if (
+        sudatchi_api_domain + "/api/streams" in final_url
+        or "sudatchi.com/api/streams" in final_url
+    ):
         try:
             resp = requests.get(final_url, headers=headers).json()
             if isinstance(resp, list) and len(resp) > 0:

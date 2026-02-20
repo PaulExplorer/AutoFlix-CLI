@@ -2,6 +2,8 @@ import requests
 import json
 import re
 
+from .config import portals
+
 
 class AnimeExtractor:
     """
@@ -11,17 +13,30 @@ class AnimeExtractor:
 
     def __init__(self):
         self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+        # --- Source URLs loaded from source_portal.jsonc ---
+        self.sudatchi_base = "https://" + portals.get("sudatchi", "sudatchi.com")
+        self.animetsu_base = "https://" + portals.get("animetsu", "animetsu.live")
+        self.allanime_api = (
+            "https://" + portals.get("allanime-api", "api.allanime.day") + "/api"
+        )
+        self.allanime_referer = "https://" + portals.get(
+            "allanime-referer", "allmanga.to"
+        )
+        self.anizone_base = "https://" + portals.get("anizone", "anizone.to")
+
+        # Replace subdomain for animetsu API (b.animetsu.live pattern)
+        self.animetsu_api = self.animetsu_base.replace("https://", "https://b.")
+
         self.headers = {
             "User-Agent": self.user_agent,
-            "Referer": "https://sudatchi.com/",
-            "Origin": "https://sudatchi.com",
+            "Referer": self.sudatchi_base + "/",
+            "Origin": self.sudatchi_base,
         }
-        self.animetsu_api = "https://animetsu.live".replace("https://", "https://b.")
-        self.animetsu_base = "https://animetsu.live"
         self.animetsu_headers = {
             "User-Agent": self.user_agent,
-            "Referer": "https://animetsu.live/",
-            "Origin": "https://animetsu.live",
+            "Referer": self.animetsu_base + "/",
+            "Origin": self.animetsu_base,
         }
 
     def _decrypt_allanime(self, hex_str):
@@ -33,7 +48,7 @@ class AnimeExtractor:
 
     def search_sudatchi(self, anilist_id, episode=1):
         """Extraction depuis Sudatchi (M3U8 direct)."""
-        base_url = "https://sudatchi.com"
+        base_url = self.sudatchi_base
         api_url = f"{base_url}/api/episode/{anilist_id}/{episode}"
 
         try:
@@ -62,8 +77,8 @@ class AnimeExtractor:
 
     def search_allanime(self, title, episode=1):
         """Extraction depuis Allanime avec hashes GQL."""
-        api_url = "https://api.allanime.day/api"
-        referer = "https://allmanga.to"
+        api_url = self.allanime_api
+        referer = self.allanime_referer
 
         # Hashs GQL (CineStream)
         search_hash = "06327bc10dd682e1ee7e07b6db9c16e9ad2fd56c1b769e47513128cd5c9fc77a"
@@ -136,7 +151,7 @@ class AnimeExtractor:
 
     def search_anizone(self, title, episode=1):
         """Extraction depuis Anizone (Regex pour éviter bs4 dependency)."""
-        base_url = "https://anizone.to"
+        base_url = self.anizone_base
         try:
             # 1. Recherche
             r = requests.get(

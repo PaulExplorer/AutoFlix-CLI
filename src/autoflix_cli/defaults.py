@@ -130,4 +130,9 @@ DEFAULT_SOURCE_PORTAL = {
     "french-stream": "french-stream.one",
     "anime-sama": "anime-sama.pw",
     "coflix": "coflix.fans",
+    "sudatchi": "sudatchi.com",
+    "animetsu": "animetsu.live",
+    "allanime-api": "api.allanime.day",
+    "allanime-referer": "allmanga.to",
+    "anizone": "anizone.to",
 }
