@@ -144,7 +144,6 @@ def _flow_goldenanime_stream(title: str, anilist_id: int, episode: int):
             or player_scraper.is_supported(url)
         )
 
-    print(results)
     valid_results = [r for r in results if _is_valid(r)]
 
     if not valid_results:
