@@ -15,7 +15,7 @@ from ..tracker import tracker
 from ..anilist import anilist_client
 from ..scraping import player as player_scraper
 
-import requests
+from curl_cffi import requests
 
 
 def search_imdb_id(title: str):
@@ -23,11 +23,11 @@ def search_imdb_id(title: str):
 
     try:
         url_series = f"https://v3-cinemeta.strem.io/catalog/series/top/search={urllib.parse.quote(title)}.json"
-        r_series = requests.get(url_series, timeout=5).json()
+        r_series = requests.get(url_series, timeout=5, impersonate="chrome").json()
         metas = r_series.get("metas", [])
 
         url_movie = f"https://v3-cinemeta.strem.io/catalog/movie/top/search={urllib.parse.quote(title)}.json"
-        r_movie = requests.get(url_movie, timeout=5).json()
+        r_movie = requests.get(url_movie, timeout=5, impersonate="chrome").json()
         metas.extend(r_movie.get("metas", []))
 
         if metas:
@@ -238,7 +238,6 @@ def _flow_goldenanime_stream(
     print_info(f"Loading stream from [cyan]{selection['source']}[/cyan]...")
 
     headers = {
-        "User-Agent": goldenanime.user_agent,
         "Referer": goldenanime.sudatchi_base + "/",
     }
     if "Allanime" in selection["source"]:
@@ -257,7 +256,7 @@ def _flow_goldenanime_stream(
         or "sudatchi.com/api/streams" in final_url
     ):
         try:
-            resp = requests.get(final_url, headers=headers).json()
+            resp = requests.get(final_url, headers=headers, impersonate="chrome").json()
             if isinstance(resp, list) and len(resp) > 0:
                 final_url = resp[0].get("url", final_url)
         except Exception:

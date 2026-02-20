@@ -1,4 +1,4 @@
-import requests
+from curl_cffi import requests
 import json
 import re
 
@@ -12,8 +12,6 @@ class AnimeExtractor:
     """
 
     def __init__(self):
-        self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-
         # --- Source URLs loaded from source_portal.jsonc ---
         self.sudatchi_base = "https://" + portals.get("sudatchi", "sudatchi.com")
         self.animetsu_base = "https://" + portals.get("animetsu", "animetsu.live")
@@ -29,12 +27,10 @@ class AnimeExtractor:
         self.animetsu_api = self.animetsu_base.replace("https://", "https://b.")
 
         self.headers = {
-            "User-Agent": self.user_agent,
             "Referer": self.sudatchi_base + "/",
             "Origin": self.sudatchi_base,
         }
         self.animetsu_headers = {
-            "User-Agent": self.user_agent,
             "Referer": self.animetsu_base + "/",
             "Origin": self.animetsu_base,
         }
@@ -52,7 +48,9 @@ class AnimeExtractor:
         api_url = f"{base_url}/api/episode/{anilist_id}/{episode}"
 
         try:
-            response = requests.get(api_url, headers=self.headers, timeout=10)
+            response = requests.get(
+                api_url, headers=self.headers, timeout=10, impersonate="chrome"
+            )
             if response.status_code != 200:
                 return []
 
@@ -103,6 +101,7 @@ class AnimeExtractor:
                 },
                 headers={"Referer": referer},
                 timeout=10,
+                impersonate="chrome",
             )
             shows = r.json().get("data", {}).get("shows", {}).get("edges", [])
             if not shows:
@@ -126,6 +125,7 @@ class AnimeExtractor:
                 },
                 headers={"Referer": referer},
                 timeout=10,
+                impersonate="chrome",
             )
             sources = r.json().get("data", {}).get("episode", {}).get("sourceUrls", [])
 
@@ -155,7 +155,10 @@ class AnimeExtractor:
         try:
             # 1. Recherche
             r = requests.get(
-                f"{base_url}/anime?search={title}", headers=self.headers, timeout=10
+                f"{base_url}/anime?search={title}",
+                headers=self.headers,
+                timeout=10,
+                impersonate="chrome",
             )
             match = re.search(r'href="(https://anizone\.to/anime/[^"]+)"', r.text)
             if not match:
@@ -163,7 +166,12 @@ class AnimeExtractor:
 
             # 2. Episode
             ep_url = f"{match.group(1)}/{episode}"
-            r = requests.get(ep_url, headers=self.headers, timeout=10)
+            r = requests.get(
+                ep_url,
+                headers=self.headers,
+                timeout=10,
+                impersonate="chrome",
+            )
             player_match = re.search(r'<media-player[^>]+src="([^"]+)"', r.text)
 
             if player_match:
@@ -189,6 +197,7 @@ class AnimeExtractor:
                 f"{self.animetsu_api}/api/anime/search/?query={title}",
                 headers=self.animetsu_headers,
                 timeout=10,
+                impersonate="chrome",
             )
             results = r.json().get("results", [])
             gojo_id = next(
@@ -207,6 +216,7 @@ class AnimeExtractor:
                 f"{self.animetsu_api}/api/anime/servers/{gojo_id}/{episode}",
                 headers=self.animetsu_headers,
                 timeout=10,
+                impersonate="chrome",
             )
             servers_data = r.json()
 
@@ -222,6 +232,7 @@ class AnimeExtractor:
                             f"{self.animetsu_api}/api/anime/oppai/{gojo_id}/{episode}?server={server_id}&source_type={lang}",
                             headers=self.animetsu_headers,
                             timeout=10,
+                            impersonate="chrome",
                         )
                         stream_data = r.json()
                         sources = stream_data.get("sources", [])

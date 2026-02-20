@@ -147,9 +147,10 @@ def play_video(
     if subtitle_url and subtitle_url.startswith("http"):
         print_info("Downloading subtitle file for compatibility...")
         try:
-            import requests, tempfile
+            from curl_cffi import requests
+            import tempfile
 
-            r = requests.get(subtitle_url, timeout=10)
+            r = requests.get(subtitle_url, timeout=10, impersonate="chrome")
             sub_ext = ".vtt" if "vtt" in subtitle_url.lower() else ".srt"
             fd, temp_sub = tempfile.mkstemp(suffix=sub_ext, prefix="autoflix_sub_")
             with os.fdopen(fd, "wb") as f:

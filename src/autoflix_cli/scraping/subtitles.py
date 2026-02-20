@@ -1,4 +1,4 @@
-import requests
+from curl_cffi import requests
 import random
 
 
@@ -11,10 +11,6 @@ class SubtitleExtractor:
     # Ordre de confiance des sources (plus bas = plus haut dans la liste)
     SOURCE_PRIORITY = {"OpenSubtitles (Stremio)": 1, "Subsense": 2, "WYZIE": 3}
 
-    def __init__(self):
-        self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        self.headers = {"User-Agent": self.user_agent}
-
     def _fetch_stremio(self, base_url, imdb_id, season=None, episode=None):
         """Helper for Stremio-style subtitle APIs."""
         if season and episode:
@@ -23,7 +19,7 @@ class SubtitleExtractor:
             endpoint = f"{base_url}/subtitles/movie/{imdb_id}.json"
 
         try:
-            response = requests.get(endpoint, headers=self.headers, timeout=10)
+            response = requests.get(endpoint, timeout=10, impersonate="chrome")
             response.raise_for_status()
             data = response.json()
             return data.get("subtitles", [])
@@ -60,7 +56,7 @@ class SubtitleExtractor:
             url += f"&season={season}&episode={episode}"
 
         try:
-            response = requests.get(url, headers=self.headers, timeout=10)
+            response = requests.get(url, timeout=10, impersonate="chrome")
             response.raise_for_status()
             data = response.json()
             normalized = []
