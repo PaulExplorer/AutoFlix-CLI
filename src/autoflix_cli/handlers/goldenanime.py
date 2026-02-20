@@ -117,8 +117,10 @@ def handle_goldenanime():
         ep_input = get_user_input("Episode number (default 1)")
         episode = int(ep_input) if ep_input and ep_input.isdigit() else 1
 
-    # Proceed to stream flow
-    _flow_goldenanime_stream(title, anilist_id, episode)
+    # Proceed to episode loop (handles next episode proposal)
+    handle_goldenanime_episode(
+        title=title, anilist_id=anilist_id, start_episode=episode
+    )
 
 
 def _flow_goldenanime_stream(title: str, anilist_id: int, episode: int):
@@ -287,7 +289,30 @@ def _flow_goldenanime_stream(title: str, anilist_id: int, episode: int):
                     print_warning("Could not update AniList.")
 
     else:
+        print_warning("Playback failed or was cancelled.")
         pause()
+        return False
+
+    return True
+
+
+def handle_goldenanime_episode(title: str, anilist_id: int, start_episode: int):
+    """Loop: play episode, then propose next, or stop."""
+    episode = start_episode
+    while True:
+        success = _flow_goldenanime_stream(
+            title=title, anilist_id=anilist_id, episode=episode
+        )
+        if success:
+            next_ep = episode + 1
+            choice = select_from_list(
+                [f"▶ Play Episode {next_ep}", "← Back"],
+                f"Episode {episode} finished:",
+            )
+            if choice == 0:
+                episode = next_ep
+                continue
+        break
 
 
 def resume_goldenanime(data):
@@ -296,8 +321,6 @@ def resume_goldenanime(data):
     episode_str = data["episode_title"].replace("Episode ", "")
     episode = int(episode_str) if episode_str.isdigit() else 1
 
-    print_info(f"Resuming [cyan]{title}[/cyan] - Episode {episode}...")
-
     anilist_id = None
     if title and title.startswith("AniList ID "):
         anilist_id_str = title.replace("AniList ID ", "")
@@ -305,4 +328,21 @@ def resume_goldenanime(data):
             anilist_id = int(anilist_id_str)
             title = None
 
-    _flow_goldenanime_stream(title=title, anilist_id=anilist_id, episode=episode)
+    display_title = title if title else f"AniList ID {anilist_id}"
+    print_info(f"Found progress: [cyan]{display_title}[/cyan] - Episode {episode}")
+
+    options = [
+        f"▶ Continue (Episode {episode + 1})",
+        f"🔁 Watch again (Episode {episode})",
+        "← Cancel",
+    ]
+    choice = select_from_list(options, "What would you like to do?")
+
+    if choice == 2:  # Cancel
+        return
+    elif choice == 0:  # Next
+        episode += 1
+
+    handle_goldenanime_episode(
+        title=title, anilist_id=anilist_id, start_episode=episode
+    )
