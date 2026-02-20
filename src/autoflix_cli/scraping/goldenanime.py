@@ -16,6 +16,13 @@ class AnimeExtractor:
             "Referer": "https://sudatchi.com/",
             "Origin": "https://sudatchi.com",
         }
+        self.animetsu_api = "https://animetsu.live".replace("https://", "https://b.")
+        self.animetsu_base = "https://animetsu.live"
+        self.animetsu_headers = {
+            "User-Agent": self.user_agent,
+            "Referer": "https://animetsu.live/",
+            "Origin": "https://animetsu.live",
+        }
 
     def _decrypt_allanime(self, hex_str):
         """Décodage simple des liens hex d'Allanime."""
@@ -157,6 +164,87 @@ class AnimeExtractor:
             pass
         return []
 
+    def search_animetsu(self, title, anilist_id, episode=1):
+        """Extraction depuis Animetsu (Gojo)."""
+        if not anilist_id:
+            return []
+        try:
+            # 1. Recherche
+            r = requests.get(
+                f"{self.animetsu_api}/api/anime/search/?query={title}",
+                headers=self.animetsu_headers,
+                timeout=10,
+            )
+            results = r.json().get("results", [])
+            gojo_id = next(
+                (
+                    item["id"]
+                    for item in results
+                    if item.get("anilist_id") == anilist_id
+                ),
+                None,
+            )
+            if not gojo_id:
+                return []
+
+            # 2. Serveurs
+            r = requests.get(
+                f"{self.animetsu_api}/api/anime/servers/{gojo_id}/{episode}",
+                headers=self.animetsu_headers,
+                timeout=10,
+            )
+            servers_data = r.json()
+
+            results = []
+            for server_obj in servers_data:
+                server_id = server_obj.get("id")
+                if not server_id:
+                    continue
+
+                for lang in ["sub", "dub"]:
+                    try:
+                        r = requests.get(
+                            f"{self.animetsu_api}/api/anime/oppai/{gojo_id}/{episode}?server={server_id}&source_type={lang}",
+                            headers=self.animetsu_headers,
+                            timeout=10,
+                        )
+                        stream_data = r.json()
+                        sources = stream_data.get("sources", [])
+
+                        # Softsubs extraction
+                        subs = []
+                        for sub in stream_data.get("subtitles", []):
+                            subs.append(
+                                {"lang": sub.get("lang"), "url": sub.get("url")}
+                            )
+
+                        for src in sources:
+                            url = src.get("url")
+                            if not url:
+                                continue
+                            # Animetsu utilise un proxy
+                            if not url.startswith("http"):
+                                url = f"https://ani.metsu.site/proxy/{url.lstrip('/')}"
+
+                            results.append(
+                                {
+                                    "source": f"Animetsu ({lang.upper()} - {server_id})",
+                                    "quality": src.get("quality", "1080p"),
+                                    "url": url,
+                                    "type": (
+                                        "M3U8"
+                                        if src.get("type") != "video/mp4"
+                                        else "MP4"
+                                    ),
+                                    "subtitles": subs if subs else None,
+                                }
+                            )
+                    except:
+                        continue
+            return results
+        except:
+            return []
+
     def extract_vo(self, title=None, anilist_id=None, episode=1):
         """Recherche, déduplication et tri."""
         results = []
@@ -165,6 +253,9 @@ class AnimeExtractor:
         if title:
             results.extend(self.search_allanime(title, episode))
             results.extend(self.search_anizone(title, episode))
+
+        if title and anilist_id:
+            results.extend(self.search_animetsu(title, anilist_id, episode))
 
         # Déduplication simple par URL
         unique = {}

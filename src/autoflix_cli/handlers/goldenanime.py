@@ -231,6 +231,9 @@ def _flow_goldenanime_stream(title: str, anilist_id: int, episode: int):
     headers = {"User-Agent": goldenanime.user_agent, "Referer": "https://sudatchi.com/"}
     if "Allanime" in selection["source"]:
         headers["Referer"] = "https://allmanga.to/"
+    if "Animetsu" in selection["source"]:
+        headers["Referer"] = "https://animetsu.live/"
+        headers["Origin"] = "https://animetsu.live"
 
     display_title = title if title else f"AniList ID {anilist_id}"
 
