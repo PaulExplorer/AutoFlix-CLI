@@ -12,7 +12,15 @@ from .cli_utils import (
 )
 from .update_checker import check_update
 from .tracker import tracker
-from .handlers import anime_sama, coflix, french_stream, wiflix, anilist, goldenanime
+from .handlers import (
+    anime_sama,
+    coflix,
+    french_stream,
+    wiflix,
+    anilist,
+    goldenanime,
+    goldenms,
+)
 from . import history_ui
 from . import proxy
 import sys
@@ -61,6 +69,11 @@ def main():
                     resume_text = f"▶ Resume: {series_name} - {ep_name}"
             elif last_watch["provider"] == "GoldenAnime":
                 resume_text = f"▶ Resume: {series_name} - {ep_name}"
+            elif last_watch["provider"] == "GoldenMS":
+                if season_name == "Movie" or ep_name == "Movie":
+                    resume_text = f"▶ Resume: {series_name} (Movie)"
+                else:
+                    resume_text = f"▶ Resume: {series_name} - {season_name} - {ep_name}"
             else:
                 resume_text = f"▶ Resume: {series_name} - {season_name} - {ep_name}"
 
@@ -109,6 +122,10 @@ def main():
                 (
                     "✨ GoldenAnime (VO and Subtitles)",
                     goldenanime.handle_goldenanime,
+                ),
+                (
+                    "🌟 GoldenMS (Movies & Series)",
+                    goldenms.handle_goldenms,
                 ),
                 ("🎬 Coflix (Series and movies)", coflix.handle_coflix),
                 (

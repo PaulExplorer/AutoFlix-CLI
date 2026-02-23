@@ -135,4 +135,8 @@ DEFAULT_SOURCE_PORTAL = {
     "allanime-api": "api.allanime.day",
     "allanime-referer": "allmanga.to",
     "anizone": "anizone.to",
+    "videasy": "api.videasy.net",
+    "vidlink": "vidlink.pro",
+    "hexa": "themoviedb.hexa.su",
+    "multi-decrypt": "enc-dec.app",
 }
