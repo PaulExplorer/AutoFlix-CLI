@@ -16,6 +16,7 @@ from ..anilist import anilist_client
 from ..scraping import player as player_scraper
 
 from curl_cffi import requests
+import re
 
 
 def search_imdb_id(title: str):
@@ -202,11 +203,23 @@ def _flow_goldenanime_stream(
         if imdb_id:
             season = None
             if not is_movie:
+                # Detect season from title for smart default
+                default_season_idx = 0
+                if search_title:
+                    match = re.search(r"Season\s+(\d+)", search_title, re.IGNORECASE)
+                    if match:
+                        detected_season = int(match.group(1))
+                        # Range 1-10 mapped to 0-9 index
+                        if 1 <= detected_season <= 10:
+                            default_season_idx = detected_season - 1
+
                 season_options = [f"Season {i}" for i in range(1, 11)] + [
                     "Manual Input"
                 ]
                 s_idx = select_from_list(
-                    season_options, "Select Season (for subtitles mapping):"
+                    season_options,
+                    "Select Season (for subtitles mapping):",
+                    default_index=default_season_idx,
                 )
                 if s_idx < 10:
                     season = s_idx + 1
