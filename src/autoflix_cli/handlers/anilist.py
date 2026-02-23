@@ -11,6 +11,7 @@ from ..cli_utils import (
     clean_title,
 )
 from .anime_sama import anime_sama
+from . import goldenanime
 from ..player_manager import play_video
 from ..scraping import player
 
@@ -75,6 +76,28 @@ def handle_anilist_continue():
     else:
         print_info(f"Target: [cyan]{media_title}[/cyan] - Episode {next_episode_num}")
 
+    # --- Provider Selection ---
+    providers = ["Anime-Sama (VF/VOSTFR)", "GoldenAnime (VO)", "← Back"]
+    p_choice = select_from_list(providers, "Select Provider:")
+
+    if p_choice == 2:  # Back
+        return
+
+    # Extract cover URL for both providers
+    cover_url = selected_entry["media"].get("coverImage", {}).get(
+        "large"
+    ) or selected_entry["media"].get("coverImage", {}).get("medium")
+
+    if p_choice == 1:  # GoldenAnime
+        goldenanime.handle_goldenanime_episode(
+            title=media_title,
+            anilist_id=media_id,
+            start_episode=next_episode_num,
+            cover_url=cover_url,
+        )
+        return
+
+    # --- Existing Anime-Sama logic ---
     anime_sama.get_website_url()
 
     cleaned_title = clean_title(media_title)
