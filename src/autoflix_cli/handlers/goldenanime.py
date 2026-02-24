@@ -12,6 +12,7 @@ from ..cli_utils import (
 )
 from ..player_manager import play_video
 from ..tracker import tracker
+from ..languages import get_language_label
 from ..anilist import anilist_client
 from ..scraping import player as player_scraper
 
@@ -180,7 +181,10 @@ def _flow_goldenanime_stream(
 
     # Subtitles logic
     subtitle_url = None
-    want_subs = select_from_list(["Yes", "No"], "Search for French subtitles?")
+    user_lang = tracker.get_language() or "fr"
+    lang_name = get_language_label(user_lang)
+
+    want_subs = select_from_list(["Yes", "No"], f"Search for {lang_name} subtitles?")
     if want_subs == 0:
         # Try to resolve title if missing
         search_title = title
@@ -231,22 +235,22 @@ def _flow_goldenanime_stream(
                         else 1
                     )
 
-            print_info("Searching for subtitles...")
+            print_info(f"Searching for {lang_name} subtitles...")
             subs = subtitle_extractor.search(
-                imdb_id=imdb_id, season=season, episode=episode, lang_filter="French"
+                imdb_id=imdb_id, season=season, episode=episode, lang_filter=user_lang
             )
 
             if subs:
                 # Show a shortened list to make it faster
                 sub_choices = [
-                    f"{s['source']} - {s.get('lang', 'Unknown')}" for s in subs[:5]
+                    f"{s['source']} - {s.get('lang', lang_name)}" for s in subs[:5]
                 ] + ["None"]
                 sub_idx = select_from_list(sub_choices, "📝 Select Subtitle:")
                 if sub_idx < len(sub_choices) - 1:
                     subtitle_url = subs[sub_idx]["url"]
                     print_info(f"Selected subtitle from: {subs[sub_idx]['source']}")
             else:
-                print_warning("No French subtitles found.")
+                print_warning(f"No {lang_name} subtitles found.")
 
     print_info(f"Loading stream from [cyan]{selection['source']}[/cyan]...")
 

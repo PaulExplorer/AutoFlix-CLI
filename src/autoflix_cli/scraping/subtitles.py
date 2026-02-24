@@ -86,8 +86,10 @@ class SubtitleExtractor:
         # 1. Filtrage par langue (insensible à la casse)
         if lang_filter:
             f = lang_filter.lower()
-            # Mappage pour aider le filtrage (fr -> french)
-            aliases = {"fr": "french", "en": "english", "es": "spanish", "de": "german"}
+            # Dynamic mapping from languages.py
+            from ..languages import get_language_aliases
+
+            aliases = get_language_aliases()
             target = aliases.get(f, f)
 
             filtered = []

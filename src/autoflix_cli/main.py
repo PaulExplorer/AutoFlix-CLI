@@ -12,6 +12,8 @@ from .cli_utils import (
 )
 from .update_checker import check_update
 from .tracker import tracker
+from .providers_registry import registry
+from .languages import LANGUAGES, get_language_display, get_all_languages
 from .handlers import (
     anime_sama,
     coflix,
@@ -28,10 +30,59 @@ import os
 import signal
 
 
+def check_language_setup():
+    """Verify if a language is set, if not, prompt for first setup."""
+    if not tracker.get_language():
+        clear_screen()
+        print_header("AutoFlix - First Launch Setup")
+        print_info("Please select your preferred language.")
+        print_info(
+            "This will filter available providers and set default subtitle languages."
+        )
+
+        langs = get_all_languages()
+
+        choice = select_from_list([l[1] for l in langs], "Choice:")
+        selected_lang = langs[choice][0]
+        tracker.set_language(selected_lang)
+        print_success(f"Language set to: {langs[choice][1]}")
+        pause()
+
+
 def main():
+    # Register Providers
+    registry.register(
+        "🎌 Anime-Sama (Anime and animated movies)",
+        anime_sama.handle_anime_sama,
+        supported_languages=["fr"],
+    )
+    registry.register(
+        "✨ GoldenAnime (VO and Subtitles)",
+        goldenanime.handle_goldenanime,
+        supported_languages=None,
+    )
+    registry.register(
+        "🌟 GoldenMS (Movies & Series)",
+        goldenms.handle_goldenms,
+        supported_languages=None,
+    )
+    registry.register(
+        "🎬 Coflix (Series and movies)",
+        coflix.handle_coflix,
+        supported_languages=["fr"],
+    )
+    registry.register(
+        "🇫🇷 French-Stream (Series and movies)",
+        french_stream.handle_french_stream,
+        supported_languages=["fr"],
+    )
+
     # Check for updates
     if check_update():
         pause()
+
+    # Check for language setup
+    check_language_setup()
 
     # Start Proxy Server
     proxy.start_proxy_server()
@@ -114,43 +165,50 @@ def main():
             continue
 
         if choice_idx == providers_idx:
-            providers = [
-                (
-                    "🎌 Anime-Sama (Anime and animated movies)",
-                    anime_sama.handle_anime_sama,
-                ),
-                (
-                    "✨ GoldenAnime (VO and Subtitles)",
-                    goldenanime.handle_goldenanime,
-                ),
-                (
-                    "🌟 GoldenMS (Movies & Series)",
-                    goldenms.handle_goldenms,
-                ),
-                ("🎬 Coflix (Series and movies)", coflix.handle_coflix),
-                (
-                    "🇫🇷 French-Stream (Series and movies - Often lower quality)",
-                    french_stream.handle_french_stream,
-                ),
-                # ("🎬 Wiflix", wiflix.handle_wiflix), don't work anymore
-                ("← Back", None),
-            ]
-            p_idx = select_from_list([p[0] for p in providers], "Select a Provider:")
-            if p_idx < len(providers) - 1:  # Not Back
-                providers[p_idx][1]()
+            user_lang = tracker.get_language()
+            available_providers = registry.get_providers(user_lang)
+
+            p_items = [p["name"] for p in available_providers] + ["← Back"]
+            p_idx = select_from_list(p_items, "Select a Provider:")
+
+            if p_idx < len(available_providers):
+                available_providers[p_idx]["handler"]()
             continue
 
         if choice_idx == settings_idx:
-            # Simple settings menu for token
-            token = tracker.get_anilist_token()
-            print_info(
-                f"Current Token: {token[:10]}..." if token else "Current Token: Not Set"
-            )
-            if select_from_list(["Update Token", "Back"], "Settings") == 0:
-                new_token = get_user_input("Enter new AniList Token")
-                if new_token:
-                    tracker.set_anilist_token(new_token)
-                    print_success("Token saved.")
+            # Settings menu
+            while True:
+                clear_screen()
+                print_header("⚙ Settings")
+                token = tracker.get_anilist_token()
+                lang = tracker.get_language()
+
+                lang_display = get_language_display(lang)
+
+                opts = [
+                    f"Update AniList Token ({'Set' if token else 'Not Set'})",
+                    f"Update Language ({lang_display})",
+                    "Back",
+                ]
+
+                s_choice = select_from_list(opts, "Select Setting:")
+
+                if s_choice == 0:
+                    new_token = get_user_input("Enter new AniList Token")
+                    if new_token:
+                        tracker.set_anilist_token(new_token)
+                        print_success("Token saved.")
+                        pause()
+                elif s_choice == 1:
+                    langs = get_all_languages()
+                    l_choice = select_from_list(
+                        [l[1] for l in langs], "Select Language:"
+                    )
+                    tracker.set_language(langs[l_choice][0])
+                    print_success(f"Language updated to: {langs[l_choice][1]}")
+                    pause()
+                else:
+                    break
             continue
 
         # Exit

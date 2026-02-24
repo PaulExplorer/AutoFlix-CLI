@@ -13,6 +13,7 @@ from ..cli_utils import (
 )
 from ..player_manager import play_video
 from ..tracker import tracker
+from ..languages import get_language_label
 from ..scraping import player as player_scraper
 import re
 
@@ -210,7 +211,10 @@ def _flow_goldenms_stream(
 
     # Subtitles logic
     subtitle_url = None
-    want_subs = select_from_list(["Yes", "No"], "Search for French subtitles?")
+    user_lang = tracker.get_language() or "fr"
+    lang_name = get_language_label(user_lang)
+
+    want_subs = select_from_list(["Yes", "No"], f"Search for {lang_name} subtitles?")
     if want_subs == 0:
         current_imdb_id = imdb_id
         if not current_imdb_id:
@@ -218,28 +222,27 @@ def _flow_goldenms_stream(
                 "Enter IMDB ID (e.g. tt0388629, leave blank to skip subtitles)"
             )
         if current_imdb_id:
-            sub_season = None
             sub_season = season if not is_movie else None
             sub_ep = episode if not is_movie else None
 
-            print_info("Searching for subtitles...")
+            print_info(f"Searching for {lang_name} subtitles...")
             subs = subtitle_extractor.search(
                 imdb_id=current_imdb_id,
                 season=sub_season,
                 episode=sub_ep,
-                lang_filter="fr",
+                lang_filter=user_lang,
             )
 
             if subs:
                 sub_opts = [
-                    f"{s['source']} - {s.get('lang', 'French')}" for s in subs
+                    f"{s['source']} - {s.get('lang', lang_name)}" for s in subs
                 ] + ["Skip Subtitles"]
                 sub_choice = select_from_list(sub_opts, "Select Subtitle:")
                 if sub_choice < len(subs):
                     subtitle_url = subs[sub_choice]["url"]
                     print_info(f"Selected subtitle: {subtitle_url}")
             else:
-                print_warning("No French subtitles found.")
+                print_warning(f"No {lang_name} subtitles found.")
                 pause()
 
     final_url = selection["url"]
