@@ -1,6 +1,6 @@
 [project]
 name = "autoflix-cli"
-version = "0.5.0"
+version = "0.5.1"
 description = "Watch movies, series, and anime in multiple languages (FR, EN, and more) directly from your terminal."
 readme = "README.md"
 requires-python = ">=3.9.2"
