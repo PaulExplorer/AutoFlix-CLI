@@ -107,7 +107,38 @@ class AnimeExtractor:
             if not shows:
                 return []
 
-            show_id = shows[0].get("_id")
+            # 1.1 Match title
+            show_id = None
+            if title:
+                t_lower = title.lower().strip()
+                for edge in shows:
+                    name = (edge.get("name") or "").lower().strip()
+                    eng = (edge.get("englishName") or "").lower().strip()
+                    if name == t_lower or eng == t_lower:
+                        show_id = edge.get("_id")
+                        break
+
+                if not show_id:
+                    # Fallback to fuzzy: find result that contains title AND doesn't have "Season"
+                    # unless title itself has "Season"
+                    has_season_query = "season" in t_lower or "saison" in t_lower
+                    for edge in shows:
+                        name = (edge.get("name") or "").lower().strip()
+                        eng = (edge.get("englishName") or "").lower().strip()
+                        if t_lower in name or t_lower in eng:
+                            if not has_season_query:
+                                if "season" not in name and "season" not in eng:
+                                    show_id = edge.get("_id")
+                                    break
+                            else:
+                                show_id = edge.get("_id")
+                                break
+
+            if not show_id and shows:
+                show_id = shows[0].get("_id")
+
+            if not show_id:
+                return []
 
             # 2. Links
             vars_ep = {
@@ -160,12 +191,34 @@ class AnimeExtractor:
                 timeout=10,
                 impersonate="chrome",
             )
-            match = re.search(r'href="(https://anizone\.to/anime/[^"]+)"', r.text)
-            if not match:
+
+            # Find all relevant matches
+            matches = re.finditer(r'href="(https://anizone\.to/anime/([^"]+))"', r.text)
+            best_url = None
+
+            if title:
+                t_slug = title.lower().replace(" ", "-")
+                for m in matches:
+                    full_url = m.group(1)
+                    slug = m.group(2)
+                    if not best_url:
+                        best_url = full_url  # Fallback to first
+                    if slug == t_slug:
+                        best_url = full_url
+                        break
+                    if t_slug in slug and "season" not in slug:
+                        best_url = full_url
+
+            if not best_url:
+                match = re.search(r'href="(https://anizone\.to/anime/[^"]+)"', r.text)
+                if match:
+                    best_url = match.group(1)
+
+            if not best_url:
                 return []
 
             # 2. Episode
-            ep_url = f"{match.group(1)}/{episode}"
+            ep_url = f"{best_url}/{episode}"
             r = requests.get(
                 ep_url,
                 headers=self.headers,
