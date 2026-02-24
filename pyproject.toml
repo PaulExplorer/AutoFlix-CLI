@@ -1,10 +1,10 @@
 [project]
 name = "autoflix-cli"
-version = "0.4.12"
-description = "Stream movies, series, and anime in French (VF & VOSTFR) directly from your terminal. Inspired by ani-cli."
+version = "0.5.0"
+description = "Watch movies, series, and anime in multiple languages (FR, EN, and more) directly from your terminal."
 readme = "README.md"
 requires-python = ">=3.9.2"
-license = {text = "MIT"}
+license = {text = "WGPLv3"}
 license-files = ["LICENSE"]
 authors = [{name = "PaulExplorer"}]
 keywords = ["autoflix", "anime", "movies", "series", "VF", "VOSTFR"]
