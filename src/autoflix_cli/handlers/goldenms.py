@@ -223,9 +223,17 @@ def _flow_goldenms_stream(
                 pause()
 
     final_url = selection["url"]
+    type_ = selection["type"].upper()
+
+    is_direct = (
+        ".m3u8" in final_url.lower()
+        or ".mp4" in final_url.lower()
+        or type_ == "MP4"
+        or type_ == "M3U8"
+    )
 
     # Player Support
-    if player_scraper.is_supported(final_url) and not final_url.endswith(".m3u8") and not final_url.endswith(".mp4"):
+    if player_scraper.is_supported(final_url) and not is_direct:
         print_info(f"Resolving player link: [cyan]{final_url}[/cyan]")
         try:
             resolved_url = player_scraper.get_hls_link(final_url)
@@ -261,6 +269,7 @@ def _flow_goldenms_stream(
         headers=headers,
         title=display_title,
         subtitle_url=subtitle_url,
+        is_direct=is_direct,
     )
 
     if success:
