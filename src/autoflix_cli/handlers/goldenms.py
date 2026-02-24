@@ -113,17 +113,53 @@ def handle_goldenms():
     episode = None
 
     if not is_movie:
-        season = get_user_input("Enter season number", default="1")
-        if not season.isdigit():
-            print_warning("Invalid season format.")
-            return
-        season = int(season)
+        videos = full_meta.get("videos", [])
 
-        episode = get_user_input("Enter episode number", default="1")
-        if not episode.isdigit():
-            print_warning("Invalid episode format.")
-            return
-        episode = int(episode)
+        if videos:
+            season_map = {}
+            for video in videos:
+                s = video.get("season", 0)
+                ep = video.get("episode", 0)
+                name = video.get("name", f"Episode {ep}")
+                if s not in season_map:
+                    season_map[s] = []
+                season_map[s].append((ep, name))
+
+            sorted_seasons = sorted(season_map.keys())
+
+            season_options = [f"Season {s}" for s in sorted_seasons] + ["Manual Input"]
+            s_idx = select_from_list(season_options, "Select Season:")
+
+            if s_idx == len(sorted_seasons):
+                season_str = get_user_input("Enter season number", default="1")
+                season = int(season_str) if season_str.isdigit() else 1
+                ep_str = get_user_input("Enter episode number", default="1")
+                episode = int(ep_str) if ep_str.isdigit() else 1
+            else:
+                season = sorted_seasons[s_idx]
+
+                episodes_list = sorted(season_map[season], key=lambda x: x[0])
+                ep_options = [f"E{ep[0]:02d} - {ep[1]}" for ep in episodes_list] + [
+                    "Manual Input",
+                    "← Cancel",
+                ]
+                ep_idx = select_from_list(
+                    ep_options, f"Select Episode (Season {season}):"
+                )
+
+                if ep_idx == len(episodes_list) + 1:
+                    return
+                elif ep_idx == len(episodes_list):
+                    ep_str = get_user_input("Enter episode number", default="1")
+                    episode = int(ep_str) if ep_str.isdigit() else 1
+                else:
+                    episode = episodes_list[ep_idx][0]
+        else:
+            season_str = get_user_input("Enter season number", default="1")
+            season = int(season_str) if season_str.isdigit() else 1
+
+            ep_str = get_user_input("Enter episode number", default="1")
+            episode = int(ep_str) if ep_str.isdigit() else 1
 
     _flow_goldenms_stream(
         title=media_title,
@@ -183,23 +219,7 @@ def _flow_goldenms_stream(
             )
         if current_imdb_id:
             sub_season = None
-            if not is_movie:
-                # auto default selection based on season
-                default_s_idx = max(0, season - 1) if season else 0
-                season_options = [f"Season {i}" for i in range(1, 15)] + [
-                    "Manual Input"
-                ]
-                s_idx = select_from_list(
-                    season_options,
-                    "Select Season (for subtitles):",
-                    default_index=default_s_idx,
-                )
-                if s_idx < 14:
-                    sub_season = s_idx + 1
-                else:
-                    man_season = get_user_input("Season number")
-                    sub_season = int(man_season) if man_season.isdigit() else 1
-
+            sub_season = season if not is_movie else None
             sub_ep = episode if not is_movie else None
 
             print_info("Searching for subtitles...")
