@@ -81,7 +81,14 @@ def handle_player_error(context: str = "player") -> int:
     )
 
 
-def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
+def play_video(
+    url: str,
+    headers: dict,
+    title: str = "AutoFlix Stream",
+    subtitle_url: str = None,
+    is_direct: bool = False,
+    is_mp4: bool = False,
+) -> bool:
     """
     Attempt to play a video with the chosen player.
 
@@ -107,29 +114,51 @@ def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
             player_config = config
             break
 
-    try:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            progress.add_task(description="Getting stream URL...", total=None)
-            stream_url = player.get_hls_link(url, headers)
-            if stream_url and stream_url.startswith("/"):
-                stream_url = (
-                    "https://"
-                    + url.removeprefix("https://").removeprefix("http://").split("/")[0]
-                    + stream_url
-                )
-    except Exception as e:
-        print_error(f"Error resolving stream URL: {e}")
-        return False
+    if is_direct:
+        stream_url = url
+    else:
+        try:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                progress.add_task(description="Getting stream URL...", total=None)
+                stream_url = player.get_hls_link(url, headers)
+                if stream_url and stream_url.startswith("/"):
+                    stream_url = (
+                        "https://"
+                        + url.removeprefix("https://")
+                        .removeprefix("http://")
+                        .split("/")[0]
+                        + stream_url
+                    )
+        except Exception as e:
+            print_error(f"Error resolving stream URL: {e}")
+            return False
 
     if not stream_url:
         print_error("Could not resolve stream URL.")
         return False
 
     print_success(f"Stream URL: [cyan]{stream_url}[/cyan]")
+
+    local_subtitle_path = subtitle_url
+    if subtitle_url and subtitle_url.startswith("http"):
+        print_info("Downloading subtitle file for compatibility...")
+        try:
+            from curl_cffi import requests
+            import tempfile
+
+            r = requests.get(subtitle_url, timeout=10, impersonate="chrome")
+            sub_ext = ".vtt" if "vtt" in subtitle_url.lower() else ".srt"
+            fd, temp_sub = tempfile.mkstemp(suffix=sub_ext, prefix="autoflix_sub_")
+            with os.fdopen(fd, "wb") as f:
+                f.write(r.content)
+            local_subtitle_path = temp_sub
+            print_success("Subtitles downloaded locally.")
+        except Exception as e:
+            print_error(f"Failed to download subtitles: {e}")
 
     while True:  # Loop to allow retrying with another player
         players = ["mpv", "vlc", "← Back"]
@@ -143,19 +172,22 @@ def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
 
         # --- 1. Preparation of Headers & Referer for both players ---
         # Calculate Referer
-        try:
-            domain = url.split("/")[2].lower()
-            referer = f"https://{domain}"
-            if player_config.get("referrer") == "full":
-                referer = url
-            elif player_config.get("referrer") == "path":
-                referer = f"https://{domain}/"
-            elif isinstance(player_config.get("referrer"), str):
-                referer = player_config.get("referrer")
+        if not is_direct:
+            try:
+                domain = url.split("/")[2].lower()
+                referer = f"https://{domain}"
+                if player_config.get("referrer") == "full":
+                    referer = url
+                elif player_config.get("referrer") == "path":
+                    referer = f"https://{domain}/"
+                elif isinstance(player_config.get("referrer"), str):
+                    referer = player_config.get("referrer")
 
-            referer = f"{referer}/"
-        except IndexError:
-            referer = ""
+                referer = f"{referer}/"
+            except IndexError:
+                referer = ""
+        else:
+            referer = headers.get("Referer", "")
 
         user_agent = headers.get("User-Agent", DEFAULT_USER_AGENT)
 
@@ -213,7 +245,7 @@ def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
                 return False
 
             endpoint = "stream"
-            if "ext" in player_config and player_config["ext"] == "mp4":
+            if ("ext" in player_config and player_config["ext"] == "mp4") or is_mp4:
                 endpoint = "video"
 
             local_stream_url = f"{proxy.PROXY_URL}/{endpoint}?url={encoded_url}&headers={encoded_headers}"
@@ -221,9 +253,17 @@ def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
             try:
                 cmd = [player_executable, local_stream_url]
                 if player_name == "vlc":
+                    if local_subtitle_path:
+                        print_warning(
+                            "Note: VLC natively struggles to sync external subtitles on HLS/M3U8 streams (subtitles may flash). Strongly recommend using MPV instead."
+                        )
                     cmd.append(f"--meta-title={title}")
+                    if local_subtitle_path:
+                        cmd.append(f"--sub-file={local_subtitle_path}")
                 elif player_name == "mpv":
                     cmd.append(f"--title={title}")
+                    if local_subtitle_path:
+                        cmd.append(f"--sub-files={local_subtitle_path}")
 
                 subprocess.run(cmd, check=True)
                 print_success("Playback completed successfully!")
@@ -245,6 +285,11 @@ def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
                         f":http-user-agent={user_agent}",
                         f"--meta-title={title}",
                     ]
+                    if local_subtitle_path:
+                        print_warning(
+                            "Note: VLC natively struggles to sync external subtitles on HLS/M3U8 streams (subtitles may flash). Strongly recommend using MPV instead."
+                        )
+                        cmd.append(f"--sub-file={local_subtitle_path}")
                     subprocess.run(cmd, check=True)
                 else:
                     # MPV Command construction
@@ -277,8 +322,10 @@ def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
                         f'--user-agent="{user_agent}"',
                         f'--http-header-fields="{headers_mpv}"',
                         f'--title="{title}"',
-                        stream_url,
                     ]
+                    if local_subtitle_path:
+                        cmd.append(f"--sub-files={local_subtitle_path}")
+                    cmd.append(stream_url)
                     subprocess.run(cmd, check=True)
 
                 print_success("Playback completed successfully!")
@@ -308,7 +355,9 @@ def play_video(url: str, headers: dict, title: str = "AutoFlix Stream") -> bool:
             return False
 
 
-def select_and_play_player(supported_players: list, referer: str, title: str) -> bool:
+def select_and_play_player(
+    supported_players: list, referer: str, title: str, subtitle_url: str = None
+) -> bool:
     """
     Let user select a player and attempt playback with retry logic.
 
@@ -332,6 +381,7 @@ def select_and_play_player(supported_players: list, referer: str, title: str) ->
             supported_players[player_idx].url,
             headers={"Referer": referer},
             title=title,
+            subtitle_url=subtitle_url,
         )
 
         if success:

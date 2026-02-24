@@ -15,19 +15,20 @@ def clear_screen():
     os.system("cls" if os.name == "nt" else "clear")
 
 
-def get_user_input(prompt: str) -> str:
+def get_user_input(prompt: str, default: str = None) -> str:
     """
     Get user input with a styled prompt.
 
     Args:
         prompt: The prompt text to display
+        default: The default value to display
 
     Returns:
         The user's input as a string
     """
     styled_prompt = Text(f"\n❯ {prompt}: ", style="bold cyan")
     console.print(styled_prompt, end="")
-    return input().strip()
+    return input().strip() or default
 
 
 def pause():

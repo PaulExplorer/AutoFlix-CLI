@@ -6,7 +6,7 @@ from .cli_utils import (
     select_from_list,
     print_success,
 )
-from .handlers import anime_sama, coflix, french_stream, wiflix
+from .handlers import anime_sama, coflix, french_stream, wiflix, goldenanime, goldenms
 
 
 def handle_resume(data):
@@ -22,6 +22,10 @@ def handle_resume(data):
         print_warning(
             "Resume for Wiflix not manually implemented here (usually direct)."
         )
+    elif provider == "GoldenAnime":
+        goldenanime.resume_goldenanime(data)
+    elif provider == "GoldenMS":
+        goldenms.resume_goldenms(data)
 
 
 def handle_history():
@@ -56,6 +60,13 @@ def handle_history():
                     text = f"[{provider}] {series} (Movie)"
                 else:
                     text = f"[{provider}] {series} - {episode}"
+            elif provider == "GoldenAnime":
+                text = f"[{provider}] {series} - {episode}"
+            elif provider == "GoldenMS":
+                if season == "Movie" or episode == "Movie":
+                    text = f"[{provider}] {series} (Movie)"
+                else:
+                    text = f"[{provider}] {series} - {season} - {episode}"
             else:
                 text = f"[{provider}] {series} - {season} - {episode}"
 
