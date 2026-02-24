@@ -5,8 +5,8 @@ from .config import portals
 
 class MediaExtractor:
     """
-    Extracteur de Films et Séries basé sur CineStream.
-    Cible les flux M3U8 et les lecteurs vidéo.
+    Movie and Series extractor based on CineStream.
+    Targets M3U8 streams and video players.
     """
 
     def __init__(self):
@@ -26,7 +26,7 @@ class MediaExtractor:
     def search_videasy(
         self, title, tmdb_id=None, imdb_id=None, year=None, season=None, episode=None
     ):
-        """Extraction via Videasy (Multi-serveurs)."""
+        """Extraction via Videasy (Multi-server)."""
         servers = [
             "myflixerzupcloud",
             "1movies",
@@ -64,7 +64,7 @@ class MediaExtractor:
                 )
                 enc_data = r.text
 
-                # Décryptage
+                # Decryption
                 payload = {"text": enc_data, "id": str(tmdb_id) if tmdb_id else ""}
                 r_dec = requests.post(
                     f"{self.multi_decrypt_api}/dec-videasy",
@@ -186,7 +186,7 @@ class MediaExtractor:
         season=None,
         episode=None,
     ):
-        """Méthode principale de recherche."""
+        """Main search method."""
         results = []
 
         # Priority: Vidlink, Hexa, Videasy
@@ -199,7 +199,7 @@ class MediaExtractor:
                 self.search_videasy(title, tmdb_id, imdb_id, year, season, episode)
             )
 
-        # Déduplication par URL
+        # Deduplication by URL
         unique = {}
         for r in results:
             if r["url"] and r["url"] not in unique:
