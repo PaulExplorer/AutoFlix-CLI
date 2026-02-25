@@ -29,8 +29,8 @@ class SubtitleExtractor:
 
     def get_opensubtitles_stremio(self, imdb_id, season=None, episode=None):
         """OpenSubtitles via Stremio bridge (French support included)."""
-        # Adding 'fr' to the list of requested languages
-        base_url = "https://opensubtitles.stremio.homes/en|fr|hi|de|ar|tr|es|ta|te|ru|ko/ai-translated=true|from=all|auto-adjustment=true"
+        # Using OpenSubtitles v3
+        base_url = "https://opensubtitles-v3.strem.io"
         subs = self._fetch_stremio(base_url, imdb_id, season, episode)
         for s in subs:
             s["source"] = "OpenSubtitles (Stremio)"
