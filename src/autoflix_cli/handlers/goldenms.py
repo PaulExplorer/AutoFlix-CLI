@@ -345,12 +345,12 @@ def resume_goldenms(data):
     tmdb_id = None
     imdb_id = None
     series_url = data.get("series_url", "")
-    if "tmdb:" in series_url:
-        match = re.search(r"tmdb:(\d+)", series_url)
+    if "tmdb:" in series_url or re.match(r"^\d+", series_url):
+        match = re.search(r"(?:tmdb:)?(\d+)", series_url)
         if match:
             tmdb_id = int(match.group(1))
     if "imdb:" in series_url:
-        match = re.search(r"imdb:(tt\d+)", series_url)
+        match = re.search(r"(?:imdb:)?(tt\d+)", series_url)
         if match:
             imdb_id = match.group(1)
 

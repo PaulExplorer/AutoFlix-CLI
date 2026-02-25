@@ -42,13 +42,14 @@ class ProgressTracker:
             return ""
         try:
             parsed = urlparse(url)
-            # If it has a scheme (http/https), return path + query
-            if parsed.scheme:
+            # Only convert standard web URLs to relative paths.
+            # Custom schemes like 'anilist:', 'tmdb:', 'imdb:' should be kept as is.
+            if parsed.scheme in ["http", "https"]:
                 path = parsed.path
                 if parsed.query:
                     path += "?" + parsed.query
                 return path
-            return url  # Already relative or invalid
+            return url  # Keep custom schemes or relative paths as is
         except Exception:
             return url
 

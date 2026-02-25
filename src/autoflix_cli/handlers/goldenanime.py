@@ -360,6 +360,9 @@ def resume_goldenanime(data):
         id_str = series_url.replace("anilist:", "")
         if id_str.isdigit():
             anilist_id = int(id_str)
+    elif series_url.isdigit():
+        # Fallback for broken history entries where the prefix was stripped
+        anilist_id = int(series_url)
     # Legacy fallback: title used to encode the ID
     elif title and title.startswith("AniList ID "):
         id_str = title.replace("AniList ID ", "")
