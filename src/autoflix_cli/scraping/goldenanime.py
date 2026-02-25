@@ -305,19 +305,22 @@ class AnimeExtractor:
                             if not url.startswith("http"):
                                 url = f"https://ani.metsu.site/proxy/{url.lstrip('/')}"
 
-                            results.append(
-                                {
-                                    "source": f"Animetsu ({lang.upper()} - {server_id})",
-                                    "quality": src.get("quality", "1080p"),
-                                    "url": url,
-                                    "type": (
-                                        "M3U8"
-                                        if src.get("type") != "video/mp4"
-                                        else "MP4"
-                                    ),
-                                    "subtitles": subs if subs else None,
-                                }
-                            )
+                            player = {
+                                "source": f"Animetsu ({lang.upper()} - {server_id})",
+                                "quality": src.get("quality", "1080p"),
+                                "url": url,
+                                "type": (
+                                    "M3U8" if src.get("type") != "video/mp4" else "MP4"
+                                ),
+                                "subtitles": subs if subs else None,
+                            }
+
+                            if (
+                                server_id == "kite" or server_id == "zoro"
+                            ) and lang.upper() == "SUB":
+                                results.insert(0, player)
+                            else:
+                                results.append(player)
                     except:
                         continue
             return results
@@ -327,14 +330,15 @@ class AnimeExtractor:
     def extract_vo(self, title=None, anilist_id=None, episode=1):
         """Search, deduplication, and sorting."""
         results = []
+
         if anilist_id:
             results.extend(self.search_sudatchi(anilist_id, episode))
         if title:
-            results.extend(self.search_allanime(title, episode))
             results.extend(self.search_anizone(title, episode))
-
         if title and anilist_id:
             results.extend(self.search_animetsu(title, anilist_id, episode))
+        if title:
+            results.extend(self.search_allanime(title, episode))
 
         # Simple deduplication by URL
         unique = {}
