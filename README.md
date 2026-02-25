@@ -31,7 +31,7 @@ uv tool install autoflix-cli
 pip install autoflix-cli
 ```
 
-> **Note:** You need an external media player such as **MPV** or **VLC** installed.
+> **Note:** You need an external media player such as **MPV**, **VLC** or **a browser** installed.
 
 ## 💻 Usage
 

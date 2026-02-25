@@ -4,6 +4,8 @@ import os
 import subprocess
 import json
 import urllib.parse
+import time
+import webbrowser
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from .cli_utils import (
     select_from_list,
@@ -161,7 +163,7 @@ def play_video(
             print_error(f"Failed to download subtitles: {e}")
 
     while True:  # Loop to allow retrying with another player
-        players = ["mpv", "vlc", "← Back"]
+        players = ["mpv", "vlc", "browser", "← Back"]
         player_choice = select_from_list(players, "🎮 Select video player:")
 
         if players[player_choice] == "← Back":
@@ -191,7 +193,9 @@ def play_video(
 
         user_agent = headers.get("User-Agent", DEFAULT_USER_AGENT)
 
-        if player_name == "vlc":
+        if player_name == "browser":
+            pass  # No executable needed
+        elif player_name == "vlc":
             player_executable = get_vlc_path()
             if not player_executable:
                 print_error("VLC not found. Please install it or add it to your PATH.")
@@ -207,6 +211,79 @@ def play_video(
                 if retry == 1:  # Back
                     return False
                 continue
+
+        if player_name == "browser":
+            print_info(f"Launching [bold cyan]Browser[/bold cyan] Player...")
+
+            # Construct Proxy URL
+            proxy_headers = headers.copy()
+            if referer:
+                proxy_headers["Referer"] = referer
+
+            if player_config.get("alt-used") is True:
+                proxy_headers["Alt-Used"] = domain
+
+            sec_headers = player_config.get("sec_headers")
+            if sec_headers:
+                if isinstance(sec_headers, str):
+                    for part in sec_headers.split(";"):
+                        if ":" in part:
+                            k, v = part.split(":", 1)
+                            proxy_headers[k.strip()] = v.strip()
+
+            headers_json = json.dumps(proxy_headers)
+            encoded_url = urllib.parse.quote(stream_url)
+            encoded_headers = urllib.parse.quote(headers_json)
+
+            if not proxy.PROXY_URL:
+                print_error("Proxy server not initialized.")
+                return False
+
+            endpoint = "stream"
+            if ("ext" in player_config and player_config["ext"] == "mp4") or is_mp4:
+                endpoint = "video"
+
+            local_stream_url = f"{proxy.PROXY_URL}/{endpoint}?url={encoded_url}&headers={encoded_headers}"
+
+            encoded_local_stream_url = urllib.parse.quote(local_stream_url)
+            browser_player_url = (
+                f"{proxy.PROXY_URL}/player?url={encoded_local_stream_url}"
+            )
+
+            if local_subtitle_path:
+                abs_sub_path = os.path.abspath(local_subtitle_path)
+                encoded_sub = urllib.parse.quote(abs_sub_path)
+                browser_player_url += f"&sub_path={encoded_sub}"
+
+            # Reset heartbeat and event
+            proxy.player_finished_event.clear()
+            proxy.player_heartbeat_time = time.time()
+
+            webbrowser.open(browser_player_url)
+            print_info(
+                "Waiting for playback to finish in browser... (Close the tab to continue)"
+            )
+
+            try:
+                # Polling loop
+                while True:
+                    time.sleep(1)
+                    if proxy.player_finished_event.is_set():
+                        print_success(
+                            "Playback finished (end of video or manually marked)."
+                        )
+                        return True
+
+                    # Check heartbeat timeout (e.g., > 6 seconds without heartbeat)
+                    if time.time() - proxy.player_heartbeat_time > 6.0:
+                        print_success("Browser tab closed or playback stopped.")
+                        return True
+            except KeyboardInterrupt:
+                print_info("\nPlayback interrupted by user.")
+                return True
+            except Exception as e:
+                print_error(f"Error monitoring browser player: {e}")
+                return False
 
         # Determine Launch Mode from config
         mode = player_config.get("mode", "proxy")  # Default to proxy

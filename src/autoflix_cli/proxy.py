@@ -14,6 +14,10 @@ PROXY_HOST = "127.0.0.1"
 PROXY_URL = None
 _server_instance = None  # To store the server for shutdown
 
+# Web Player State
+player_finished_event = threading.Event()
+player_heartbeat_time = 0
+
 app = Flask(__name__)
 
 # Requested Google DNS Options
@@ -290,6 +294,238 @@ def proxy_video():
     return Response(
         stream_with_context(generate()), status=status_code, headers=response_headers
     )
+
+
+# ---------------------------------------------------------------------------
+# Routes: Web Player & Heartbeat
+# ---------------------------------------------------------------------------
+@app.route("/player")
+def proxy_player_ui():
+    html_content = """<!DOCTYPE html>
+<html>
+<head>
+    <title>AutoFlix Web Player</title>
+    <meta charset="utf-8">
+    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; overflow: hidden; font-family: sans-serif; }
+        .plyr { width: 100%; height: 100%; }
+        #controls-overlay { position: absolute; top: 20px; right: 20px; z-index: 1000; opacity: 0; transition: opacity 0.3s; }
+        body:hover #controls-overlay, .plyr--active #controls-overlay { opacity: 1; }
+        .action-btn { background-color: rgba(255, 0, 0, 0.7); color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        .action-btn:hover { background-color: rgba(255, 0, 0, 1); }
+        .message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-size: 24px; display: none; text-align: center; z-index: 2000; }
+        .message button { margin-top: 20px; padding: 10px 20px; font-size: 18px; cursor: pointer; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
+</head>
+<body>
+    <div id="controls-overlay">
+        <button id="closeBtn" class="action-btn">Mark as watched & Close</button>
+    </div>
+    
+    <video id="video" controls crossorigin="anonymous" playsinline>
+        <!-- Title and captions will be injected via JS -->
+    </video>
+    
+    <div id="finishedMsg" class="message">
+        Video finished! You can safely close this tab.<br>
+        <button onclick="window.close()">Close Tab</button>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const video = document.getElementById('video');
+            const urlParams = new URLSearchParams(window.location.search);
+            const source = urlParams.get('url');
+            const subPath = urlParams.get('sub_path');
+            
+            const isMp4 = source && source.indexOf('/video') !== -1;
+            const closeBtn = document.getElementById('closeBtn');
+
+            // Setup subtitle track if provided
+            if (subPath) {
+                const track = document.createElement('track');
+                track.kind = 'captions';
+                track.label = 'Subtitles';
+                track.src = '/player/subtitle?path=' + encodeURIComponent(subPath);
+                track.default = true;
+                video.appendChild(track);
+            }
+
+            const defaultOptions = {
+                captions: { active: true, update: true, language: 'auto' },
+                controls: [
+                    'play-large', 'play', 'progress', 'current-time', 'mute', 'volume',
+                    'captions', 'settings', 'pip', 'airplay', 'fullscreen'
+                ],
+                settings: ['captions', 'quality', 'speed']
+            };
+
+            let player;
+
+            if (source) {
+                if (isMp4 || !Hls.isSupported()) {
+                    // Native playback for MP4 or native HLS (Safari)
+                    video.src = source;
+                    player = new Plyr(video, defaultOptions);
+                    player.play();
+                } else {
+                    // hls.js for M3U8 with quality selection
+                    const hls = new Hls({
+                        xhrSetup: function(xhr, url) {
+                            xhr.withCredentials = false; // Important to avoid CORS issues if not needed
+                        }
+                    });
+                    
+                    hls.loadSource(source);
+                    hls.attachMedia(video);
+                    
+                    hls.on(Hls.Events.MANIFEST_PARSED, function (event, data) {
+                        // Extract available qualities
+                        const availableQualities = hls.levels.map((l) => l.height);
+                        // Add Auto option
+                        availableQualities.unshift(0); 
+
+                        defaultOptions.quality = {
+                            default: 0, // 0 means auto
+                            options: availableQualities,
+                            forced: true,
+                            onChange: (e) => updateQuality(e),
+                        };
+                        // Custom labels for the qualities
+                        defaultOptions.i18n = {
+                            qualityLabel: {
+                                0: 'Auto',
+                            },
+                        };
+
+                        player = new Plyr(video, defaultOptions);
+                        
+                        // Play immediately after setup
+                        player.play();
+                    });
+
+                    // Recover from errors
+                    hls.on(Hls.Events.ERROR, function(event, data) {
+                        if (data.fatal) {
+                            switch (data.type) {
+                                case Hls.ErrorTypes.NETWORK_ERROR:
+                                    console.error("Fatal network error encountered, try to recover");
+                                    hls.startLoad();
+                                    break;
+                                case Hls.ErrorTypes.MEDIA_ERROR:
+                                    console.error("Fatal media error encountered, try to recover");
+                                    hls.recoverMediaError();
+                                    break;
+                                default:
+                                    hls.destroy();
+                                    break;
+                            }
+                        }
+                    });
+
+                    function updateQuality(newQuality) {
+                        if (newQuality === 0) {
+                            window.hls.currentLevel = -1; // -1 triggers auto level
+                        } else {
+                            // Find the index of the level matching the requested height
+                            const levelIndex = hls.levels.findIndex((l) => l.height === newQuality);
+                            if (levelIndex !== -1) {
+                                hls.currentLevel = levelIndex;
+                            }
+                        }
+                    }
+                    window.hls = hls; // Make available globally for quality update
+                }
+            }
+
+            // Heartbeat logic
+            let heartbeatInterval = setInterval(() => {
+                fetch('/player/heartbeat').catch(e => console.log('Heartbeat failed'));
+            }, 2000);
+
+            function endPlayback() {
+                clearInterval(heartbeatInterval);
+                fetch('/player/end').then(() => {
+                    document.getElementById('finishedMsg').style.display = 'block';
+                    document.getElementById('controls-overlay').style.display = 'none';
+                    if(player) {
+                        player.destroy();
+                    } else {
+                        video.style.display = 'none';
+                    }
+                    // Try to close tab automatically
+                    setTimeout(() => window.close(), 1000);
+                }).catch(e => {
+                    // Fallback UI
+                    document.getElementById('finishedMsg').style.display = 'block';
+                    if(player) {
+                        player.destroy();
+                    } else {
+                        video.style.display = 'none';
+                    }
+                });
+            }
+
+            // Listen to video native 'ended' event
+            video.addEventListener('ended', endPlayback);
+            closeBtn.addEventListener('click', endPlayback);
+        });
+    </script>
+</body>
+</html>"""
+    return Response(html_content, mimetype="text/html")
+
+
+@app.route("/player/subtitle")
+def proxy_player_subtitle():
+    import os
+
+    sub_path = request.args.get("path")
+    if not sub_path or not os.path.exists(sub_path):
+        return "Subtitle not found", 404
+
+    try:
+        with open(sub_path, "rb") as f:
+            content = f.read()
+
+        # Standardize SRT to WebVTT for HTML5 video <track> compatibility
+        if sub_path.lower().endswith(".srt"):
+            text = content.decode("utf-8", errors="ignore")
+            # Replace timestamps ',' with '.' for VTT format e.g: 00:00:10,500 -> 00:00:10.500
+            import re
+
+            vtt_content = "WEBVTT\n\n" + re.sub(
+                r"(\d{2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", text
+            )
+            return Response(
+                vtt_content,
+                mimetype="text/vtt",
+                headers={"Access-Control-Allow-Origin": "*"},
+            )
+
+        return Response(
+            content, mimetype="text/vtt", headers={"Access-Control-Allow-Origin": "*"}
+        )
+    except Exception as e:
+        return f"Error loading subtitle: {e}", 500
+
+
+@app.route("/player/heartbeat")
+def proxy_player_heartbeat():
+    global player_heartbeat_time
+    # Update global timestamp of the heartbeat
+    player_heartbeat_time = time.time()
+    return "ok", 200
+
+
+@app.route("/player/end")
+def proxy_player_end():
+    global player_finished_event
+    player_finished_event.set()
+    return "ok", 200
 
 
 # ---------------------------------------------------------------------------
