@@ -4,12 +4,12 @@ import random
 
 class SubtitleExtractor:
     """
-    Extracteur de sous-titres optimisé pour être utilisé comme bibliothèque.
-    Les résultats sont triés par ordre de confiance (OpenSubtitles > Subsense > WYZIE).
+    Subtitle extractor optimized to be used as a library.
+    Results are sorted by order of confidence (OpenSubtitles > WYZIE > Subsense).
     """
 
-    # Ordre de confiance des sources (plus bas = plus haut dans la liste)
-    SOURCE_PRIORITY = {"OpenSubtitles (Stremio)": 1, "Subsense": 2, "WYZIE": 3}
+    # Order of confidence of sources (lower = higher in the list)
+    SOURCE_PRIORITY = {"OpenSubtitles (Stremio)": 1, "WYZIE": 2, "Subsense": 3}
 
     def _fetch_stremio(self, base_url, imdb_id, season=None, episode=None):
         """Helper for Stremio-style subtitle APIs."""
@@ -24,12 +24,12 @@ class SubtitleExtractor:
             data = response.json()
             return data.get("subtitles", [])
         except Exception as e:
-            # En mode bibliothèque, on reste discret sur les erreurs réseau
+            # In library mode, we stay discreet about network errors
             return []
 
     def get_opensubtitles_stremio(self, imdb_id, season=None, episode=None):
-        """OpenSubtitles via Stremio bridge (Support français inclus)."""
-        # Ajout de 'fr' à la liste des langues demandées
+        """OpenSubtitles via Stremio bridge (French support included)."""
+        # Adding 'fr' to the list of requested languages
         base_url = "https://opensubtitles.stremio.homes/en|fr|hi|de|ar|tr|es|ta|te|ru|ko/ai-translated=true|from=all|auto-adjustment=true"
         subs = self._fetch_stremio(base_url, imdb_id, season, episode)
         for s in subs:
@@ -37,8 +37,8 @@ class SubtitleExtractor:
         return subs
 
     def get_subsense(self, imdb_id, season=None, episode=None):
-        """Subsense via Stremio bridge (Support français inclus)."""
-        # Ajout de 'fr' à la config
+        """Subsense via Stremio bridge (French support included)."""
+        # Adding 'fr' to the config
         config = (
             'n0tcjfba-{"languages":["en","fr","hi","ta","es","ar"],"maxSubtitles":10}'
         )
@@ -74,16 +74,16 @@ class SubtitleExtractor:
 
     def search(self, imdb_id, season=None, episode=None, lang_filter=None):
         """
-        Recherche, filtre et trie les sous-titres par ordre de confiance.
-        :param lang_filter: Code langue ou nom (ex: 'French', 'fr').
-        :return: Liste de dictionnaires triée.
+        Search, filter and sort subtitles by order of confidence.
+        :param lang_filter: Language code or name (e.g., 'French', 'fr').
+        :return: Sorted list of dictionaries.
         """
         all_subs = []
         all_subs.extend(self.get_opensubtitles_stremio(imdb_id, season, episode))
-        all_subs.extend(self.get_subsense(imdb_id, season, episode))
         all_subs.extend(self.get_wyzie(imdb_id, season, episode))
+        all_subs.extend(self.get_subsense(imdb_id, season, episode))
 
-        # 1. Filtrage par langue (insensible à la casse)
+        # 1. Filter by language (case insensitive)
         if lang_filter:
             f = lang_filter.lower()
             # Dynamic mapping from languages.py
@@ -99,8 +99,8 @@ class SubtitleExtractor:
                     filtered.append(sub)
             all_subs = filtered
 
-        # 2. Tri par priorité de source (OpenSubs > Subsense > WYZIE)
-        # On mélange d'abord pour avoir un ordre aléatoire entre les liens d'une même source
+        # 2. Sort by source priority (OpenSubs > WYZIE > Subsense)
+        # First shuffle to have a random order between links from the same source
         random.shuffle(all_subs)
         all_subs.sort(key=lambda x: self.SOURCE_PRIORITY.get(x["source"], 99))
         return all_subs
