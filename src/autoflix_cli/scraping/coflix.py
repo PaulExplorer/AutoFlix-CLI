@@ -122,7 +122,9 @@ def get_episode(url: str) -> Episode:
             title = episode.find("span", class_="fwb link-co").text.strip()
             break
 
-    players_url = soup.find("iframe").attrs["src"]
+    title_player = soup.find("div", {"class": "title-player"})
+    players_url_base64 = title_player.find("button").attrs["data-src"]
+    players_url = str(base64.b64decode(players_url_base64), "utf-8")
 
     players = get_players(players_url)
 
