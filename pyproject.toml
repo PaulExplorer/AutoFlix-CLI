@@ -21,6 +21,7 @@ dependencies = [
     "platformdirs>=4.0.0",
     "pycryptodome>=3.23.0",
     "m3u8>=6.0.0",
+    "upnpclient>=2.0.0",
 ]
 
 # Project URLs

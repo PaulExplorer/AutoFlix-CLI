@@ -10,9 +10,11 @@ import m3u8
 
 # Global Configuration
 PROXY_PORT = 0
-PROXY_HOST = "127.0.0.1"
-PROXY_URL = None
-_server_instance = None  # To store the server for shutdown
+PROXY_HOST = "0.0.0.0"   # Listen on all interfaces so LAN devices (TV/UPnP) can reach the proxy
+PROXY_URL = None          # Loopback URL used by local players (browser, mpv, vlc)
+LAN_IP = "127.0.0.1"     # Machine's LAN IP — populated at startup
+LAN_PROXY_URL = None      # LAN-reachable URL used for UPnP casting
+_server_instance = None   # To store the server for shutdown
 
 # Web Player State
 player_finished_event = threading.Event()
@@ -547,20 +549,32 @@ def run_flask(port):
 
 
 def start_proxy_server(port=0):
-    global PROXY_PORT, PROXY_URL
+    global PROXY_PORT, PROXY_URL, LAN_IP, LAN_PROXY_URL
 
     if port == 0:
         port = find_free_port()
 
     PROXY_PORT = port
-    PROXY_URL = f"http://{PROXY_HOST}:{PROXY_PORT}"
+
+    # Detect LAN IP so UPnP devices can reach the proxy
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as _s:
+            _s.connect(("8.8.8.8", 80))
+            LAN_IP = _s.getsockname()[0]
+    except Exception:
+        LAN_IP = "127.0.0.1"
+
+    # Local players (browser, mpv, vlc) still use loopback for simplicity
+    PROXY_URL = f"http://127.0.0.1:{PROXY_PORT}"
+    # UPnP / external devices use the LAN-reachable address
+    LAN_PROXY_URL = f"http://{LAN_IP}:{PROXY_PORT}"
 
     # Launch in a Daemon thread (stops when the main program stops)
     t = threading.Thread(target=run_flask, args=(port,))
     t.daemon = True
     t.start()
 
-    print(f"[*] M3U8 Proxy started on http://{PROXY_HOST}:{PROXY_PORT}")
+    print(f"[*] M3U8 Proxy started on {PROXY_URL} (LAN: {LAN_PROXY_URL})")
     return port
 
 

@@ -30,6 +30,7 @@ PLAYERS: Dict[str, Dict[str, str]] = {
     "mpv": {"display": "mpv"},
     "vlc": {"display": "vlc"},
     "browser": {"display": "browser"},
+    "upnp": {"display": "📺 UPnP/DLNA (TV, Kodi...)"},
     "manual": {"display": "manual"},
 }
 
@@ -194,13 +195,17 @@ def play_video(
     while True:  # Loop to allow retrying with another player
         player_pref = tracker.get_player()
         if force_manual_mode or not player_pref or player_pref == "manual":
-            players = ["mpv", "vlc", "browser", "← Back"]
+            players = ["mpv", "vlc", "browser", "📺 UPnP/DLNA (TV, Kodi...)", "← Back"]
             player_choice = select_from_list(players, "🎮 Select video player:")
 
             if players[player_choice] == "← Back":
                 return False
 
-            player_name = players[player_choice]
+            # Normalise the display label back to the internal key
+            if players[player_choice].startswith("📺"):
+                player_name = "upnp"
+            else:
+                player_name = players[player_choice]
             player_executable = None
 
         else:
@@ -228,8 +233,8 @@ def play_video(
 
         user_agent = headers.get("User-Agent", DEFAULT_USER_AGENT)
 
-        if player_name == "browser":
-            pass  # No executable needed
+        if player_name in ("browser", "upnp"):
+            pass  # No system executable needed
         elif player_name == "vlc":
             player_executable = get_vlc_path()
             if not player_executable:
@@ -321,6 +326,52 @@ def play_video(
             except Exception as e:
                 print_error(f"Error monitoring browser player: {e}")
                 return False
+
+        elif player_name == "upnp":
+            # --- UPnP / DLNA cast to TV ---
+            from . import proxy as _proxy
+            from .upnp_cast import interactive_upnp_cast
+
+            if not _proxy.LAN_PROXY_URL:
+                print_error("Proxy server not initialized.")
+                return False
+
+            # Build the LAN-reachable proxy URL
+            endpoint = "stream"
+            if is_mp4:
+                endpoint = "video"
+
+            proxy_headers = headers.copy()
+            if not is_direct:
+                try:
+                    domain = url.split("/")[2].lower()
+                    if player_config.get("referrer") == "full":
+                        _ref = url
+                    elif player_config.get("referrer") == "path":
+                        _ref = f"https://{domain}/"
+                    elif isinstance(player_config.get("referrer"), str):
+                        _ref = player_config.get("referrer")
+                    else:
+                        _ref = f"https://{domain}"
+                    proxy_headers["Referer"] = _ref + "/"
+                except IndexError:
+                    pass
+
+            import json as _json
+            import urllib.parse as _up
+            encoded_url = _up.quote(stream_url)
+            encoded_headers = _up.quote(_json.dumps(proxy_headers))
+            lan_stream_url = (
+                f"{_proxy.LAN_PROXY_URL}/{endpoint}"
+                f"?url={encoded_url}&headers={encoded_headers}"
+            )
+
+            success = interactive_upnp_cast(
+                stream_url=lan_stream_url,
+                title=title,
+                is_hls=(endpoint == "stream"),
+            )
+            return success
 
         # Determine Launch Mode from config
         mode = player_config.get("mode", "proxy")  # Default to proxy
