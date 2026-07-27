@@ -148,6 +148,12 @@ class AniListClient:
                             format
                             episodes
                             seasonYear
+                            status
+                            nextAiringEpisode {
+                                episode
+                                airingAt
+                                timeUntilAiring
+                            }
                         }
                     }
                 }

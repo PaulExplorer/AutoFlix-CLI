@@ -48,10 +48,29 @@ def handle_anilist_continue():
         progress = e["progress"] or 0
         total = e["media"]["episodes"] or "?"
 
-        if isinstance(total, int) and progress >= total:
-            status = f"Finished {progress}/{total}"
+        # Calculate latest released episode & episodes behind
+        next_airing = e["media"].get("nextAiringEpisode")
+        latest_released = None
+        if next_airing and isinstance(next_airing, dict) and next_airing.get("episode"):
+            latest_released = max(0, next_airing["episode"] - 1)
+        elif isinstance(e["media"].get("episodes"), int):
+            latest_released = e["media"]["episodes"]
+
+        if latest_released is not None:
+            behind = max(0, latest_released - progress)
+            behind_str = f"{behind} ep behind" if behind > 0 else "Up to date"
         else:
-            status = f"Ep {progress+1}/{total}"
+            behind_str = None
+
+        if isinstance(total, int) and progress >= total:
+            status_info = f"Finished {progress}/{total}"
+        else:
+            status_info = f"Ep {progress+1}/{total}"
+
+        if behind_str:
+            status = f"{status_info} - {behind_str}"
+        else:
+            status = status_info
 
         display_options.append(f"{title} ({status})")
 
