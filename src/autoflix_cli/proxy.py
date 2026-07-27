@@ -22,7 +22,7 @@ app = Flask(__name__)
 
 # Requested Cloudflare DNS Options
 DNS_OPTIONS = {
-    CurlOpt.DOH_URL: "https://1.1.1.1/dns-query",
+    CurlOpt.DOH_URL: "https://cloudflare-dns.com/dns-query",
     CurlOpt.DOH_SSL_VERIFYPEER: 0,
     CurlOpt.DOH_SSL_VERIFYHOST: 0,
 }
