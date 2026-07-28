@@ -174,6 +174,9 @@ def play_video(
 
     print_success(f"Stream URL: [cyan]{stream_url}[/cyan]")
 
+    if not is_mp4 and (".mp4" in stream_url.lower() or ".mp4" in url.lower()):
+        is_mp4 = True
+
     local_subtitle_path = subtitle_url
     if subtitle_url and subtitle_url.startswith("http"):
         print_info("Downloading subtitle file for compatibility...")
@@ -333,8 +336,10 @@ def play_video(
             from .upnp_cast import interactive_upnp_cast
 
             if not _proxy.LAN_PROXY_URL:
-                print_error("Proxy server not initialized.")
-                return False
+                from .upnp_cast import get_lan_ip
+                _proxy.LAN_IP = get_lan_ip()
+                port = _proxy.PROXY_PORT or 8080
+                _proxy.LAN_PROXY_URL = f"http://{_proxy.LAN_IP}:{port}"
 
             # Build the LAN-reachable proxy URL
             endpoint = "stream"
@@ -342,20 +347,21 @@ def play_video(
                 endpoint = "video"
 
             proxy_headers = headers.copy()
-            if not is_direct:
-                try:
-                    domain = url.split("/")[2].lower()
-                    if player_config.get("referrer") == "full":
-                        _ref = url
-                    elif player_config.get("referrer") == "path":
-                        _ref = f"https://{domain}/"
-                    elif isinstance(player_config.get("referrer"), str):
-                        _ref = player_config.get("referrer")
-                    else:
-                        _ref = f"https://{domain}"
-                    proxy_headers["Referer"] = _ref + "/"
-                except IndexError:
-                    pass
+            if referer:
+                proxy_headers["Referer"] = referer
+            if "User-Agent" not in proxy_headers:
+                proxy_headers["User-Agent"] = user_agent
+
+            if player_config.get("alt-used") is True:
+                proxy_headers["Alt-Used"] = domain
+
+            sec_headers = player_config.get("sec_headers")
+            if sec_headers:
+                if isinstance(sec_headers, str):
+                    for part in sec_headers.split(";"):
+                        if ":" in part:
+                            k, v = part.split(":", 1)
+                            proxy_headers[k.strip()] = v.strip()
 
             import json as _json
             import urllib.parse as _up
@@ -370,6 +376,7 @@ def play_video(
                 stream_url=lan_stream_url,
                 title=title,
                 is_hls=(endpoint == "stream"),
+                lan_proxy_url=_proxy.LAN_PROXY_URL,
             )
             return success
 

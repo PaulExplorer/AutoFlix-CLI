@@ -70,16 +70,20 @@ def fetch_with_retry(url, headers, method="GET", stream=False, max_retries=3):
             # Forward the Range header if present (for MP4 seeking)
             req_headers = headers.copy() if headers else {}
 
-            # Handle the Range header coming from the client (VLC)
-            if "Range" in request.headers:
+            # Handle the Range header coming from the client (VLC/TV)
+            from flask import has_request_context
+            if has_request_context() and "Range" in request.headers:
                 req_headers["Range"] = request.headers["Range"]
+
+            # Connect timeout 10s, read timeout 86400s (24h) for streams
+            req_timeout = (10, 86400) if stream else 15
 
             response = session.request(
                 method=method,
                 url=url,
                 headers=req_headers,
                 stream=stream,
-                timeout=15,  # Reasonable timeout
+                timeout=req_timeout,
             )
 
             # If 429 error (Rate Limit) or 5xx, retry
@@ -102,8 +106,18 @@ def fetch_with_retry(url, headers, method="GET", stream=False, max_retries=3):
 # ---------------------------------------------------------------------------
 # Route: /stream (For .m3u8 files)
 # ---------------------------------------------------------------------------
-@app.route("/stream")
+@app.route("/stream", methods=["GET", "HEAD"])
 def proxy_stream():
+    if request.method == "HEAD":
+        return Response(
+            "",
+            status=200,
+            headers={
+                "Content-Type": "application/vnd.apple.mpegurl",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
+
     target_url = request.args.get("url")
     headers_str = request.args.get("headers", "{}")
 
@@ -134,10 +148,20 @@ def proxy_stream():
     def make_proxy_url(endpoint, original_uri):
         # Absolute URL resolution if relative
         absolute_url = urllib.parse.urljoin(base_uri, original_uri)
-        encoded_url = urllib.parse.quote(absolute_url)
-        encoded_headers = urllib.parse.quote(json.dumps(headers))
-        # Points to localhost:PORT
-        return f"http://{PROXY_HOST}:{PROXY_PORT}/{endpoint}?url={encoded_url}&headers={encoded_headers}"
+        encoded_url = urllib.parse.quote(absolute_url, safe="")
+        encoded_headers = urllib.parse.quote(json.dumps(headers), safe="")
+
+        if LAN_PROXY_URL:
+            base_prefix = LAN_PROXY_URL.rstrip("/")
+        else:
+            host_str = (
+                request.host
+                if request and request.host and ":" in request.host and not request.host.startswith("0.0.0.0")
+                else f"{LAN_IP}:{PROXY_PORT}"
+            )
+            base_prefix = f"http://{host_str}"
+
+        return f"{base_prefix}/{endpoint}?url={encoded_url}&headers={encoded_headers}"
 
     # 3. Rewriting segments (.ts)
     # We directly modify the m3u8 object or perform string replace if the object is too complex.
@@ -198,6 +222,123 @@ def proxy_stream():
 
 
 # ---------------------------------------------------------------------------
+# Route: /upnp-stream  (ffmpeg transcode → live MP4 or MPEG-TS for DLNA renderers)
+# ---------------------------------------------------------------------------
+@app.route("/upnp-stream", methods=["GET", "HEAD"])
+def proxy_upnp_stream():
+    """
+    Transcode a local or remote HLS URL to live MP4 or MPEG-TS on-the-fly using ffmpeg.
+    Allows DLNA renderers (TVs) that don't support HLS natively to stream
+    directly as standard HTTP MP4 or MPEG-TS.
+
+    Query params:
+      url — the stream URL (or /stream proxy URL)
+      headers — optional JSON encoded headers
+      fmt — 'ts' (default, video/mp2t) or 'mp4' (video/mp4)
+    """
+    fmt = request.args.get("fmt", "ts")
+    mimetype = "video/mp4" if fmt == "mp4" else "video/mp2t"
+
+    if request.method == "HEAD":
+        return Response(
+            "",
+            status=200,
+            headers={
+                "Content-Type": mimetype,
+                "Accept-Ranges": "bytes",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
+
+    import shutil
+    import subprocess
+
+    source_url = request.args.get("url")
+    headers_str = request.args.get("headers", "{}")
+
+    if not source_url:
+        return "Missing url parameter", 400
+
+    if not shutil.which("ffmpeg"):
+        return (
+            "ffmpeg is not installed. On Fedora: sudo dnf install ffmpeg",
+            503,
+        )
+
+    # Unwrap /stream URL if passed as a proxy URL
+    if "/stream?" in source_url:
+        parsed = urllib.parse.urlparse(source_url)
+        qs = urllib.parse.parse_qs(parsed.query)
+        if "url" in qs and qs["url"]:
+            source_url = qs["url"][0]
+        if "headers" in qs and qs["headers"]:
+            headers_str = qs["headers"][0]
+
+    try:
+        headers_dict = json.loads(headers_str)
+    except Exception:
+        headers_dict = {}
+
+    ffmpeg_headers = ""
+    for k, v in headers_dict.items():
+        ffmpeg_headers += f"{k}: {v}\r\n"
+
+    cmd = ["ffmpeg", "-loglevel", "warning"]
+    if ffmpeg_headers:
+        cmd.extend(["-headers", ffmpeg_headers])
+
+    cmd.extend([
+        "-i", source_url,
+        "-c:v", "copy",             # Video passthrough (0% CPU, no quality loss)
+        "-c:a", "aac",              # Audio → AAC (universal TV support)
+        "-b:a", "192k",
+        "-f", "mpegts" if fmt == "ts" else "mp4",
+    ])
+
+    if fmt == "mp4":
+        cmd.extend(["-movflags", "frag_keyframe+empty_moov+default_base_moof"])
+
+    cmd.append("pipe:1")
+
+    def generate():
+        proc = None
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,
+            )
+            while True:
+                chunk = proc.stdout.read(65536)  # 64 KB chunks
+                if not chunk:
+                    break
+                yield chunk
+        except GeneratorExit:
+            pass  # Client disconnected
+        except Exception as e:
+            print(f"[upnp-stream] ffmpeg error: {e}")
+        finally:
+            if proc and proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=3)
+                except Exception:
+                    proc.kill()
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype=mimetype,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Transfer-Encoding": "chunked",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Catch-all for debugging 404s
 # ---------------------------------------------------------------------------
 @app.route("/", defaults={"path": ""})
@@ -252,8 +393,19 @@ def proxy_ts():
 # ---------------------------------------------------------------------------
 # Route: /video (For single MP4 files with Seeking)
 # ---------------------------------------------------------------------------
-@app.route("/video")
+@app.route("/video", methods=["GET", "HEAD"])
 def proxy_video():
+    if request.method == "HEAD":
+        return Response(
+            "",
+            status=200,
+            headers={
+                "Content-Type": "video/mp4",
+                "Accept-Ranges": "bytes",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
+
     target_url = request.args.get("url")
     headers_str = request.args.get("headers", "{}")
 
