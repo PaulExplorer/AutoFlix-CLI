@@ -4,7 +4,6 @@ from .objects import (
     SearchResult,
     CoflixSeason,
     CoflixSeries,
-    SeasonAccess,
     EpisodeAccess,
     Episode,
     Player,

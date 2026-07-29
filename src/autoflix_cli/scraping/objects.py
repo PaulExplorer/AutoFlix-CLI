@@ -215,6 +215,16 @@ class CoflixMovie:
     def __repr__(self):
         return str(self)
 
+class CoflixSeason:
+    def __init__(self, title: str, episodes: list[EpisodeAccess]):
+        self.title = title
+        self.episodes = episodes
+
+    def __str__(self):
+        return f"SamaSeason(title='{self.title}', episodes={self.episodes})"
+
+    def __repr__(self):
+        return str(self)
 
 class CoflixSeries:
     def __init__(
@@ -233,18 +243,6 @@ class CoflixSeries:
 
     def __str__(self):
         return f"SamaSeries(title='{self.title}', url='{self.url}', img='{self.img}', genres={self.genres}, seasons={self.seasons})"
-
-    def __repr__(self):
-        return str(self)
-
-
-class CoflixSeason:
-    def __init__(self, title: str, episodes: list[EpisodeAccess]):
-        self.title = title
-        self.episodes = episodes
-
-    def __str__(self):
-        return f"SamaSeason(title='{self.title}', episodes={self.episodes})"
 
     def __repr__(self):
         return str(self)
