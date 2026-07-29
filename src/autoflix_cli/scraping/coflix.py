@@ -51,7 +51,8 @@ def search(query: str) -> list[SearchResult]:
         try:
             if result.find("img").attrs["src"]:
                 image: str = "https:" + result.find("img").attrs["src"]
-        except: pass
+            else: image = None
+        except: image = None
 
         title = result.find("p", {"class": "md-manga-card-name"}).text
         url = result.find("a").attrs["href"]
@@ -174,35 +175,53 @@ def get_movie(url: str) -> CoflixMovie:
 
     return CoflixMovie(title, url, img, genres, year, players)
 
+def get_season_name(soup, id):
+    season_container = soup.find("div", {"id": "cfSeasonTabs"})
+
+    for season in season_container.find_all("button"):
+        if season.attrs["data-season"] == id:
+            return season.text
+
+    try:
+        return "Saison" + (int(id) + 1)
+    except: 
+        return "Saison Inconnu"
 
 def get_series(url: str) -> CoflixSeries:
     response = scraper.get(url)
     response.raise_for_status()
 
-    soup = BeautifulSoup(response.text, "html5lib")
+    content = response.text
+    soup = BeautifulSoup(content, "html5lib")
 
     title: str = soup.find("h1").text.strip()
-    img: str = soup.find("div", {"class": "poster"}).find("img").attrs["src"]
+
+    try:
+        if soup.find("img", {"class": "cf-movie-cover-img"}).attrs["src"]:
+            img: str = soup.find("img", {"class": "cf-movie-cover-img"}).attrs["src"]
+        else: img = None
+    except: img = None
 
     genres: list[str] = []
-    genres_container = soup.find("div", {"class": "ctgrs"})
+    genres_container = soup.find("div", {"class": "cf-movie-tags-row"})
 
     if genres_container:
         for genre_link in genres_container.find_all("a"):
             genres.append(genre_link.text)
 
-    seasons_container = soup.find("div", {"class": "drp-seasons"}).find("ul", {"class": "sub-menu"})
-    seasons: list[SeasonAccess] = []
+    seasons: list[CoflixSeason] = []
 
-    if seasons_container:
-        for season in seasons_container.find_all("li"):
-            input_element = season.find("input")
-            if input_element:
-                element_id = input_element.attrs["post-id"]
-                season_id = input_element.attrs["data-season"]
+    for season in soup.find_all("div", {"class": "cf-episodes-panel"}):
+        episodes: list[EpisodeAccess] = []
+        for episode in season.find_all("div", {"class": "cf-episode-item"}):
+            episode_name = episode.find("span", {"class": "cf-episode-title"}).text
+            episode_url = episode.attrs["onclick"]
 
-                link = f"{website_origin}/wp-json/apiflix/v1/series/{element_id}/{season_id}"
-                seasons.append(SeasonAccess(season.text.strip(), link))
+            episodes.append(EpisodeAccess(episode_name, episode_url))
+
+        season_name = get_season_name(soup, season.attrs["data-panel"])
+
+        seasons.append(CoflixSeason(season_name, episodes))
 
     return CoflixSeries(title, url, img, genres, seasons)
 

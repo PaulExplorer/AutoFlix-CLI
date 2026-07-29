@@ -225,7 +225,7 @@ class CoflixSeries:
         url: str,
         img: str,
         genres: list[str],
-        seasons: list[SeasonAccess],
+        seasons: list[CoflixSeason],
     ):
         self.title = title
         self.url = url
@@ -241,13 +241,12 @@ class CoflixSeries:
 
 
 class CoflixSeason:
-    def __init__(self, title: str, url: str, episodes: list[EpisodeAccess]):
+    def __init__(self, title: str, episodes: list[EpisodeAccess]):
         self.title = title
-        self.url = url
         self.episodes = episodes
 
     def __str__(self):
-        return f"SamaSeason(title='{self.title}', url='{self.url}', episodes={self.episodes})"
+        return f"SamaSeason(title='{self.title}', episodes={self.episodes})"
 
     def __repr__(self):
         return str(self)
