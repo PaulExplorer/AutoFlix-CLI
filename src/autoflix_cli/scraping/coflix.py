@@ -11,6 +11,7 @@ from .objects import (
 )
 from .utils import parse_episodes_from_js
 import base64
+import json
 import re
 from ..proxy import DNS_OPTIONS
 
@@ -103,6 +104,32 @@ def get_players(players_url: str) -> list[Player]:
     return players
 
 
+def _parse_cfservers(content: str) -> list[Player]:
+    start = content.find('var cfServers = ')
+    if start == -1:
+        return []
+    bracket_start = content.find('[', start)
+    if bracket_start == -1:
+        return []
+    depth = 0
+    bracket_end = -1
+    for i in range(bracket_start, len(content)):
+        if content[i] == '[':
+            depth += 1
+        elif content[i] == ']':
+            depth -= 1
+            if depth == 0:
+                bracket_end = i + 1
+                break
+    if bracket_end == -1:
+        return []
+    try:
+        servers = json.loads(content[bracket_start:bracket_end])
+        return [Player(s["nombre"], s["embed_url"]) for s in servers]
+    except (json.JSONDecodeError, KeyError):
+        return []
+
+
 def get_episode(url: str) -> Episode:
     """
     Get episode details including players.
@@ -121,8 +148,11 @@ def get_episode(url: str) -> Episode:
 
     title: str = soup.find("h1").text
     players_url: str = soup.find("iframe").attrs["src"]
-
-    players = get_players(players_url)
+    
+    if "lecteurvideo.com" in players_url:
+        players = get_players(players_url)
+    else:
+        players = _parse_cfservers(content)
 
     return Episode(title, players)
 
@@ -148,14 +178,19 @@ def get_movie(url: str) -> CoflixMovie:
     response = scraper.get(url)
     response.raise_for_status()
 
-    soup = BeautifulSoup(response.text, "html5lib")
+    content = response.text
+    soup = BeautifulSoup(content, "html5lib")
 
     title: str = soup.find("h1").text.strip()
     img: str = get_content_img(soup)
     genres: list[str] = get_genres(soup)
 
     players_url = soup.find("iframe", {"id": "cfPlayerFrame"}).attrs["src"]
-    players = get_players(players_url)
+
+    if "lecteurvideo.com" in players_url:
+        players = get_players(players_url)
+    else:
+        players = _parse_cfservers(content)
 
     return CoflixMovie(title, url, img, genres, players)
 
