@@ -51,6 +51,7 @@ DEFAULT_PLAYERS = {
     "vidzy": {"type": "default"},
     "ok.ru": {"type": "default"},
     "ansembed": { "type": "default" },
+    "morencius": { "type": "default" },
     "videzz": {
         "type": "vidoza",
         "mode": "proxy",
