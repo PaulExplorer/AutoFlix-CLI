@@ -11,6 +11,7 @@ from .objects import (
 )
 from .utils import parse_episodes_from_js
 import base64
+import re
 from ..proxy import DNS_OPTIONS
 
 website_origin = ""
@@ -193,7 +194,9 @@ def get_series(url: str) -> CoflixSeries:
         episodes: list[EpisodeAccess] = []
         for episode in season.find_all("div", {"class": "cf-episode-item"}):
             episode_name = episode.find("span", {"class": "cf-episode-title"}).text
-            episode_url = episode.attrs["onclick"]
+            onclick = episode.attrs.get("onclick", "")
+            match = re.search(r"https?://[^\s'\"<>]+", onclick)
+            episode_url = match.group(0) if match else onclick
 
             episodes.append(EpisodeAccess(episode_name, episode_url))
 
