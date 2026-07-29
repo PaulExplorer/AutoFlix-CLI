@@ -119,37 +119,12 @@ def get_episode(url: str) -> Episode:
     content = response.text
     soup = BeautifulSoup(content, "html5lib")
 
-    title: str = ""
-    episodes_div = soup.find("div", {"class": "episodes"})
-    for episode in episodes_div.find_all("div", class_="episode"):
-        if episode.find("a").attrs["href"] == url:
-            title = episode.find("span", class_="fwb link-co").text.strip()
-            break
-
-    title_player = soup.find("div", {"class": "title-player"})
-    players_url_base64 = title_player.find("button").attrs["data-src"]
-    players_url = str(base64.b64decode(players_url_base64), "utf-8")
+    title: str = soup.find("h1").text
+    players_url: str = soup.find("iframe").attrs["src"]
 
     players = get_players(players_url)
 
     return Episode(title, players)
-
-
-def get_season(url: str) -> CoflixSeason:
-    response = scraper.get(url)
-    response.raise_for_status()
-
-    content = response.json()
-
-    title = content["title"]
-    episodes: list[EpisodeAccess] = []
-
-    for episode in content["episodes"]:
-        name = f"Episode {episode['number']}"
-        episodes.append(EpisodeAccess(name, url=episode["links"]))
-
-    return CoflixSeason(title, url, episodes)
-
 
 def get_movie(url: str) -> CoflixMovie:
     response = scraper.get(url)
