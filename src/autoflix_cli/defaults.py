@@ -50,6 +50,7 @@ DEFAULT_PLAYERS = {
     "bingezove": {"type": "default"},
     "vidzy": {"type": "default"},
     "ok.ru": {"type": "default"},
+    "ansembed": { "type": "default" },
     "videzz": {
         "type": "vidoza",
         "mode": "proxy",
