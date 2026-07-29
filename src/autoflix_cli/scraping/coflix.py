@@ -37,23 +37,26 @@ def get_website_url(portal=portals["coflix"]):
 
 
 def search(query: str) -> list[SearchResult]:
-    page = website_origin + f"/suggest.php?query={query}"
+    page = website_origin + f"/?s={query}"
 
     response = scraper.get(page)
     response.raise_for_status()
-    response = response.json()
+
+    content = response.text
+    soup = BeautifulSoup(content, "html5lib")
 
     results: list[SearchResult] = []
 
-    for result in response:
-        image: str = result["image"]
-        # Handle cases where the image might not have the expected format
+    for result in soup.find_all("div", {"class": "md-manga-card"}):
         try:
-            image = "https://" + image.split("//")[1].split('"')[0]
-        except IndexError:
-            pass  # Keep the original url if the split fails
+            if result.find("img").attrs["src"]:
+                image: str = "https:" + result.find("img").attrs["src"]
+        except: pass
 
-        results.append(SearchResult(result["title"], result["url"], image, []))
+        title = result.find("p", {"class": "md-manga-card-name"}).text
+        url = result.find("a").attrs["href"]
+
+        results.append(SearchResult(title, url, image, []))
 
     return results
 
