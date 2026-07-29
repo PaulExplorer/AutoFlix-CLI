@@ -126,6 +126,24 @@ def get_episode(url: str) -> Episode:
 
     return Episode(title, players)
 
+def get_genres(soup) -> list[str]:
+    genres: list[str] = []
+    genres_container = soup.find("div", {"class": "cf-movie-tags-row"})
+
+    if genres_container:
+        for genre_link in genres_container.find_all("a"):
+            genres.append(genre_link.text)
+
+    return genres
+
+def get_content_img(soup) -> str:
+    try:
+        if soup.find("img", {"class": "cf-movie-cover-img"}).attrs["src"]:
+            return soup.find("img", {"class": "cf-movie-cover-img"}).attrs["src"]
+    except: pass
+
+    return None
+
 def get_movie(url: str) -> CoflixMovie:
     response = scraper.get(url)
     response.raise_for_status()
@@ -133,22 +151,13 @@ def get_movie(url: str) -> CoflixMovie:
     soup = BeautifulSoup(response.text, "html5lib")
 
     title: str = soup.find("h1").text.strip()
-    img: str = soup.find("div", {"class": "title-img"}).find("img").attrs["src"]
+    img: str = get_content_img(soup)
+    genres: list[str] = get_genres(soup)
 
-    genres: list[str] = []
-    genres_container = soup.find("div", {"class": "ctgrs"})
-
-    if genres_container:
-        for genre_link in genres_container.find_all("a"):
-            genres.append(genre_link.text)
-
-    year_elem = soup.find("span", {"class": "fwb fz20 e-fz25 dib"})
-    year = year_elem.text.strip() if year_elem else "Unknown"
-
-    players_url = soup.find("iframe").attrs["src"]
+    players_url = soup.find("iframe", {"id": "cfPlayerFrame"}).attrs["src"]
     players = get_players(players_url)
 
-    return CoflixMovie(title, url, img, genres, year, players)
+    return CoflixMovie(title, url, img, genres, players)
 
 def get_season_name(soup, id):
     season_container = soup.find("div", {"id": "cfSeasonTabs"})
@@ -170,19 +179,8 @@ def get_series(url: str) -> CoflixSeries:
     soup = BeautifulSoup(content, "html5lib")
 
     title: str = soup.find("h1").text.strip()
-
-    try:
-        if soup.find("img", {"class": "cf-movie-cover-img"}).attrs["src"]:
-            img: str = soup.find("img", {"class": "cf-movie-cover-img"}).attrs["src"]
-        else: img = None
-    except: img = None
-
-    genres: list[str] = []
-    genres_container = soup.find("div", {"class": "cf-movie-tags-row"})
-
-    if genres_container:
-        for genre_link in genres_container.find_all("a"):
-            genres.append(genre_link.text)
+    img: str = get_content_img(soup)
+    genres: list[str] = get_genres(soup)
 
     seasons: list[CoflixSeason] = []
 

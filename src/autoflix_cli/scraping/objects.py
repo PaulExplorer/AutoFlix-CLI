@@ -201,18 +201,16 @@ class CoflixMovie:
         url: str,
         img: str,
         genres: list[str],
-        year: int,
         players: list[Player],
     ):
         self.title = title
         self.url = url
         self.img = img
         self.genres = genres
-        self.year = year
         self.players = players
 
     def __str__(self):
-        return f"CoflixMovie(title='{self.title}', url='{self.url}', img='{self.img}', genres={self.genres}, year={self.year}, players={self.players})"
+        return f"CoflixMovie(title='{self.title}', url='{self.url}', img='{self.img}', genres={self.genres}, players={self.players})"
 
     def __repr__(self):
         return str(self)
