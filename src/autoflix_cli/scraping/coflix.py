@@ -163,7 +163,13 @@ def get_season_name(soup, id):
 
     for season in season_container.find_all("button"):
         if season.attrs["data-season"] == id:
-            return season.text
+            title = season.get_text(strip=True)
+            span_text = season.find('span', class_='cf-server-tab-lang').get_text(strip=True)
+            
+            title = title.replace(span_text, "")
+            result = f"{title} ({span_text})"
+
+            return result
 
     try:
         return "Saison" + (int(id) + 1)
