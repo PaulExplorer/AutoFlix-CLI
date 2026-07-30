@@ -30,7 +30,6 @@ PLAYERS: Dict[str, Dict[str, str]] = {
     "mpv": {"display": "mpv"},
     "vlc": {"display": "vlc"},
     "browser": {"display": "browser"},
-    "upnp": {"display": "📺 UPnP/DLNA (TV, Kodi...)"},
     "manual": {"display": "manual"},
 }
 
@@ -174,9 +173,6 @@ def play_video(
 
     print_success(f"Stream URL: [cyan]{stream_url}[/cyan]")
 
-    if not is_mp4 and (".mp4" in stream_url.lower() or ".mp4" in url.lower()):
-        is_mp4 = True
-
     local_subtitle_path = subtitle_url
     if subtitle_url and subtitle_url.startswith("http"):
         print_info("Downloading subtitle file for compatibility...")
@@ -198,17 +194,13 @@ def play_video(
     while True:  # Loop to allow retrying with another player
         player_pref = tracker.get_player()
         if force_manual_mode or not player_pref or player_pref == "manual":
-            players = ["mpv", "vlc", "browser", "📺 UPnP/DLNA (TV, Kodi...)", "← Back"]
+            players = ["mpv", "vlc", "browser", "← Back"]
             player_choice = select_from_list(players, "🎮 Select video player:")
 
             if players[player_choice] == "← Back":
                 return False
 
-            # Normalise the display label back to the internal key
-            if players[player_choice].startswith("📺"):
-                player_name = "upnp"
-            else:
-                player_name = players[player_choice]
+            player_name = players[player_choice]
             player_executable = None
 
         else:
@@ -236,8 +228,8 @@ def play_video(
 
         user_agent = headers.get("User-Agent", DEFAULT_USER_AGENT)
 
-        if player_name in ("browser", "upnp"):
-            pass  # No system executable needed
+        if player_name == "browser":
+            pass  # No executable needed
         elif player_name == "vlc":
             player_executable = get_vlc_path()
             if not player_executable:
@@ -329,56 +321,6 @@ def play_video(
             except Exception as e:
                 print_error(f"Error monitoring browser player: {e}")
                 return False
-
-        elif player_name == "upnp":
-            # --- UPnP / DLNA cast to TV ---
-            from . import proxy as _proxy
-            from .upnp_cast import interactive_upnp_cast
-
-            if not _proxy.LAN_PROXY_URL:
-                from .upnp_cast import get_lan_ip
-                _proxy.LAN_IP = get_lan_ip()
-                port = _proxy.PROXY_PORT or 8080
-                _proxy.LAN_PROXY_URL = f"http://{_proxy.LAN_IP}:{port}"
-
-            # Build the LAN-reachable proxy URL
-            endpoint = "stream"
-            if is_mp4:
-                endpoint = "video"
-
-            proxy_headers = headers.copy()
-            if referer:
-                proxy_headers["Referer"] = referer
-            if "User-Agent" not in proxy_headers:
-                proxy_headers["User-Agent"] = user_agent
-
-            if player_config.get("alt-used") is True:
-                proxy_headers["Alt-Used"] = domain
-
-            sec_headers = player_config.get("sec_headers")
-            if sec_headers:
-                if isinstance(sec_headers, str):
-                    for part in sec_headers.split(";"):
-                        if ":" in part:
-                            k, v = part.split(":", 1)
-                            proxy_headers[k.strip()] = v.strip()
-
-            import json as _json
-            import urllib.parse as _up
-            encoded_url = _up.quote(stream_url)
-            encoded_headers = _up.quote(_json.dumps(proxy_headers))
-            lan_stream_url = (
-                f"{_proxy.LAN_PROXY_URL}/{endpoint}"
-                f"?url={encoded_url}&headers={encoded_headers}"
-            )
-
-            success = interactive_upnp_cast(
-                stream_url=lan_stream_url,
-                title=title,
-                is_hls=(endpoint == "stream"),
-                lan_proxy_url=_proxy.LAN_PROXY_URL,
-            )
-            return success
 
         # Determine Launch Mode from config
         mode = player_config.get("mode", "proxy")  # Default to proxy
