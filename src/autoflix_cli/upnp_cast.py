@@ -128,8 +128,7 @@ def cast_to_device(
             port = _proxy.PROXY_PORT or "PORT"
             print_warning(
                 f"💡 [bold]Network/Firewall Tip:[/bold] The TV timed out trying to reach your PC.\n"
-                f"On Fedora/Linux, firewalld may be blocking port {port}.\n"
-                f"Try opening the port temporarily: [cyan]sudo firewall-cmd --add-port={port}/tcp --temporary[/cyan]"
+                f"Make sure your firewall allows incoming connections on port {port}."
             )
             return False
 

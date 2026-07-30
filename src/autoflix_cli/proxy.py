@@ -261,7 +261,7 @@ def proxy_upnp_stream():
 
     if not shutil.which("ffmpeg"):
         return (
-            "ffmpeg is not installed. On Fedora: sudo dnf install ffmpeg",
+            "ffmpeg is not installed. Install ffmpeg to enable HLS transcoding for DLNA.",
             503,
         )
 
@@ -306,7 +306,7 @@ def proxy_upnp_stream():
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
                 bufsize=0,
             )
             while True:
