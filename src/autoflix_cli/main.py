@@ -238,7 +238,7 @@ def main():
         # Exit
         print_success("Goodbye!")
         proxy.stop_proxy_server()
-        os._exit(0)
+        return
 
 
 if __name__ == "__main__":
@@ -247,4 +247,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nGoodbye!")
         proxy.stop_proxy_server()
-        os._exit(0)
+        sys.exit(0)
