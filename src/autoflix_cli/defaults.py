@@ -129,7 +129,7 @@ DEFAULT_SOURCE_PORTAL = {
     "french-stream": "https://french-stream.one",
     "anime-sama": "https://anime-sama.pw",
     "arkanime": "https://arkanim.net",
-    "coflix": "https://coflix.fans",
+    "coflix": "https://coflix.domains",
     "sudatchi": "https://sudatchi.com",
     "animetsu": "https://animetsu.live",
     "animetsu-api": "https://b.animetsu.live",

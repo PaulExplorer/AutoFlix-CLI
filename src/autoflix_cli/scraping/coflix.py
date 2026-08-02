@@ -29,12 +29,14 @@ def get_website_url(portal=portals["coflix"]):
         return
 
     if portal.startswith("http"):
-        response = scraper.head(portal)
+        response = scraper.get(portal)
     else:
-        response = scraper.head("https://" + portal)
+        response = scraper.get("https://" + portal)
     response.raise_for_status()
 
-    website_origin = response.url
+    content = response.text
+
+    website_origin = content.split('redirect_url":"')[1].split('"')[0]
 
 
 def search(query: str) -> list[SearchResult]:
