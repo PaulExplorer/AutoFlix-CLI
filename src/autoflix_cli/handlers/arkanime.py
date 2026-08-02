@@ -1,4 +1,5 @@
 from ..scraping import arkanime, player
+from ..scraping.objects import ArkMovie, ArkSeries
 from ..cli_utils import (
     select_from_list,
     print_success,
@@ -151,11 +152,52 @@ def handle_arkanime():
 
         print_info(f"Loading [cyan]{selection.title}[/cyan]...")
         try:
-            series = arkanime.get_content(selection.url)
+            content = arkanime.get_content(selection.url)
         except Exception as e:
-            print_error(f"Error loading series: {e}")
+            print_error(f"Error loading content: {e}")
             pause()
             continue
+
+        if isinstance(content, ArkMovie):
+            console.print(f"\n[bold]🎬 Movie:[/bold] [cyan]{content.title}[/cyan]\n")
+
+            saved_progress = tracker.get_series_progress("ArkAnime", content.title)
+            if saved_progress:
+                choice = select_from_list(
+                    ["Watch again/Resume", "Cancel"],
+                    f"Found saved progress for {content.title}:",
+                )
+                if choice == 0:
+                    resume_arkanime(saved_progress)
+                    continue
+
+            if not content.players:
+                print_warning("No players found.")
+                pause()
+                continue
+
+            supported_players = [
+                p for p in content.players if player.is_supported(p.url)
+            ]
+            if not supported_players:
+                print_warning("No supported players found.")
+                pause()
+                continue
+
+            headers = {"Referer": arkanime.website_origin}
+            play_episode_flow(
+                provider_name="ArkAnime",
+                series_title=content.title,
+                season_title="Movie",
+                episode=content,
+                series_url=content.id,
+                season_url=content.id,
+                logo_url=content.img,
+                headers=headers,
+            )
+            continue
+
+        series = content
 
         if not series.seasons:
             print_warning("No seasons found.")
@@ -229,11 +271,38 @@ def resume_arkanime(data):
     print_info(f"Resuming [cyan]{data['series_title']}[/cyan]...")
 
     try:
-        series = arkanime.get_content(data["series_url"])
+        content = arkanime.get_content(data["series_url"])
     except Exception as e:
-        print_error(f"Could not load series: {e}")
+        print_error(f"Could not load content: {e}")
         pause()
         return
+
+    if isinstance(content, ArkMovie) or data.get("season_title") == "Movie":
+        if not isinstance(content, ArkMovie):
+            print_error("Expected a Movie but got something else.")
+            pause()
+            return
+
+        options = ["Watch again", "Cancel"]
+        choice = select_from_list(options, "What would you like to do?")
+
+        if choice == 1:
+            return
+
+        headers = {"Referer": arkanime.website_origin}
+        play_episode_flow(
+            provider_name="ArkAnime",
+            series_title=content.title,
+            season_title="Movie",
+            episode=content,
+            series_url=content.id,
+            season_url=content.id,
+            logo_url=content.img,
+            headers=headers,
+        )
+        return
+
+    series = content
 
     season = None
     for s in series.seasons:
