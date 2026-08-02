@@ -151,7 +151,7 @@ def handle_arkanime():
 
         print_info(f"Loading [cyan]{selection.title}[/cyan]...")
         try:
-            series = arkanime.get_series(selection.url)
+            series = arkanime.get_content(selection.url)
         except Exception as e:
             print_error(f"Error loading series: {e}")
             pause()
@@ -229,7 +229,7 @@ def resume_arkanime(data):
     print_info(f"Resuming [cyan]{data['series_title']}[/cyan]...")
 
     try:
-        series = arkanime.get_series(data["series_url"])
+        series = arkanime.get_content(data["series_url"])
     except Exception as e:
         print_error(f"Could not load series: {e}")
         pause()

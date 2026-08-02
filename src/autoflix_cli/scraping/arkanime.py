@@ -1,6 +1,4 @@
-from autoflix_cli.scraping.objects import ArkSeries
-from autoflix_cli.scraping.objects import Player
-from autoflix_cli.scraping.objects import ArkSeason
+from autoflix_cli.scraping.objects import ArkSeries, Player, ArkSeason, ArkMovie
 from curl_cffi import requests as cffi_requests
 from .objects import SearchResult, SamaSeries, Episode
 from ..proxy import DNS_OPTIONS
@@ -36,51 +34,60 @@ def search(query: str) -> list[SearchResult]:
 
     return results
 
-def get_series(url: str) -> SamaSeries:
+def get_content(url: str):
     response = scraper.get(website_origin + "/api/anime/" + url)
     response.raise_for_status()
 
-    series = response.json()["result"]
+    content = response.json()["result"]
 
-    title = series["titleEnglish"]
-    img = series["coverImage"]
-    genres = series["genres"]
+    title = content["titleEnglish"]
+    img = content["coverImage"]
+    genres = content["genres"]
 
-    seasons:list[ArkSeason] = []
-    for season in series["seasons"]:
-        id = season["id"]
-        season_title = season["title"]
-        
-        episodes: list[Episode] = []
-        if season["episodes"]:
-            for episode in season["episodes"]:
-                players = [
-                    Player("montmyoboky (default)", "montmyoboky:" + str(episode["id"]))
-                ]
-
-                episodes.append(Episode(f"Episode {episode['number']} : " + episode["title"], players=players))
-
-        elif season["arcs"]:
-            for arc in season["arcs"]:
-                arc_url = website_origin + f"/api/anime/{url}/seasons/{id}/episodes?from={arc['episodeStart']}&to={arc['episodeEnd']}"
-                arc_response = scraper.get(arc_url)
-                arc_response.raise_for_status()
-
-                arc_json = arc_response.json()
-                for episode in arc_json["episodes"]:
+    if content["seasons"]:
+        seasons:list[ArkSeason] = []
+        for season in content["seasons"]:
+            id = season["id"]
+            season_title = season["title"]
+            
+            episodes: list[Episode] = []
+            if season["episodes"]:
+                for episode in season["episodes"]:
                     players = [
                         Player("montmyoboky (default)", "montmyoboky:" + str(episode["id"]))
                     ]
 
                     episodes.append(Episode(f"Episode {episode['number']} : " + episode["title"], players=players))
 
-        seasons.append(ArkSeason(id, season_title, episodes))
+            elif season["arcs"]:
+                for arc in season["arcs"]:
+                    arc_url = website_origin + f"/api/anime/{url}/seasons/{id}/episodes?from={arc['episodeStart']}&to={arc['episodeEnd']}"
+                    arc_response = scraper.get(arc_url)
+                    arc_response.raise_for_status()
 
-    return ArkSeries(id=url, title=title, img=img, genres=genres, seasons=seasons)
+                    arc_json = arc_response.json()
+                    for episode in arc_json["episodes"]:
+                        players = [
+                            Player("montmyoboky (default)", "montmyoboky:" + str(episode["id"]))
+                        ]
+
+                        episodes.append(Episode(f"Episode {episode['number']} : " + episode["title"], players=players))
+
+            seasons.append(ArkSeason(id, season_title, episodes))
+
+        return ArkSeries(id=url, title=title, img=img, genres=genres, seasons=seasons)
+    
+    elif content["movie"]:
+        players = [
+            Player("montmyoboky (default)", "montmyoboky_movie:" + str(content["movie"]["id"]))
+        ]
+
+        return ArkMovie(id=url, title=title, img=img, genres=genres, players=players)
+
 
 
 if __name__ == "__main__":
     #print(search("one piece"))
     #print(get_series("106"))
-    print(get_series("313"))
+    print(get_content("313"))
 
