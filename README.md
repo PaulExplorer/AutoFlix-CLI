@@ -62,6 +62,7 @@ This project uses logic and inspiration from several open-source projects:
 - [CineStream (CSX)](https://github.com/SaurabhKaperwan/CSX) by [SaurabhKaperwan](https://github.com/SaurabhKaperwan) - Major inspiration for the multi-provider architecture and English stream extraction.
 - [Anime-Sama-Downloader](https://github.com/SertraFurr/Anime-Sama-Downloader) by [SertraFurr](https://github.com/SertraFurr) - Implementation of the `embed4me` stream extraction.
 - [cloudstream-extensions-phisher](https://github.com/phisher98/cloudstream-extensions-phisher) by [phisher98](https://github.com/phisher98) - Implementation of the `Veev` stream extraction.
+- [Anivexa-API](https://github.com/walterwhite-69/Anivexa-API) by [walterwhite-69](https://github.com/walterwhite-69) - REST API used for English/global anime (VO) stream and subtitle extraction (anizone, anikoto, and more).
 
 ## 📜 License
 
