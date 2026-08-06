@@ -57,10 +57,11 @@ class SubtitleExtractor:
                     if re.search(rf"{s}x{e}\b", name):
                         return True
 
-        # Bare episode token, e.g. " - 01 -", "[01]", "ep05"
-        if re.search(rf"(?<!\d){ep}(?!\d)", name):
+        # Bare episode token, e.g. " - 01 -", "[01]" (but NOT the digits inside
+        # "S01", "S01E12", "ep05", "1080p", ... -> exclude any alnum neighbour)
+        if re.search(rf"(?<![a-z0-9]){ep}(?![a-z0-9])", name):
             return True
-        if re.search(rf"(?<!\d){ep_plain}(?!\d)", name):
+        if re.search(rf"(?<![a-z0-9]){ep_plain}(?![a-z0-9])", name):
             return True
         if re.search(rf"\bep(?:isode\s*)?{ep}\b", name):
             return True
@@ -95,7 +96,10 @@ class SubtitleExtractor:
         if not isinstance(releases, list):
             return []
 
-        # Rank candidates: exact episode match first, then episode-in-batch
+        # Rank candidates: exact episode match first, then episode-in-batch.
+        # Batches (e.g. full-season releases) must stay in the pool: they are
+        # often the only ones shipping per-file subtitle attachments (incl.
+        # French) even when single-episode releases exist.
         exact = []
         batch = []
         for rel in releases:
@@ -105,7 +109,7 @@ class SubtitleExtractor:
             elif self._is_batch(name):
                 batch.append(rel)
 
-        candidates = (exact or batch)[:max_releases]
+        candidates = exact[:max_releases] + batch[:max_releases]
 
         subs = []
         seen = set()
