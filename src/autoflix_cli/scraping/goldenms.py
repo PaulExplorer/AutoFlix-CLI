@@ -1,9 +1,26 @@
+import re
+from urllib.parse import quote
 from curl_cffi import requests as cffi_requests
-import urllib.parse
 from .config import portals
 from ..proxy import DNS_OPTIONS
 
 scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS)
+
+# Public player key embedded in MoviesAPI's own web player JS (de-facto public).
+MOVIESAPI_KEY = (
+    "3a67e8866ae1d2bb9e81fe7f73315a56eb3bdf5e3e755c7554c8be6910aa6b13"
+)
+
+# Videasy hosted API (CineStream's backend) + player origin used by its CDNs.
+VIDEASY_ORIGIN = "https://player.videasy.to"
+VIDEASY_SERVERS = [
+    "downloader2",
+    "m4uhd",
+    "cdn",
+    "lamovie",
+    "superflix",
+    "hdmovie",
+]
 
 
 class MediaExtractor:
@@ -14,286 +31,174 @@ class MediaExtractor:
 
     def __init__(self):
         # --- Source URLs loaded from source_portal.jsonc ---
-        self.multi_decrypt_api = portals.get(
-            "multi-decrypt", "https://enc-dec.app/api"
-        )
-        self.videasy_api = portals.get("videasy", "https://api.videasy.net")
-        self.vidlink_api = portals.get("vidlink", "https://vidlink.pro")
-        self.hexa_api = portals.get("hexa", "https://themoviedb.hexa.su")
-        self.mapple_api = portals.get("mapple", "https://mapple.uk")
         self.xpass_api = portals.get("xpass", "https://play.xpass.top")
+        self.moviesapi_api = portals.get("moviesapi", "https://moviesapi.to")
+        self.videasy_api = portals.get("videasy", "https://api.speedracelight.com")
 
-        # --- Referers ---
-        self.videasy_referer = portals.get("videasy-referer", "https://cineby.gd")
-        self.hexa_referer = portals.get("hexa-referer", "https://hexa.su/")
+    def search_moviesapi(self, tmdb_id, season=None, episode=None):
+        """Extraction via MoviesAPI (Vidora backend). Direct HLS by TMDB ID."""
+        if not tmdb_id:
+            return []
+        try:
+            headers = {
+                "x-player-key": MOVIESAPI_KEY,
+                "Accept": "application/json, text/plain, */*",
+                "User-Agent": scraper.headers.get("User-Agent", "Mozilla/5.0"),
+                "Referer": f"{self.moviesapi_api}/",
+                "Origin": self.moviesapi_api,
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-origin",
+            }
 
-        self.headers = {"Connection": "keep-alive"}
+            if season is None:
+                path = f"/api/vidora/v1/movie/{tmdb_id}"
+            else:
+                path = f"/api/vidora/v1/tv/{tmdb_id}/{season}/{episode}"
 
-    def _quote(self, text):
-        return urllib.parse.quote(text).replace("+", "%20")
+            r = scraper.get(
+                f"{self.moviesapi_api}{path}", headers=headers, timeout=15
+            )
+            if r.status_code != 200:
+                return []
+            data = r.json()
+            if not data.get("result") or not data.get("sources"):
+                return []
+
+            source = data["sources"][0]
+            stream_url = source.get("url")
+            if not stream_url:
+                return []
+
+            cdn_headers = {
+                "Referer": f"{self.moviesapi_api}/",
+                "Origin": self.moviesapi_api,
+            }
+            subtitles = [
+                {
+                    "lang": t.get("label") or t.get("language") or "?",
+                    "url": t["file"],
+                    "headers": cdn_headers,
+                }
+                for t in (source.get("tracks") or [])
+                if t.get("file")
+            ]
+            return [
+                {
+                    "source": "MoviesAPI",
+                    "quality": "Auto",
+                    "url": stream_url,
+                    "type": "M3U8",
+                    "subtitles": subtitles or None,
+                    "headers": cdn_headers,
+                }
+            ]
+        except:
+            return []
 
     def search_videasy(
-        self, title, tmdb_id=None, imdb_id=None, year=None, season=None, episode=None
+        self,
+        tmdb_id,
+        title=None,
+        year=None,
+        imdb_id=None,
+        season=None,
+        episode=None,
     ):
-        """Extraction via Videasy (Multi-server)."""
-        headers = {
-            "Accept": "*/*",
-            "User-Agent": scraper.headers.get("User-Agent", "Mozilla/5.0"),
-            "Origin": self.videasy_referer,
-            "Referer": self.videasy_referer + "/",
-        }
+        """Extraction via Videasy hosted API (api.speedracelight.com).
 
-        servers = [
-            "myflixerzupcloud",
-            "1movies",
-            "moviebox",
-            "primewire",
-            "m4uhd",
-            "hdmovie",
-            "cdn",
-            "primesrcme",
-        ]
-        results = []
-
-        if not title:
-            return []
-
-        # Double encoding as per CineStream logic
-        enc_title = self._quote(self._quote(title))
-        media_type = "movie" if season is None else "tv"
-
-        for server in servers:
-            try:
-                url = f"{self.videasy_api}/{server}/sources-with-title?title={enc_title}&mediaType={media_type}"
-                if year:
-                    url += f"&year={year}"
-                if tmdb_id:
-                    url += f"&tmdbId={tmdb_id}"
-                if imdb_id:
-                    url += f"&imdbId={imdb_id}"
-                if season:
-                    url += f"&seasonId={season}"
-                if episode:
-                    url += f"&episodeId={episode}"
-
-                r = scraper.get(url, headers=headers, timeout=10)
-                if r.status_code != 200:
-                    continue
-                enc_data = r.text
-
-                # Decryption via multi-decrypt (passing tmdbId as 'id')
-                payload = {"text": enc_data, "id": tmdb_id}
-                r_dec = scraper.post(
-                    f"{self.multi_decrypt_api}/dec-videasy", json=payload, timeout=10
-                )
-
-                if r_dec.status_code == 200:
-                    data = r_dec.json().get("result", {})
-                    sources = data.get("sources", [])
-                    subs = [
-                        {"lang": s.get("language"), "url": s.get("url")}
-                        for s in data.get("subtitles", [])
-                    ]
-
-                    for src in sources:
-                        results.append(
-                            {
-                                "source": f"Videasy ({server.upper()})",
-                                "quality": src.get("quality", "Multi"),
-                                "url": src.get("url"),
-                                "type": (
-                                    "M3U8"
-                                    if ".m3u8" in src.get("url", "").lower()
-                                    else "VIDEO"
-                                ),
-                                "subtitles": subs if subs else None,
-                                "headers": headers,
-                            }
-                        )
-            except:
-                continue
-        return results
-
-    def search_vidlink(self, tmdb_id, season=None, episode=None):
-        """Extraction via Vidlink."""
+        Multi-server backend: seed -> per-server encrypted payload -> decrypt
+        through enc-dec.app. Returns real MP4/HLS links with VTT subtitles.
+        """
         if not tmdb_id:
             return []
-        try:
-            # 1. Encrypt TMDB ID via API
-            r_enc = scraper.get(
-                f"{self.multi_decrypt_api}/enc-vidlink?text={tmdb_id}", timeout=10
-            )
-            enc_data = r_enc.json().get("result")
 
+        api = self.videasy_api
+        try:
             headers = {
+                "Accept": "*/*",
                 "User-Agent": scraper.headers.get("User-Agent", "Mozilla/5.0"),
-                "Connection": "keep-alive",
-                "Referer": f"{self.vidlink_api}/",
-                "Origin": self.vidlink_api,
+                "Origin": VIDEASY_ORIGIN,
+                "Referer": f"{VIDEASY_ORIGIN}/",
             }
 
-            if season is None:
-                url = f"{self.vidlink_api}/api/b/movie/{enc_data}"
-            else:
-                url = f"{self.vidlink_api}/api/b/tv/{enc_data}/{season}/{episode}"
-
-            r = scraper.get(url, headers=headers, timeout=10)
-            data = r.json()
-            m3u8_url = data.get("stream", {}).get("playlist")
-
-            if m3u8_url:
-                return [
-                    {
-                        "source": "Vidlink",
-                        "quality": "Multi",
-                        "url": m3u8_url,
-                        "type": "M3U8",
-                        "headers": headers,
-                    }
-                ]
-        except:
-            pass
-        return []
-
-    def search_hexa(self, tmdb_id, season=None, episode=None):
-        """Extraction via Hexa with dynamic security handshake."""
-        if not tmdb_id:
-            return []
-        try:
-            # 1. Endpoint
-            if season is None:
-                url = f"{self.hexa_api}/api/tmdb/movie/{tmdb_id}/images"
-            else:
-                url = f"{self.hexa_api}/api/tmdb/tv/{tmdb_id}/season/{season}/episode/{episode}/images"
-
-            # 2. Security Handshake
-            import secrets
-
-            key = secrets.token_hex(32)  # Generate 32-byte key
-
-            # Fetch X-Cap-Token from multi-decrypt
-            r_token = scraper.get(f"{self.multi_decrypt_api}/enc-hexa", timeout=10)
-            cap_token = r_token.json().get("result", {}).get("token")
-
-            headers = {
-                "User-Agent": scraper.headers.get("User-Agent", "Mozilla/5.0"),
-                "Accept": "text/plain",
-                "X-Api-Key": key,
-                "X-Fingerprint-Lite": "e9136c41504646444",
-                "Referer": self.hexa_referer,
-                "X-Cap-Token": cap_token,
-            }
-
-            # 3. Request
-            r_enc = scraper.get(url, headers=headers, timeout=10)
-            if r_enc.status_code != 200:
-                return []
-            enc_data = r_enc.text
-
-            # 4. Decrypt
-            payload = {"text": enc_data, "key": key}
-            r_dec = scraper.post(
-                f"{self.multi_decrypt_api}/dec-hexa", json=payload, timeout=10
+            r = scraper.get(
+                f"{api}/seed?mediaId={tmdb_id}", headers=headers, timeout=10
             )
-
-            if r_dec.status_code == 200:
-                data = r_dec.json().get("result", {})
-                sources = data.get("sources", [])
-                results = []
-                for src in sources:
-                    results.append(
-                        {
-                            "source": f"Hexa ({src.get('server', '').upper()})",
-                            "quality": "Multi",
-                            "url": src.get("url"),
-                            "type": "M3U8",
-                            "headers": {"Referer": self.hexa_referer},
-                        }
-                    )
-                return results
-        except:
-            pass
-        return []
-
-    def search_mapple(self, tmdb_id, season=None, episode=None):
-        """Extraction via Mapple."""
-        if not tmdb_id:
-            return []
-
-        base_url = self.mapple_api
-        headers = {
-            "User-Agent": scraper.headers.get("User-Agent", "Mozilla/5.0"),
-            "Referer": f"{base_url}/",
-        }
-
-        try:
-            # 1. Get Token
-            media_type = "movie" if season is None else "tv"
-            tv_slug = f"{season}-{episode}" if season else ""
-            watch_url = f"{base_url}/watch/{media_type}/{tmdb_id}"
-            if season:
-                watch_url += f"/{tv_slug}"
-
-            r = scraper.get(watch_url, headers=headers, timeout=10)
-            token_match = re.search(
-                r'window\.__REQUEST_TOKEN__\s*=\s*"([^"]+)"', r.text
-            )
-            if not token_match:
+            if r.status_code != 200:
                 return []
-            token = token_match.group(1)
+            seed = r.json().get("seed")
+            if not seed:
+                return []
 
-            # 2. Extract Streams (Iterate through sources)
-            sources = [
-                "mapple",
-                "sakura",
-                "oak",
-                "willow",
-                "cherry",
-                "pines",
-                "magnolia",
-                "sequoia",
+            enc_title = quote(quote(title or ""))
+            query = [
+                f"title={enc_title}",
+                f"mediaType={'tv' if season is not None else 'movie'}",
+                f"tmdbId={tmdb_id}",
+                "enc=2",
+                f"seed={seed}",
             ]
+            if year:
+                query.append(f"year={year}")
+            if imdb_id:
+                query.append(f"imdbId={imdb_id}")
+            if season is not None:
+                query.append(f"seasonId={season}")
+            if episode is not None:
+                query.append(f"episodeId={episode}")
+            query_string = "&".join(query)
+
+            cdn_headers = {"Referer": f"{VIDEASY_ORIGIN}/"}
             results = []
+            seen = set()
 
-            for source in sources:
+            for server in VIDEASY_SERVERS:
                 try:
-                    payload = {
-                        "data": {
-                            "mediaId": int(tmdb_id),
-                            "mediaType": media_type,
-                            "tv_slug": tv_slug,
-                            "source": source,
-                        },
-                        "endpoint": "stream-encrypted",
-                    }
-
-                    r_enc = scraper.post(
-                        f"{base_url}/api/encrypt",
-                        json=payload,
+                    r = scraper.get(
+                        f"{api}/{server}/sources-with-title?{query_string}",
                         headers=headers,
-                        timeout=10,
+                        timeout=12,
                     )
-                    stream_path = r_enc.json().get("url")
-                    if not stream_path:
+                    if r.status_code != 200:
                         continue
-
-                    final_url = f"{base_url}{stream_path}&requestToken={token}"
-                    r_streams = scraper.get(
-                        final_url, headers=headers, timeout=10
-                    ).json()
-
-                    if r_streams.get("success"):
-                        stream_url = r_streams.get("data", {}).get("stream_url")
-                        if stream_url:
+                    j = scraper.post(
+                        "https://enc-dec.app/api/dec-videasy",
+                        json={"text": r.text, "id": tmdb_id, "seed": seed},
+                        timeout=15,
+                    )
+                    if j.status_code != 200:
+                        continue
+                    payload = j.json().get("result") or {}
+                    subtitles = [
+                        {
+                            "lang": t.get("language") or t.get("label") or "?",
+                            "url": t["url"],
+                            "headers": cdn_headers,
+                        }
+                        for t in (payload.get("subtitles") or [])
+                        if t.get("url")
+                    ]
+                    for src in payload.get("sources") or []:
+                        url = src.get("url")
+                        if url and url not in seen:
+                            seen.add(url)
                             results.append(
                                 {
-                                    "source": f"Mapple ({source.upper()})",
-                                    "quality": "1080p",
-                                    "url": stream_url,
-                                    "type": "M3U8",
-                                    "headers": {"Referer": f"{base_url}/"},
+                                    "source": "Videasy",
+                                    "quality": src.get("quality") or "Auto",
+                                    "url": url,
+                                    "type": (
+                                        "M3U8"
+                                        if "m3u8" in url.lower()
+                                        else "VIDEO"
+                                    ),
+                                    "subtitles": subtitles or None,
+                                    "headers": cdn_headers,
                                 }
                             )
+                            if len(results) >= 10:
+                                return results
                 except:
                     continue
             return results
@@ -314,14 +219,19 @@ class MediaExtractor:
             )
             r = scraper.get(embed_url, headers={"Referer": f"{base_url}/"}, timeout=10)
 
-            # Extract backups/sources via regex
-            matches = re.findall(r'href=["\']([^"\']+/playlist/[^"\']+)["\']', r.text)
+            # Extract backups/sources via regex (deduplicated, capped)
+            matches = []
+            for m in re.findall(
+                r'"(?:url|playlist)"\s*:\s*"([^"]+playlist\.json)"', r.text
+            ):
+                if m not in matches:
+                    matches.append(m)
             results = []
 
-            for url in matches:
+            for url in matches[:8]:
                 full_url = url if url.startswith("http") else f"{base_url}{url}"
                 try:
-                    r_json = scraper.get(full_url, timeout=10).json()
+                    r_json = scraper.get(full_url, timeout=6).json()
                     playlist = r_json.get("playlist", [])[0]
                     sources = playlist.get("sources", [])
                     for src in sources:
@@ -358,17 +268,20 @@ class MediaExtractor:
         """Main search method."""
         results = []
 
-        # Priority: Vidlink, Hexa, Xpass, Mapple, Videasy
+        # Priority: MoviesAPI (hosted API, fast single request), then Xpass
+        # as fallback for titles not encoded on Vidora.
+        # VidLink is parsed but excluded: its MP4 CDN (bcdn.hakunaymatata.com)
+        # requires a proxy (requiresProxy=True) and blocks direct access (403/429).
+        # Mapple is dead: every source returns the same signed URL on
+        # source.heistotron.uk serving a 26s loading clip instead of the media.
         if tmdb_id:
-            results.extend(self.search_vidlink(tmdb_id, season, episode))
-            results.extend(self.search_hexa(tmdb_id, season, episode))
-            results.extend(self.search_xpass(tmdb_id, season, episode))
-            results.extend(self.search_mapple(tmdb_id, season, episode))
-
-        if title:
+            results.extend(self.search_moviesapi(tmdb_id, season, episode))
             results.extend(
-                self.search_videasy(title, tmdb_id, imdb_id, year, season, episode)
+                self.search_videasy(
+                    tmdb_id, title, year, imdb_id, season, episode
+                )
             )
+            results.extend(self.search_xpass(tmdb_id, season, episode))
 
         # Deduplication by URL
         unique = {}

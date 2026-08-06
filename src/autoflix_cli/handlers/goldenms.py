@@ -198,137 +198,175 @@ def _flow_goldenms_stream(
         skipped = len(results) - len(valid_results)
         print_info(f"[dim]Skipped {skipped} unsupported stream(s).[/dim]")
 
-    choice_idx = select_from_list(
-        [f"{r['source']} - {r['quality']} ({r['type']})" for r in valid_results]
-        + ["← Back"],
-        "📺 Select Stream:",
-    )
-
-    if choice_idx == len(valid_results):
-        return
-
-    selection = valid_results[choice_idx]
-
-    # Subtitles logic
-    subtitle_url = None
-    user_lang = tracker.get_language() or "fr"
-    lang_name = get_language_label(user_lang)
-
-    want_subs = select_from_list(["Yes", "No"], f"Search for {lang_name} subtitles?")
-    if want_subs == 0:
-        current_imdb_id = imdb_id
-        if not current_imdb_id:
-            current_imdb_id = get_user_input(
-                "Enter IMDB ID (e.g. tt0388629, leave blank to skip subtitles)"
-            )
-        if current_imdb_id:
-            sub_season = season if not is_movie else None
-            sub_ep = episode if not is_movie else None
-
-            print_info(f"Searching for {lang_name} subtitles...")
-            subs = subtitle_extractor.search(
-                imdb_id=current_imdb_id,
-                season=sub_season,
-                episode=sub_ep,
-                lang_filter=user_lang,
-            )
-
-            if subs:
-                sub_opts = [
-                    f"{s['source']} - {s.get('lang', lang_name)}" for s in subs
-                ] + ["Skip Subtitles"]
-                sub_choice = select_from_list(sub_opts, "Select Subtitle:")
-                if sub_choice < len(subs):
-                    subtitle_url = subs[sub_choice]["url"]
-                    print_info(f"Selected subtitle: {subtitle_url}")
-            else:
-                print_warning(f"No {lang_name} subtitles found.")
-                pause()
-
-    final_url = selection["url"]
-    type_ = selection["type"].upper()
-
-    is_direct = (
-        ".m3u8" in final_url.lower()
-        or ".mp4" in final_url.lower()
-        or type_ == "MP4"
-        or type_ == "M3U8"
-    )
-
-    # Player Support
-    if player_scraper.is_supported(final_url) and not is_direct:
-        print_info(f"Resolving player link: [cyan]{final_url}[/cyan]")
-        try:
-            resolved_url = player_scraper.get_hls_link(final_url)
-            if resolved_url:
-                final_url = resolved_url
-                print_info(f"Resolved to: [cyan]{final_url}[/cyan]")
-            else:
-                print_warning("Failed to extract raw stream from player.")
-                if select_from_list(["Try to play anyway", "Cancel"], "Action:") == 1:
-                    return
-        except Exception as e:
-            print_warning(f"Error resolving player: {e}")
-
-    # Display Title
-    if is_movie:
-        display_title = f"{title} (Movie)"
-    else:
-        display_title = f"{title} - S{season:02d}E{episode:02d}"
-
-    print_info(f"Starting playback: [cyan]{display_title}[/cyan]")
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    }
-
-    # Note: vidlink expects origin/referer headers, hexa might just need generic
-    if "vidlink" in selection["source"].lower():
-        headers["Referer"] = f"{goldenms_extractor.vidlink_api}/"
-        headers["Origin"] = f"{goldenms_extractor.vidlink_api}/"
-
-    success = play_video(
-        final_url,
-        headers=headers,
-        title=display_title,
-        subtitle_url=subtitle_url,
-        is_direct=is_direct,
-    )
-
-    if success:
-        # History
-        tracker.save_progress(
-            provider="GoldenMS",
-            series_title=title,
-            season_title="Movie" if is_movie else f"Season {season}",
-            episode_title="Movie" if is_movie else f"Episode {episode}",
-            series_url=f"tmdb:{tmdb_id}|imdb:{imdb_id}",
-            season_url="",
-            episode_url="",  # re-search on resume
-            logo_url=logo_url,
+    while True:
+        choice_idx = select_from_list(
+            [
+                f"{r['source']} - {r['quality']} ({r['type']})"
+                for r in valid_results
+            ]
+            + ["← Back"],
+            "📺 Select Stream:",
         )
-        print_success("Local progress saved.")
 
-        if not is_movie:
-            if (
-                select_from_list(
-                    ["Yes", "No"], f"Play Next Episode (Episode {episode + 1})?"
-                )
-                == 0
-            ):
-                _flow_goldenms_stream(
-                    title=title,
-                    tmdb_id=tmdb_id,
-                    imdb_id=imdb_id,
-                    year=year,
-                    season=season,
-                    episode=episode + 1,
-                    is_movie=False,
-                    logo_url=logo_url,
-                )
-    else:
-        print_warning("Playback failed or was cancelled.")
-        pause()
+        if choice_idx == len(valid_results):
+            return
+
+        selection = valid_results[choice_idx]
+
+        # Subtitles logic
+        subtitle_tracks = None
+        user_lang = tracker.get_language() or "fr"
+        lang_name = get_language_label(user_lang)
+
+        embedded_tracks = selection.get("subtitles") or []
+        if embedded_tracks:
+            langs_preview = ", ".join(
+                sorted({t.get("lang", "?") for t in embedded_tracks})
+            )
+            use_embedded = select_from_list(
+                [
+                    f"Yes (load {len(embedded_tracks)} tracks: {langs_preview})",
+                    "No (search external subtitles)",
+                ],
+                "The stream has embedded subtitle tracks (language picked in the player):",
+            )
+            if use_embedded == 0:
+                subtitle_tracks = embedded_tracks
+
+        if subtitle_tracks is None:
+            want_subs = select_from_list(
+                ["Yes", "No"], f"Search for {lang_name} subtitles?"
+            )
+            if want_subs == 0:
+                current_imdb_id = imdb_id
+                if not current_imdb_id:
+                    current_imdb_id = get_user_input(
+                        "Enter IMDB ID (e.g. tt0388629, leave blank to skip subtitles)"
+                    )
+                if current_imdb_id:
+                    sub_season = season if not is_movie else None
+                    sub_ep = episode if not is_movie else None
+
+                    print_info(f"Searching for {lang_name} subtitles...")
+                    subs = subtitle_extractor.search(
+                        imdb_id=current_imdb_id,
+                        season=sub_season,
+                        episode=sub_ep,
+                        lang_filter=user_lang,
+                    )
+
+                    if subs:
+                        sub_opts = [
+                            f"{s['source']} - {s.get('lang', lang_name)}" for s in subs
+                        ] + ["Skip Subtitles"]
+                        sub_choice = select_from_list(sub_opts, "Select Subtitle:")
+                        if sub_choice < len(subs):
+                            subtitle_tracks = [subs[sub_choice]]
+                            print_info(f"Selected subtitle: {subs[sub_choice]['url']}")
+                    else:
+                        print_warning(f"No {lang_name} subtitles found.")
+                        pause()
+
+        final_url = selection["url"]
+        type_ = selection["type"].upper()
+
+        is_direct = (
+            ".m3u8" in final_url.lower()
+            or ".mp4" in final_url.lower()
+            or type_ == "MP4"
+            or type_ == "M3U8"
+        )
+
+        # Player Support
+        if player_scraper.is_supported(final_url) and not is_direct:
+            print_info(f"Resolving player link: [cyan]{final_url}[/cyan]")
+            try:
+                resolved_url = player_scraper.get_hls_link(final_url)
+                if resolved_url:
+                    final_url = resolved_url
+                    print_info(f"Resolved to: [cyan]{final_url}[/cyan]")
+                else:
+                    print_warning("Failed to extract raw stream from player.")
+                    if select_from_list(["Try to play anyway", "Cancel"], "Action:") == 1:
+                        continue
+            except Exception as e:
+                print_warning(f"Error resolving player: {e}")
+
+        # Display Title
+        if is_movie:
+            display_title = f"{title} (Movie)"
+        else:
+            display_title = f"{title} - S{season:02d}E{episode:02d}"
+
+        print_info(f"Starting playback: [cyan]{display_title}[/cyan]")
+
+        headers = dict(selection.get("headers") or {})
+        headers.setdefault(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        )
+
+        # MoviesAPI sources already ship their Referer/Origin via selection headers;
+        # ensure they're present (Vidora CDN rejects requests without them).
+        if "moviesapi" in selection["source"].lower():
+            headers.setdefault("Referer", f"{goldenms_extractor.moviesapi_api}/")
+            headers.setdefault("Origin", goldenms_extractor.moviesapi_api)
+
+        # Videasy MP4/HLS CDNs require the Videasy player as referer/origin.
+        if "videasy" in selection["source"].lower():
+            headers.setdefault("Referer", "https://player.videasy.to/")
+            headers.setdefault("Origin", "https://player.videasy.to")
+
+        success = play_video(
+            final_url,
+            headers=headers,
+            title=display_title,
+            subtitle_url=None,
+            subtitles=subtitle_tracks,
+            is_direct=is_direct,
+        )
+
+        if success:
+            # History
+            tracker.save_progress(
+                provider="GoldenMS",
+                series_title=title,
+                season_title="Movie" if is_movie else f"Season {season}",
+                episode_title="Movie" if is_movie else f"Episode {episode}",
+                series_url=f"tmdb:{tmdb_id}|imdb:{imdb_id}",
+                season_url="",
+                episode_url="",  # re-search on resume
+                logo_url=logo_url,
+            )
+            print_success("Local progress saved.")
+
+            if not is_movie:
+                if (
+                    select_from_list(
+                        ["Yes", "No"], f"Play Next Episode (Episode {episode + 1})?"
+                    )
+                    == 0
+                ):
+                    _flow_goldenms_stream(
+                        title=title,
+                        tmdb_id=tmdb_id,
+                        imdb_id=imdb_id,
+                        year=year,
+                        season=season,
+                        episode=episode + 1,
+                        is_movie=False,
+                        logo_url=logo_url,
+                    )
+            return
+        # Playback failed: let the user pick another source (many provider
+        # links are dead or expired), or go back.
+        change_source = select_from_list(
+            ["Try another source", "← Back"],
+            "Playback failed or was cancelled. What would you like to do?",
+        )
+        if change_source == 1:
+            pause()
+            return
 
 
 def resume_goldenms(data):

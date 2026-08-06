@@ -56,7 +56,8 @@ def _download_subtitles(subtitle_items) -> list:
         if not url or not isinstance(url, str) or not url.startswith("http"):
             continue
         try:
-            r = requests.get(url, timeout=15, impersonate="chrome")
+            headers = item.get("headers") if isinstance(item, dict) else None
+            r = requests.get(url, timeout=15, impersonate="chrome", headers=headers)
             content = r.content
             ext = _guess_subtitle_ext(url)
             if url.lower().endswith(".xz"):
@@ -147,6 +148,13 @@ def handle_player_error(context: str = "player") -> int:
         ["Try another player", "← Back"],
         f"The {context} failed. What would you like to do?",
     )
+
+
+def _player_exit_hint(code: int) -> str:
+    """Human hint for a failed player exit code (see mpv(1) EXIT CODES)."""
+    return {
+        2: "the file could not be played (link likely dead or expired)",
+    }.get(code, "")
 
 
 def play_video(
@@ -431,6 +439,12 @@ def play_video(
                 subprocess.run(cmd, check=True)
                 print_success("Playback completed successfully!")
                 return True
+            except subprocess.CalledProcessError as e:
+                hint = _player_exit_hint(e.returncode)
+                if hint:
+                    print_error(f"Error running player via proxy: {e} ({hint}).")
+                    return False
+                print_error(f"Error running player via proxy: {e}")
             except Exception as e:
                 print_error(f"Error running player via proxy: {e}")
 
@@ -496,6 +510,10 @@ def play_video(
                 return True
 
             except subprocess.CalledProcessError as e:
+                hint = _player_exit_hint(e.returncode)
+                if hint:
+                    print_error(f"Error running player: {e} ({hint}).")
+                    return False
                 print_error(f"Error running player: {e}")
                 # Retry logic below
             except Exception as e:

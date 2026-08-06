@@ -13,8 +13,9 @@ class SubtitleExtractor:
 
     # Order of confidence of sources (lower = higher in the list)
     SOURCE_PRIORITY = {
-        "OpenSubtitles (Stremio)": 1,
-        "AnimeTosho": 2,
+        "OpenSubtitles (Homes)": 1,
+        "OpenSubtitles (Stremio)": 2,
+        "AnimeTosho": 3,
     }
 
     def _fetch_stremio(self, base_url, imdb_id, season=None, episode=None):
@@ -39,6 +40,48 @@ class SubtitleExtractor:
         for s in subs:
             s["source"] = "OpenSubtitles (Stremio)"
         return subs
+
+    def get_opensubtitles_homes(
+        self, imdb_id, season=None, episode=None, lang_filter=None
+    ):
+        """OpenSubtitles via the Stremio addon hosted on opensubtitles.stremio.homes.
+
+        Larger result set than the legacy strem.io bridge. The addon requires a
+        language/options prefix in the URL (without it the route 404s), so the
+        user's preferred language is baked in first (English always kept).
+        """
+        base_url = portals.get(
+            "opensubtitles-homes", "https://opensubtitles.stremio.homes"
+        )
+        lang = lang_filter if (lang_filter and len(lang_filter) == 2) else None
+        if lang:
+            langs = f"{lang}|en"
+        else:
+            langs = "en|hi|de|ar|tr|es|ta|te|ru|ko"
+        config_url = f"{base_url}/{langs}/ai-translated=false|from=all"
+        subs = self._fetch_stremio(config_url, imdb_id, season, episode)
+        for s in subs:
+            s["source"] = "OpenSubtitles (Homes)"
+        return subs
+
+    @staticmethod
+    def _dedupe(subs):
+        """Remove duplicates by URL, then by (lang, title); keep first occurrence."""
+        seen_url = set()
+        seen_lang_title = set()
+        unique = []
+        for sub in subs:
+            url = sub.get("url")
+            if url:
+                if url in seen_url:
+                    continue
+                seen_url.add(url)
+            key = (sub.get("lang") or "", sub.get("title") or "")
+            if key != ("", "") and key in seen_lang_title:
+                continue
+            seen_lang_title.add(key)
+            unique.append(sub)
+        return unique
 
     @staticmethod
     def _matches_episode(name, episode, season=None):
@@ -170,11 +213,15 @@ class SubtitleExtractor:
         :return: Sorted list of dictionaries.
         """
         all_subs = []
+        all_subs.extend(
+            self.get_opensubtitles_homes(imdb_id, season, episode, lang_filter)
+        )
         all_subs.extend(self.get_opensubtitles_stremio(imdb_id, season, episode))
         if anidb_id:
             all_subs.extend(
                 self.get_animetosho(anidb_id, episode=episode or 1, season=season)
             )
+        all_subs = self._dedupe(all_subs)
 
         # 1. Filter by language (case insensitive)
         if lang_filter:
