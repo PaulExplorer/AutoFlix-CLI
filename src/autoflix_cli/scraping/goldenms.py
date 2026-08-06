@@ -1,4 +1,5 @@
 import re
+from urllib.parse import quote
 from curl_cffi import requests as cffi_requests
 from .config import portals
 from ..proxy import DNS_OPTIONS
@@ -9,6 +10,17 @@ scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS)
 MOVIESAPI_KEY = (
     "3a67e8866ae1d2bb9e81fe7f73315a56eb3bdf5e3e755c7554c8be6910aa6b13"
 )
+
+# Videasy hosted API (CineStream's backend) + player origin used by its CDNs.
+VIDEASY_ORIGIN = "https://player.videasy.to"
+VIDEASY_SERVERS = [
+    "downloader2",
+    "m4uhd",
+    "cdn",
+    "lamovie",
+    "superflix",
+    "hdmovie",
+]
 
 
 class MediaExtractor:
@@ -21,6 +33,7 @@ class MediaExtractor:
         # --- Source URLs loaded from source_portal.jsonc ---
         self.xpass_api = portals.get("xpass", "https://play.xpass.top")
         self.moviesapi_api = portals.get("moviesapi", "https://moviesapi.to")
+        self.videasy_api = portals.get("videasy", "https://api.speedracelight.com")
 
     def search_moviesapi(self, tmdb_id, season=None, episode=None):
         """Extraction via MoviesAPI (Vidora backend). Direct HLS by TMDB ID."""
@@ -80,6 +93,115 @@ class MediaExtractor:
                     "headers": cdn_headers,
                 }
             ]
+        except:
+            return []
+
+    def search_videasy(
+        self,
+        tmdb_id,
+        title=None,
+        year=None,
+        imdb_id=None,
+        season=None,
+        episode=None,
+    ):
+        """Extraction via Videasy hosted API (api.speedracelight.com).
+
+        Multi-server backend: seed -> per-server encrypted payload -> decrypt
+        through enc-dec.app. Returns real MP4/HLS links with VTT subtitles.
+        """
+        if not tmdb_id:
+            return []
+
+        api = self.videasy_api
+        try:
+            headers = {
+                "Accept": "*/*",
+                "User-Agent": scraper.headers.get("User-Agent", "Mozilla/5.0"),
+                "Origin": VIDEASY_ORIGIN,
+                "Referer": f"{VIDEASY_ORIGIN}/",
+            }
+
+            r = scraper.get(
+                f"{api}/seed?mediaId={tmdb_id}", headers=headers, timeout=10
+            )
+            if r.status_code != 200:
+                return []
+            seed = r.json().get("seed")
+            if not seed:
+                return []
+
+            enc_title = quote(quote(title or ""))
+            query = [
+                f"title={enc_title}",
+                f"mediaType={'tv' if season is not None else 'movie'}",
+                f"tmdbId={tmdb_id}",
+                "enc=2",
+                f"seed={seed}",
+            ]
+            if year:
+                query.append(f"year={year}")
+            if imdb_id:
+                query.append(f"imdbId={imdb_id}")
+            if season is not None:
+                query.append(f"seasonId={season}")
+            if episode is not None:
+                query.append(f"episodeId={episode}")
+            query_string = "&".join(query)
+
+            cdn_headers = {"Referer": f"{VIDEASY_ORIGIN}/"}
+            results = []
+            seen = set()
+
+            for server in VIDEASY_SERVERS:
+                try:
+                    r = scraper.get(
+                        f"{api}/{server}/sources-with-title?{query_string}",
+                        headers=headers,
+                        timeout=12,
+                    )
+                    if r.status_code != 200:
+                        continue
+                    j = scraper.post(
+                        "https://enc-dec.app/api/dec-videasy",
+                        json={"text": r.text, "id": tmdb_id, "seed": seed},
+                        timeout=15,
+                    )
+                    if j.status_code != 200:
+                        continue
+                    payload = j.json().get("result") or {}
+                    subtitles = [
+                        {
+                            "lang": t.get("language") or t.get("label") or "?",
+                            "url": t["url"],
+                            "headers": cdn_headers,
+                        }
+                        for t in (payload.get("subtitles") or [])
+                        if t.get("url")
+                    ]
+                    for src in payload.get("sources") or []:
+                        url = src.get("url")
+                        if url and url not in seen:
+                            seen.add(url)
+                            results.append(
+                                {
+                                    "source": "Videasy",
+                                    "quality": src.get("quality") or "Auto",
+                                    "url": url,
+                                    "type": (
+                                        "M3U8"
+                                        if "m3u8" in url.lower()
+                                        else "VIDEO"
+                                    ),
+                                    "subtitles": subtitles or None,
+                                    "headers": cdn_headers,
+                                }
+                            )
+                            if len(results) >= 10:
+                                return results
+                except:
+                    continue
+            return results
         except:
             return []
 
@@ -154,6 +276,11 @@ class MediaExtractor:
         # source.heistotron.uk serving a 26s loading clip instead of the media.
         if tmdb_id:
             results.extend(self.search_moviesapi(tmdb_id, season, episode))
+            results.extend(
+                self.search_videasy(
+                    tmdb_id, title, year, imdb_id, season, episode
+                )
+            )
             results.extend(self.search_xpass(tmdb_id, season, episode))
 
         # Deduplication by URL

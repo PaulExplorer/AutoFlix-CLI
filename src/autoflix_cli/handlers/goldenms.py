@@ -308,6 +308,11 @@ def _flow_goldenms_stream(
         headers.setdefault("Referer", f"{goldenms_extractor.moviesapi_api}/")
         headers.setdefault("Origin", goldenms_extractor.moviesapi_api)
 
+    # Videasy MP4/HLS CDNs require the Videasy player as referer/origin.
+    if "videasy" in selection["source"].lower():
+        headers.setdefault("Referer", "https://player.videasy.to/")
+        headers.setdefault("Origin", "https://player.videasy.to")
+
     success = play_video(
         final_url,
         headers=headers,
