@@ -6,6 +6,11 @@ from ..proxy import DNS_OPTIONS
 
 scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS)
 
+# Public player key embedded in MoviesAPI's own web player JS (de-facto public).
+MOVIESAPI_KEY = (
+    "3a67e8866ae1d2bb9e81fe7f73315a56eb3bdf5e3e755c7554c8be6910aa6b13"
+)
+
 
 class MediaExtractor:
     """
@@ -23,6 +28,7 @@ class MediaExtractor:
         self.hexa_api = portals.get("hexa", "https://themoviedb.hexa.su")
         self.mapple_api = portals.get("mapple", "https://mapple.uk")
         self.xpass_api = portals.get("xpass", "https://play.xpass.top")
+        self.moviesapi_api = portals.get("moviesapi", "https://moviesapi.to")
 
         # --- Referers ---
         self.videasy_referer = portals.get("videasy-referer", "https://cineby.gd")
@@ -246,6 +252,67 @@ class MediaExtractor:
             pass
         return []
 
+    def search_moviesapi(self, tmdb_id, season=None, episode=None):
+        """Extraction via MoviesAPI (Vidora backend). Direct HLS by TMDB ID."""
+        if not tmdb_id:
+            return []
+        try:
+            headers = {
+                "x-player-key": MOVIESAPI_KEY,
+                "Accept": "application/json, text/plain, */*",
+                "User-Agent": scraper.headers.get("User-Agent", "Mozilla/5.0"),
+                "Referer": f"{self.moviesapi_api}/",
+                "Origin": self.moviesapi_api,
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-origin",
+            }
+
+            if season is None:
+                path = f"/api/vidora/v1/movie/{tmdb_id}"
+            else:
+                path = f"/api/vidora/v1/tv/{tmdb_id}/{season}/{episode}"
+
+            r = scraper.get(
+                f"{self.moviesapi_api}{path}", headers=headers, timeout=15
+            )
+            if r.status_code != 200:
+                return []
+            data = r.json()
+            if not data.get("result") or not data.get("sources"):
+                return []
+
+            source = data["sources"][0]
+            stream_url = source.get("url")
+            if not stream_url:
+                return []
+
+            cdn_headers = {
+                "Referer": f"{self.moviesapi_api}/",
+                "Origin": self.moviesapi_api,
+            }
+            subtitles = [
+                {
+                    "lang": t.get("label") or t.get("language") or "?",
+                    "url": t["file"],
+                    "headers": cdn_headers,
+                }
+                for t in (source.get("tracks") or [])
+                if t.get("file")
+            ]
+            return [
+                {
+                    "source": "MoviesAPI",
+                    "quality": "Auto",
+                    "url": stream_url,
+                    "type": "M3U8",
+                    "subtitles": subtitles or None,
+                    "headers": cdn_headers,
+                }
+            ]
+        except:
+            return []
+
     def search_mapple(self, tmdb_id, season=None, episode=None):
         """Extraction via Mapple."""
         if not tmdb_id:
@@ -394,12 +461,15 @@ class MediaExtractor:
         """Main search method."""
         results = []
 
-        # Priority: Xpass, Mapple
+        # Priority: MoviesAPI (hosted API, fast single request), then Xpass
+        # as fallback for titles not encoded on Vidora.
         # VidLink is parsed but excluded: its MP4 CDN (bcdn.hakunaymatata.com)
         # requires a proxy (requiresProxy=True) and blocks direct access (403/429).
+        # Mapple is dead: every source returns the same signed URL on
+        # source.heistotron.uk serving a 26s loading clip instead of the media.
         if tmdb_id:
+            results.extend(self.search_moviesapi(tmdb_id, season, episode))
             results.extend(self.search_xpass(tmdb_id, season, episode))
-            results.extend(self.search_mapple(tmdb_id, season, episode))
 
         # Deduplication by URL
         unique = {}

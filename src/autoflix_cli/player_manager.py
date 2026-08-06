@@ -56,7 +56,8 @@ def _download_subtitles(subtitle_items) -> list:
         if not url or not isinstance(url, str) or not url.startswith("http"):
             continue
         try:
-            r = requests.get(url, timeout=15, impersonate="chrome")
+            headers = item.get("headers") if isinstance(item, dict) else None
+            r = requests.get(url, timeout=15, impersonate="chrome", headers=headers)
             content = r.content
             ext = _guess_subtitle_ext(url)
             if url.lower().endswith(".xz"):

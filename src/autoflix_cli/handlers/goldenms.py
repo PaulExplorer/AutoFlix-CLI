@@ -302,10 +302,11 @@ def _flow_goldenms_stream(
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     )
 
-    # Note: vidlink expects origin/referer headers, hexa might just need generic
-    if "vidlink" in selection["source"].lower():
-        headers["Referer"] = f"{goldenms_extractor.vidlink_api}/"
-        headers["Origin"] = f"{goldenms_extractor.vidlink_api}/"
+    # MoviesAPI sources already ship their Referer/Origin via selection headers;
+    # ensure they're present (Vidora CDN rejects requests without them).
+    if "moviesapi" in selection["source"].lower():
+        headers.setdefault("Referer", f"{goldenms_extractor.moviesapi_api}/")
+        headers.setdefault("Origin", goldenms_extractor.moviesapi_api)
 
     success = play_video(
         final_url,
