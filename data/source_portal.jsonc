@@ -7,6 +7,7 @@
   "aniwatch-fallback": "https://anivexa-api.vercel.app",
   "aniwatch-referer": "https://anizone.to",
   "animetosho": "https://feed.animetosho.xyz",
+  "opensubtitles-homes": "https://opensubtitles.stremio.homes",
   "videasy": "https://api.speedracelight.com",
   "videasy-referer": "https://player.videasy.to",
   "vidlink": "https://vidlink.pro",
