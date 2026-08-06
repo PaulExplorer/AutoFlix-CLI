@@ -210,40 +210,58 @@ def _flow_goldenms_stream(
     selection = valid_results[choice_idx]
 
     # Subtitles logic
-    subtitle_url = None
+    subtitle_tracks = None
     user_lang = tracker.get_language() or "fr"
     lang_name = get_language_label(user_lang)
 
-    want_subs = select_from_list(["Yes", "No"], f"Search for {lang_name} subtitles?")
-    if want_subs == 0:
-        current_imdb_id = imdb_id
-        if not current_imdb_id:
-            current_imdb_id = get_user_input(
-                "Enter IMDB ID (e.g. tt0388629, leave blank to skip subtitles)"
-            )
-        if current_imdb_id:
-            sub_season = season if not is_movie else None
-            sub_ep = episode if not is_movie else None
+    embedded_tracks = selection.get("subtitles") or []
+    if embedded_tracks:
+        langs_preview = ", ".join(
+            sorted({t.get("lang", "?") for t in embedded_tracks})
+        )
+        use_embedded = select_from_list(
+            [
+                f"Yes (load {len(embedded_tracks)} tracks: {langs_preview})",
+                "No (search external subtitles)",
+            ],
+            "The stream has embedded subtitle tracks (language picked in the player):",
+        )
+        if use_embedded == 0:
+            subtitle_tracks = embedded_tracks
 
-            print_info(f"Searching for {lang_name} subtitles...")
-            subs = subtitle_extractor.search(
-                imdb_id=current_imdb_id,
-                season=sub_season,
-                episode=sub_ep,
-                lang_filter=user_lang,
-            )
+    if subtitle_tracks is None:
+        want_subs = select_from_list(
+            ["Yes", "No"], f"Search for {lang_name} subtitles?"
+        )
+        if want_subs == 0:
+            current_imdb_id = imdb_id
+            if not current_imdb_id:
+                current_imdb_id = get_user_input(
+                    "Enter IMDB ID (e.g. tt0388629, leave blank to skip subtitles)"
+                )
+            if current_imdb_id:
+                sub_season = season if not is_movie else None
+                sub_ep = episode if not is_movie else None
 
-            if subs:
-                sub_opts = [
-                    f"{s['source']} - {s.get('lang', lang_name)}" for s in subs
-                ] + ["Skip Subtitles"]
-                sub_choice = select_from_list(sub_opts, "Select Subtitle:")
-                if sub_choice < len(subs):
-                    subtitle_url = subs[sub_choice]["url"]
-                    print_info(f"Selected subtitle: {subtitle_url}")
-            else:
-                print_warning(f"No {lang_name} subtitles found.")
-                pause()
+                print_info(f"Searching for {lang_name} subtitles...")
+                subs = subtitle_extractor.search(
+                    imdb_id=current_imdb_id,
+                    season=sub_season,
+                    episode=sub_ep,
+                    lang_filter=user_lang,
+                )
+
+                if subs:
+                    sub_opts = [
+                        f"{s['source']} - {s.get('lang', lang_name)}" for s in subs
+                    ] + ["Skip Subtitles"]
+                    sub_choice = select_from_list(sub_opts, "Select Subtitle:")
+                    if sub_choice < len(subs):
+                        subtitle_tracks = [subs[sub_choice]]
+                        print_info(f"Selected subtitle: {subs[sub_choice]['url']}")
+                else:
+                    print_warning(f"No {lang_name} subtitles found.")
+                    pause()
 
     final_url = selection["url"]
     type_ = selection["type"].upper()
@@ -278,9 +296,11 @@ def _flow_goldenms_stream(
 
     print_info(f"Starting playback: [cyan]{display_title}[/cyan]")
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    }
+    headers = dict(selection.get("headers") or {})
+    headers.setdefault(
+        "User-Agent",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    )
 
     # Note: vidlink expects origin/referer headers, hexa might just need generic
     if "vidlink" in selection["source"].lower():
@@ -291,7 +311,8 @@ def _flow_goldenms_stream(
         final_url,
         headers=headers,
         title=display_title,
-        subtitle_url=subtitle_url,
+        subtitle_url=None,
+        subtitles=subtitle_tracks,
         is_direct=is_direct,
     )
 

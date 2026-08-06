@@ -1,5 +1,6 @@
-from curl_cffi import requests as cffi_requests
+import re
 import urllib.parse
+from curl_cffi import requests as cffi_requests
 from .config import portals
 from ..proxy import DNS_OPTIONS
 
@@ -139,18 +140,48 @@ class MediaExtractor:
 
             r = scraper.get(url, headers=headers, timeout=10)
             data = r.json()
-            m3u8_url = data.get("stream", {}).get("playlist")
+            stream = data.get("stream", {})
 
+            subtitles = None
+            captions = stream.get("captions") or []
+            if captions:
+                subtitles = [
+                    {"lang": c.get("language", "?"), "url": c.get("url")}
+                    for c in captions
+                    if c.get("url")
+                ]
+
+            qualities = stream.get("qualities") or {}
+            m3u8_url = stream.get("playlist") or (qualities or {}).get("master")
+
+            results = []
             if m3u8_url:
-                return [
+                results.append(
                     {
                         "source": "Vidlink",
                         "quality": "Multi",
                         "url": m3u8_url,
                         "type": "M3U8",
+                        "subtitles": subtitles,
                         "headers": headers,
                     }
-                ]
+                )
+            else:
+                for quality in ("1080", "720", "480", "360"):
+                    if quality in qualities:
+                        q = qualities[quality]
+                        results.append(
+                            {
+                                "source": "Vidlink",
+                                "quality": f"{quality}p",
+                                "url": q.get("url"),
+                                "type": q.get("type", "MP4").upper(),
+                                "subtitles": subtitles,
+                                "headers": headers,
+                            }
+                        )
+
+            return results
         except:
             pass
         return []
@@ -314,14 +345,19 @@ class MediaExtractor:
             )
             r = scraper.get(embed_url, headers={"Referer": f"{base_url}/"}, timeout=10)
 
-            # Extract backups/sources via regex
-            matches = re.findall(r'href=["\']([^"\']+/playlist/[^"\']+)["\']', r.text)
+            # Extract backups/sources via regex (deduplicated, capped)
+            matches = []
+            for m in re.findall(
+                r'"(?:url|playlist)"\s*:\s*"([^"]+playlist\.json)"', r.text
+            ):
+                if m not in matches:
+                    matches.append(m)
             results = []
 
-            for url in matches:
+            for url in matches[:8]:
                 full_url = url if url.startswith("http") else f"{base_url}{url}"
                 try:
-                    r_json = scraper.get(full_url, timeout=10).json()
+                    r_json = scraper.get(full_url, timeout=6).json()
                     playlist = r_json.get("playlist", [])[0]
                     sources = playlist.get("sources", [])
                     for src in sources:
@@ -358,17 +394,12 @@ class MediaExtractor:
         """Main search method."""
         results = []
 
-        # Priority: Vidlink, Hexa, Xpass, Mapple, Videasy
+        # Priority: Xpass, Mapple
+        # VidLink is parsed but excluded: its MP4 CDN (bcdn.hakunaymatata.com)
+        # requires a proxy (requiresProxy=True) and blocks direct access (403/429).
         if tmdb_id:
-            results.extend(self.search_vidlink(tmdb_id, season, episode))
-            results.extend(self.search_hexa(tmdb_id, season, episode))
             results.extend(self.search_xpass(tmdb_id, season, episode))
             results.extend(self.search_mapple(tmdb_id, season, episode))
-
-        if title:
-            results.extend(
-                self.search_videasy(title, tmdb_id, imdb_id, year, season, episode)
-            )
 
         # Deduplication by URL
         unique = {}
