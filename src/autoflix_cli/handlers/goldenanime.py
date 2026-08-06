@@ -144,13 +144,14 @@ def _flow_goldenanime_stream(
         pause()
         return
 
-    # Filter: only keep direct streams (m3u8 / master URLs) or supported embedded players
+    # Filter: only keep direct streams (m3u8 / mp4) or supported embedded players
     def _is_valid(r):
         url = r.get("url", "")
+        rtype = (r.get("type") or "").lower()
         return (
-            r.get("type").lower() == "m3u8"
-            or r.get("type").lower() == "mp4"
+            rtype in ("m3u8", "hls", "mp4")
             or ".m3u8" in url
+            or ".m3u" in url
             or "master" in url.lower()
             or player_scraper.is_supported(url)
         )
@@ -180,12 +181,24 @@ def _flow_goldenanime_stream(
     selection = valid_results[choice_idx]
 
     # Subtitles logic
-    subtitle_url = None
+    subtitle_tracks = None
     user_lang = tracker.get_language() or "fr"
     lang_name = get_language_label(user_lang)
 
-    want_subs = select_from_list(["Yes", "No"], f"Search for {lang_name} subtitles?")
-    if want_subs == 0:
+    embedded_tracks = selection.get("subtitles") or []
+    if embedded_tracks:
+        langs_preview = ", ".join(sorted({t.get("lang", "?") for t in embedded_tracks}))
+        use_embedded = select_from_list(
+            [
+                f"Yes (load {len(embedded_tracks)} tracks: {langs_preview})",
+                "No (search external subtitles)",
+            ],
+            "The stream has embedded subtitle tracks (language picked in the player):",
+        )
+        if use_embedded == 0:
+            subtitle_tracks = embedded_tracks
+
+    if subtitle_tracks is None:
         # Try to resolve title if missing
         search_title = title
         if not search_title and anilist_id:
@@ -195,89 +208,82 @@ def _flow_goldenanime_stream(
                     "title", {}
                 ).get("romaji")
 
-        imdb_id = None
-        is_movie = False
-        if search_title:
-            imdb_id, is_movie = search_imdb_id(search_title)
-        else:
-            imdb_id = get_user_input(
-                "Enter IMDB ID manually (e.g. tt0388629, leave blank to skip)"
-            )
-
-        if imdb_id:
-            season = None
-            if not is_movie:
-                # Detect season from title for smart default
-                default_season_idx = 0
-                if search_title:
-                    match = re.search(r"Season\s+(\d+)", search_title, re.IGNORECASE)
-                    if match:
-                        detected_season = int(match.group(1))
-                        # Range 1-10 mapped to 0-9 index
-                        if 1 <= detected_season <= 10:
-                            default_season_idx = detected_season - 1
-
-                season_options = [f"Season {i}" for i in range(1, 11)] + [
-                    "Manual Input"
-                ]
-                s_idx = select_from_list(
-                    season_options,
-                    "Select Season (for subtitles mapping):",
-                    default_index=default_season_idx,
-                )
-                if s_idx < 10:
-                    season = s_idx + 1
-                else:
-                    season_input = get_user_input("Season number (default 1)")
-                    season = (
-                        int(season_input)
-                        if season_input and season_input.isdigit()
-                        else 1
-                    )
-
-            print_info(f"Searching for {lang_name} subtitles...")
-            subs = subtitle_extractor.search(
-                imdb_id=imdb_id, season=season, episode=episode, lang_filter=user_lang
-            )
-
-            if subs:
-                # Show a shortened list to make it faster
-                sub_choices = [
-                    f"{s['source']} - {s.get('lang', lang_name)}" for s in subs[:5]
-                ] + ["None"]
-                sub_idx = select_from_list(sub_choices, "📝 Select Subtitle:")
-                if sub_idx < len(sub_choices) - 1:
-                    subtitle_url = subs[sub_idx]["url"]
-                    print_info(f"Selected subtitle from: {subs[sub_idx]['source']}")
+        want_subs = select_from_list(
+            ["Yes", "No"], f"Search for {lang_name} subtitles?"
+        )
+        if want_subs == 0:
+            imdb_id = None
+            is_movie = False
+            if search_title:
+                imdb_id, is_movie = search_imdb_id(search_title)
             else:
-                print_warning(f"No {lang_name} subtitles found.")
+                imdb_id = get_user_input(
+                    "Enter IMDB ID manually (e.g. tt0388629, leave blank to skip)"
+                )
+
+            if imdb_id:
+                season = None
+                if not is_movie:
+                    # Detect season from title for smart default
+                    default_season_idx = 0
+                    if search_title:
+                        match = re.search(r"Season\s+(\d+)", search_title, re.IGNORECASE)
+                        if match:
+                            detected_season = int(match.group(1))
+                            # Range 1-10 mapped to 0-9 index
+                            if 1 <= detected_season <= 10:
+                                default_season_idx = detected_season - 1
+
+                    season_options = [f"Season {i}" for i in range(1, 11)] + [
+                        "Manual Input"
+                    ]
+                    s_idx = select_from_list(
+                        season_options,
+                        "Select Season (for subtitles mapping):",
+                        default_index=default_season_idx,
+                    )
+                    if s_idx < 10:
+                        season = s_idx + 1
+                    else:
+                        season_input = get_user_input("Season number (default 1)")
+                        season = (
+                            int(season_input)
+                            if season_input and season_input.isdigit()
+                            else 1
+                        )
+
+                print_info(f"Searching for {lang_name} subtitles...")
+                anidb_id = None
+                if anilist_id:
+                    mappings = goldenanime.get_mappings(anilist_id)
+                    anidb_id = mappings.get("anidbId")
+                subs = subtitle_extractor.search(
+                    imdb_id=imdb_id,
+                    season=season,
+                    episode=episode,
+                    lang_filter=user_lang,
+                    anidb_id=anidb_id,
+                )
+
+                if subs:
+                    # Show a shortened list to make it faster
+                    sub_choices = [
+                        f"{s['source']} - {s.get('lang', lang_name)}" for s in subs[:6]
+                    ] + ["None"]
+                    sub_idx = select_from_list(sub_choices, "📝 Select Subtitle:")
+                    if sub_idx < len(sub_choices) - 1:
+                        subtitle_tracks = [subs[sub_idx]]
+                        print_info(f"Selected subtitle from: {subs[sub_idx]['source']}")
+                else:
+                    print_warning(f"No {lang_name} subtitles found.")
 
     print_info(f"Loading stream from [cyan]{selection['source']}[/cyan]...")
 
-    headers = {
-        "Referer": goldenanime.sudatchi_base + "/",
-    }
-    if "Allanime" in selection["source"]:
-        headers["Referer"] = goldenanime.allanime_referer + "/"
-    if "Animetsu" in selection["source"]:
-        headers["Referer"] = goldenanime.animetsu_base + "/"
-        headers["Origin"] = goldenanime.animetsu_base
+    headers = selection.get("headers") or {"Referer": goldenanime.referer + "/"}
 
     display_title = title if title else f"AniList ID {anilist_id}"
 
-    # Handle specific API URLs that return JSON instead of M3U8 directly
     final_url = selection["url"]
-    sudatchi_api_domain = goldenanime.sudatchi_base.replace("https://", "")
-    if (
-        sudatchi_api_domain + "/api/streams" in final_url
-        or "sudatchi.com/api/streams" in final_url
-    ):
-        try:
-            resp = requests.get(final_url, headers=headers, impersonate="chrome").json()
-            if isinstance(resp, list) and len(resp) > 0:
-                final_url = resp[0].get("url", final_url)
-        except Exception:
-            pass
 
     is_direct = (
         selection["type"].lower() == "m3u8"
@@ -289,7 +295,8 @@ def _flow_goldenanime_stream(
         final_url,
         headers=headers,
         title=f"{display_title} - Episode {episode}",
-        subtitle_url=subtitle_url,
+        subtitle_url=None,
+        subtitles=subtitle_tracks,
         is_direct=is_direct,
         is_mp4=selection["type"].lower() == "mp4",
     )

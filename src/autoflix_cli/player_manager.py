@@ -26,6 +26,51 @@ DEFAULT_USER_AGENT = (
 )
 
 
+def _guess_subtitle_ext(url: str) -> str:
+    """Guess a subtitle file extension from its URL (.ass/.vtt/.srt...)."""
+    path = url.split("?")[0].lower()
+    if path.endswith(".xz"):
+        path = path[:-3]
+    for ext in (".ass", ".srt", ".vtt", ".ssa", ".sub"):
+        if path.endswith(ext):
+            return ext
+    return ".srt"
+
+
+def _download_subtitles(subtitle_items) -> list:
+    """
+    Download subtitle file(s) to local temp files (handles .xz compression).
+
+    Args:
+        subtitle_items: List of dicts with a "url" key (or plain URL strings).
+    Returns:
+        List of local temp file paths.
+    """
+    from curl_cffi import requests
+    import tempfile
+    import lzma
+
+    paths = []
+    for item in subtitle_items:
+        url = item["url"] if isinstance(item, dict) else item
+        if not url or not isinstance(url, str) or not url.startswith("http"):
+            continue
+        try:
+            r = requests.get(url, timeout=15, impersonate="chrome")
+            content = r.content
+            ext = _guess_subtitle_ext(url)
+            if url.lower().endswith(".xz"):
+                content = lzma.decompress(content)
+                ext = _guess_subtitle_ext(url[:-3])
+            fd, temp_path = tempfile.mkstemp(suffix=ext, prefix="autoflix_sub_")
+            with os.fdopen(fd, "wb") as f:
+                f.write(content)
+            paths.append(temp_path)
+        except Exception as e:
+            print_error(f"Failed to download subtitle: {e}")
+    return paths
+
+
 PLAYERS: Dict[str, Dict[str, str]] = {
     "mpv": {"display": "mpv"},
     "vlc": {"display": "vlc"},
@@ -109,6 +154,7 @@ def play_video(
     headers: dict,
     title: str = "AutoFlix Stream",
     subtitle_url: str = None,
+    subtitles: list = None,
     is_direct: bool = False,
     is_mp4: bool = False,
 ) -> bool:
@@ -119,6 +165,11 @@ def play_video(
         url: Video player URL
         headers: HTTP headers for the request
         title: Title of the video to display in the player
+        subtitle_url: Single primary subtitle URL (kept for compatibility)
+        subtitles: Optional list of subtitle track dicts ({"url", "label", ...})
+            so the user can pick the language inside the player
+        is_direct: Whether the URL is a direct media file
+        is_mp4: Whether the stream is an MP4
 
     Returns:
         True if playback succeeded, False otherwise
@@ -174,21 +225,19 @@ def play_video(
     print_success(f"Stream URL: [cyan]{stream_url}[/cyan]")
 
     local_subtitle_path = subtitle_url
+    subtitle_paths = []
+    subtitle_items = list(subtitles or [])
     if subtitle_url and subtitle_url.startswith("http"):
-        print_info("Downloading subtitle file for compatibility...")
-        try:
-            from curl_cffi import requests
-            import tempfile
+        subtitle_items.insert(0, subtitle_url)
 
-            r = requests.get(subtitle_url, timeout=10, impersonate="chrome")
-            sub_ext = ".vtt" if "vtt" in subtitle_url.lower() else ".srt"
-            fd, temp_sub = tempfile.mkstemp(suffix=sub_ext, prefix="autoflix_sub_")
-            with os.fdopen(fd, "wb") as f:
-                f.write(r.content)
-            local_subtitle_path = temp_sub
-            print_success("Subtitles downloaded locally.")
-        except Exception as e:
-            print_error(f"Failed to download subtitles: {e}")
+    if subtitle_items:
+        print_info("Downloading subtitle file(s) for compatibility...")
+        subtitle_paths = _download_subtitles(subtitle_items)
+        if subtitle_paths:
+            local_subtitle_path = subtitle_paths[0]
+            print_success(f"{len(subtitle_paths)} subtitle track(s) downloaded locally.")
+        else:
+            local_subtitle_path = None
 
     force_manual_mode = False
     while True:  # Loop to allow retrying with another player
@@ -367,17 +416,17 @@ def play_video(
             try:
                 cmd = [player_executable, local_stream_url]
                 if player_name == "vlc":
-                    if local_subtitle_path:
+                    if subtitle_paths:
                         print_warning(
                             "Note: VLC natively struggles to sync external subtitles on HLS/M3U8 streams (subtitles may flash). Strongly recommend using MPV instead."
                         )
                     cmd.append(f"--meta-title={title}")
-                    if local_subtitle_path:
-                        cmd.append(f"--sub-file={local_subtitle_path}")
+                    for path in subtitle_paths:
+                        cmd.append(f"--sub-file={path}")
                 elif player_name == "mpv":
                     cmd.append(f"--title={title}")
-                    if local_subtitle_path:
-                        cmd.append(f"--sub-files={local_subtitle_path}")
+                    for path in subtitle_paths:
+                        cmd.append(f"--sub-file={path}")
 
                 subprocess.run(cmd, check=True)
                 print_success("Playback completed successfully!")
@@ -399,11 +448,12 @@ def play_video(
                         f":http-user-agent={user_agent}",
                         f"--meta-title={title}",
                     ]
-                    if local_subtitle_path:
+                    if subtitle_paths:
                         print_warning(
                             "Note: VLC natively struggles to sync external subtitles on HLS/M3U8 streams (subtitles may flash). Strongly recommend using MPV instead."
                         )
-                        cmd.append(f"--sub-file={local_subtitle_path}")
+                        for path in subtitle_paths:
+                            cmd.append(f"--sub-file={path}")
                     subprocess.run(cmd, check=True)
                 else:
                     # MPV Command construction
@@ -437,8 +487,8 @@ def play_video(
                         f'--http-header-fields="{headers_mpv}"',
                         f'--title="{title}"',
                     ]
-                    if local_subtitle_path:
-                        cmd.append(f"--sub-files={local_subtitle_path}")
+                    for path in subtitle_paths:
+                        cmd.append(f"--sub-file={path}")
                     cmd.append(stream_url)
                     subprocess.run(cmd, check=True)
 
