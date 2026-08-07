@@ -18,6 +18,7 @@ from ..scraping import arkanime as arkanime_scraper
 from .playback import play_episode_flow
 from ..player_manager import play_video
 from ..scraping import player
+from ..scraping.objects import ArkMovie
 
 
 def handle_anilist_continue():
@@ -123,10 +124,29 @@ def handle_anilist_continue():
     romaji_title = selected_entry["media"]["title"]["romaji"]
 
     if p_choice == 2:  # ArkAnime
-        series = _search_and_select_series(arkanime_scraper, media_title, romaji_title)
-        if not series or not series.seasons:
-            if series and not series.seasons:
-                print_warning("No seasons found.")
+        content = _search_and_select_series(arkanime_scraper, media_title, romaji_title)
+        if not content:
+            return
+
+        if isinstance(content, ArkMovie):
+            if not content.players:
+                print_warning("No players found.")
+                return
+            play_episode_flow(
+                provider_name="ArkAnime",
+                series_title=content.title,
+                season_title="Movie",
+                episode=content,
+                series_url=content.id,
+                season_url=content.id,
+                logo_url=content.img,
+                headers={"Referer": arkanime_scraper.website_origin},
+            )
+            return
+
+        series = content
+        if not series.seasons:
+            print_warning("No seasons found.")
             return
 
         season = _auto_select_season(series.seasons, media_title, romaji_title)
@@ -258,6 +278,8 @@ def _search_and_select_series(scraper, media_title, romaji_title):
 
     selection = results[r_idx]
     print_info(f"Loading [cyan]{selection.title}[/cyan]...")
+    if hasattr(scraper, "get_content"):
+        return scraper.get_content(selection.url)
     return scraper.get_series(selection.url)
 
 
