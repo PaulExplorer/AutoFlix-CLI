@@ -1,5 +1,6 @@
 from curl_cffi import requests as cffi_requests
 
+from .anivault import anivault
 from .config import portals
 
 scraper = cffi_requests.Session(impersonate="chrome")
@@ -28,10 +29,18 @@ class AnimeExtractor:
     ]
 
     def __init__(self):
-        self.bases = [
-            portals.get("aniwatch", "https://anivexa-api-production.up.railway.app"),
-            portals.get("aniwatch-fallback", "https://anivexa-api.vercel.app"),
-        ]
+        self.bases = list(
+            dict.fromkeys(
+                b
+                for b in [
+                    portals.get(
+                        "aniwatch", "https://anivexa-api.vercel.app"
+                    ),
+                    portals.get("aniwatch-fallback"),
+                ]
+                if b
+            )
+        )
         self.referer = portals.get("aniwatch-referer", "https://anizone.to")
 
     def _get_json(self, path):
@@ -172,6 +181,11 @@ class AnimeExtractor:
                 if entry and entry["url"] not in seen_urls:
                     seen_urls.add(entry["url"])
                     results.append(entry)
+
+        for entry in anivault.extract_vo(anilist_id, episode=episode):
+            if entry and entry["url"] not in seen_urls:
+                seen_urls.add(entry["url"])
+                results.append(entry)
 
         return results
 
