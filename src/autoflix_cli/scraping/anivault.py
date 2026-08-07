@@ -1,8 +1,21 @@
+import re
+import time
+import urllib.parse
+
 from curl_cffi import requests as cffi_requests
 
 from .config import portals
 
 scraper = cffi_requests.Session(impersonate="chrome")
+
+
+def _is_media_segment(url):
+    """True if a playlist entry points to real media, not an ad image."""
+    m = re.search(r"[?&]url=([^&]+)", url)
+    if m:
+        url = urllib.parse.unquote(m.group(1))
+    path = url.split("?")[0].lower()
+    return path.endswith(".ts") or path.endswith(".mp4")
 
 
 class AniVaultExtractor:
@@ -38,12 +51,17 @@ class AniVaultExtractor:
     def _get_json(self, path):
         """GET a JSON payload from the first base that answers."""
         for base in self.bases:
-            try:
-                r = scraper.get(base + path, timeout=20)
-                if r.status_code == 200:
-                    return r.json()
-            except Exception:
-                continue
+            for attempt in (0, 1):
+                try:
+                    r = scraper.get(base + path, timeout=20)
+                    if r.status_code == 200:
+                        return r.json()
+                    if r.status_code in (429, 500, 502, 503, 504) and attempt == 0:
+                        time.sleep(1)
+                        continue
+                    break
+                except Exception:
+                    break
         return None
 
     def get_info(self, anilist_id):
@@ -75,6 +93,41 @@ class AniVaultExtractor:
             )
         return subtitles or None
 
+    def _valid_hls(self, proxy_url):
+        """
+        Check that an HLS playlist actually carries video segments.
+
+        Some anikoto/megacloud streams currently return playlists made of
+        ad images only (tiktokcdn), which mpv cannot play. Reject those.
+        """
+        try:
+            master = scraper.get(proxy_url, timeout=20)
+            if (
+                master.status_code != 200
+                or not master.text.lstrip().startswith("#EXTM3U")
+            ):
+                return False
+            variants = [
+                l
+                for l in master.text.splitlines()
+                if l.strip().startswith("http")
+            ]
+            if not variants:
+                return False
+            variant = scraper.get(variants[0], timeout=20)
+            if variant.status_code != 200:
+                return False
+            segments = [
+                l
+                for l in variant.text.splitlines()
+                if l and not l.startswith("#")
+            ]
+            if not segments:
+                return False
+            return any(_is_media_segment(s) for s in segments)
+        except Exception:
+            return False
+
     def _entry(self, source, url, stype, referer, watch):
         headers = {"Referer": referer}
         return {
@@ -99,18 +152,28 @@ class AniVaultExtractor:
         url = watch.get("hlsProxyUrl") or watch.get("m3u8")
         if not url:
             return None
+        if not self._valid_hls(url):
+            return None
         return self._entry("anikoto", url, "M3U8", self.referer, watch)
 
     def _extract_animeheaven(self, anilist_id, episode):
-        info = self.get_info(anilist_id)
-        heaven_id = (info.get("siteIds") or {}).get("animeheaven")
-        if not heaven_id:
-            return None
+        # The watch endpoint resolves the animeheaven ID from the AniList ID
+        # itself; fall back to the explicit heaven ID if that fails.
         watch = self._get_json(
-            f"/api/watch/animeheaven/{heaven_id}/{episode}/sub"
+            f"/api/watch/animeheaven/{anilist_id}/{episode}/sub"
         )
-        if not isinstance(watch, dict):
-            return None
+        if not isinstance(watch, dict) or not (
+            watch.get("mp4ProxyUrl") or watch.get("mp4")
+        ):
+            info = self.get_info(anilist_id)
+            heaven_id = (info.get("siteIds") or {}).get("animeheaven")
+            if not heaven_id:
+                return None
+            watch = self._get_json(
+                f"/api/watch/animeheaven/{heaven_id}/{episode}/sub"
+            )
+            if not isinstance(watch, dict):
+                return None
         url = watch.get("mp4ProxyUrl") or watch.get("mp4")
         if not url:
             return None
