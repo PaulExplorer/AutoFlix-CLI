@@ -19,7 +19,6 @@ from .handlers import (
     anime_sama,
     coflix,
     french_stream,
-    wiflix,
     anilist,
     goldenanime,
     goldenms,

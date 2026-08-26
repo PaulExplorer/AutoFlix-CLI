@@ -6,7 +6,7 @@ from .cli_utils import (
     select_from_list,
     print_success,
 )
-from .handlers import anime_sama, coflix, french_stream, wiflix, goldenanime, goldenms, arkanime
+from .handlers import anime_sama, coflix, french_stream, goldenanime, goldenms, arkanime
 
 
 def handle_resume(data):
@@ -18,10 +18,6 @@ def handle_resume(data):
         coflix.resume_coflix(data)
     elif provider == "French-Stream":
         french_stream.resume_french_stream(data)
-    elif provider == "Wiflix":
-        print_warning(
-            "Resume for Wiflix not manually implemented here (usually direct)."
-        )
     elif provider == "GoldenAnime":
         goldenanime.resume_goldenanime(data)
     elif provider == "GoldenMS":

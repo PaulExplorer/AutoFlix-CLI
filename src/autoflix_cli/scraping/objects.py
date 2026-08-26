@@ -24,36 +24,6 @@ class Player:
         return str(self)
 
 
-class WiflixMovie:
-    def __init__(
-        self,
-        title: str,
-        url: str,
-        img: str,
-        genres: list[str],
-        year: int,
-        origin: str,
-        authors: str,
-        duration: str,
-        players: list[Player],
-    ):
-        self.title = title
-        self.url = url
-        self.img = img
-        self.genres = genres
-        self.year = year
-        self.origin = origin
-        self.authors = authors
-        self.duration = duration
-        self.players = players
-
-    def __str__(self):
-        return f"WiflixMovie(title='{self.title}', url='{self.url}', img='{self.img}', genres={self.genres}, year={self.year}, origin='{self.origin}', authors='{self.authors}', duration='{self.duration}', players={self.players})"
-
-    def __repr__(self):
-        return str(self)
-
-
 class Episode:
     def __init__(self, title: str, players: list[Player]):
         self.title = title
@@ -61,38 +31,6 @@ class Episode:
 
     def __str__(self):
         return f"Episode(title='{self.title}', players={self.players})"
-
-    def __repr__(self):
-        return str(self)
-
-
-class WiflixSeriesSeason:
-    def __init__(
-        self,
-        title: str,
-        season: str,
-        url: str,
-        img: str,
-        genres: list[str],
-        year: int,
-        origin: str,
-        authors: str,
-        duration: str,
-        episodes: dict[str, list[Episode]],
-    ):
-        self.title = title
-        self.season = season
-        self.url = url
-        self.img = img
-        self.genres = genres
-        self.year = year
-        self.origin = origin
-        self.authors = authors
-        self.duration = duration
-        self.episodes = episodes
-
-    def __str__(self):
-        return f"WiflixSeriesSeason(title='{self.title}', season='{self.season}', url='{self.url}', img='{self.img}', genres={self.genres}, year={self.year}, origin='{self.origin}', authors='{self.authors}', duration='{self.duration}', episodes={self.episodes})"
 
     def __repr__(self):
         return str(self)
