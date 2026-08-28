@@ -1,6 +1,5 @@
-from autoflix_cli.scraping.objects import ArkSeries, Player, ArkSeason, ArkMovie
+from .objects import ArkSeries, Player, ArkSeason, ArkMovie, SearchResult, SamaSeries, Episode
 from curl_cffi import requests as cffi_requests
-from .objects import SearchResult, SamaSeries, Episode
 from ..proxy import DNS_OPTIONS
 
 website_origin = ""

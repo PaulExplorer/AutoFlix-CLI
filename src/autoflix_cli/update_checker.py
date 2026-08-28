@@ -1,11 +1,18 @@
 import urllib.request
 import json
+import re
 import importlib.metadata
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
 console = Console()
+
+
+def _version_tuple(version: str) -> tuple:
+    """Convert a version string into a comparable tuple of integers."""
+    parts = re.split(r"[^\d]+", version)
+    return tuple(int(p) for p in parts if p)
 
 
 def get_latest_version(package_name: str) -> str:
@@ -36,7 +43,7 @@ def check_update(package_name: str = "autoflix-cli"):
 
     latest_version = get_latest_version(package_name)
 
-    if latest_version and latest_version > current_version:
+    if latest_version and _version_tuple(latest_version) > _version_tuple(current_version):
         panel_content = Text()
         panel_content.append(
             f"\nExample: A new version of {package_name} is available!\n",

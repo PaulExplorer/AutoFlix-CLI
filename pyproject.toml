@@ -4,7 +4,7 @@ version = "0.8.1"
 description = "Watch movies, series, and anime in multiple languages (FR, EN, and more) directly from your terminal."
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "WGPLv3"}
+license = {text = "GPL-3.0-or-later"}
 license-files = ["LICENSE"]
 authors = [{name = "PaulExplorer"}]
 keywords = ["autoflix", "anime", "movies", "series", "VF", "VOSTFR"]

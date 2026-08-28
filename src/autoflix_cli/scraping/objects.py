@@ -148,7 +148,7 @@ class ArkMovie:
         self.players = players
 
     def __str__(self):
-        return f"ArkSeries(id='{self.id}', title='{self.title}', img='{self.img}', genres={self.genres}, players={self.players})"
+        return f"ArkMovie(id='{self.id}', title='{self.title}', img='{self.img}', genres={self.genres}, players={self.players})"
 
     def __repr__(self):
         return str(self)
@@ -180,7 +180,7 @@ class CoflixSeason:
         self.episodes = episodes
 
     def __str__(self):
-        return f"SamaSeason(title='{self.title}', episodes={self.episodes})"
+        return f"CoflixSeason(title='{self.title}', episodes={self.episodes})"
 
     def __repr__(self):
         return str(self)
@@ -201,7 +201,7 @@ class CoflixSeries:
         self.seasons = seasons
 
     def __str__(self):
-        return f"SamaSeries(title='{self.title}', url='{self.url}', img='{self.img}', genres={self.genres}, seasons={self.seasons})"
+        return f"CoflixSeries(title='{self.title}', url='{self.url}', img='{self.img}', genres={self.genres}, seasons={self.seasons})"
 
     def __repr__(self):
         return str(self)

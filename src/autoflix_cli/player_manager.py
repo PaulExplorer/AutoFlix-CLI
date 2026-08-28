@@ -189,354 +189,363 @@ def play_video(
 
     print_info(f"Resolving stream for: [cyan]{url}[/cyan]")
 
-    # Determine player configuration
-    player_config = {}
-    for player_name, config in player.players.items():
-        if player_name in url.lower():
-            player_config = config
-            break
-
-    if is_direct:
-        stream_url = url
-    else:
-        try:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-            ) as progress:
-                progress.add_task(description="Getting stream URL...", total=None)
-                stream_res = player.get_hls_link(url, headers, return_subs=True)
-                if isinstance(stream_res, tuple):
-                    stream_url, extracted_sub = stream_res
-                    if extracted_sub and not subtitle_url:
-                        subtitle_url = extracted_sub
-                else:
-                    stream_url = stream_res
-
-                if stream_url and stream_url.startswith("/"):
-                    stream_url = (
-                        "https://"
-                        + url.removeprefix("https://")
-                        .removeprefix("http://")
-                        .split("/")[0]
-                        + stream_url
-                    )
-        except Exception as e:
-            print_error(f"Error resolving stream URL: {e}")
-            return False
-
-    if not stream_url:
-        print_error("Could not resolve stream URL.")
-        return False
-
-    print_success(f"Stream URL: [cyan]{stream_url}[/cyan]")
-
-    local_subtitle_path = subtitle_url
     subtitle_paths = []
-    subtitle_items = list(subtitles or [])
-    if subtitle_url and subtitle_url.startswith("http"):
-        subtitle_items.insert(0, subtitle_url)
-
-    if subtitle_items:
-        print_info("Downloading subtitle file(s) for compatibility...")
-        subtitle_paths = _download_subtitles(subtitle_items)
-        if subtitle_paths:
-            local_subtitle_path = subtitle_paths[0]
-            print_success(f"{len(subtitle_paths)} subtitle track(s) downloaded locally.")
+    try:
+        # Determine player configuration
+        player_config = {}
+        for player_name, config in player.players.items():
+            if player_name in url.lower():
+                player_config = config
+                break
+    
+        if is_direct:
+            stream_url = url
         else:
-            local_subtitle_path = None
-
-    force_manual_mode = False
-    while True:  # Loop to allow retrying with another player
-        player_pref = tracker.get_player()
-        if force_manual_mode or not player_pref or player_pref == "manual":
-            players = ["mpv", "vlc", "browser", "← Back"]
-            player_choice = select_from_list(players, "🎮 Select video player:")
-
-            if players[player_choice] == "← Back":
-                return False
-
-            player_name = players[player_choice]
-            player_executable = None
-
-        else:
-            player_name = player_pref
-            player_executable = None
-
-        # --- 1. Preparation of Headers & Referer for both players ---
-        # Calculate Referer
-        if not is_direct:
             try:
-                domain = url.split("/")[2].lower()
-                referer = f"https://{domain}"
-                if player_config.get("referrer") == "full":
-                    referer = url
-                elif player_config.get("referrer") == "path":
-                    referer = f"https://{domain}/"
-                elif isinstance(player_config.get("referrer"), str):
-                    referer = player_config.get("referrer")
-
-                referer = f"{referer}/"
-            except IndexError:
-                referer = ""
-        else:
-            referer = headers.get("Referer", "")
-
-        user_agent = headers.get("User-Agent", DEFAULT_USER_AGENT)
-
-        if player_name == "browser":
-            pass  # No executable needed
-        elif player_name == "vlc":
-            player_executable = get_vlc_path()
-            if not player_executable:
-                print_error("VLC not found. Please install it or add it to your PATH.")
-                retry = handle_player_error("VLC")
-                if retry == 1:  # Back
-                    return False
-                force_manual_mode = True
-                continue
-        else:
-            player_executable = shutil.which(player_name)
-            if not player_executable:
-                print_error(f"{player_name} is not installed or not in PATH.")
-                retry = handle_player_error(player_name)
-                if retry == 1:  # Back
-                    return False
-                force_manual_mode = True
-                continue
-
-        if player_name == "browser":
-            print_info(f"Launching [bold cyan]Browser[/bold cyan] Player...")
-
-            # Construct Proxy URL
-            proxy_headers = headers.copy()
-            if referer:
-                proxy_headers["Referer"] = referer
-
-            if player_config.get("alt-used") is True:
-                proxy_headers["Alt-Used"] = domain
-
-            sec_headers = player_config.get("sec_headers")
-            if sec_headers:
-                if isinstance(sec_headers, str):
-                    for part in sec_headers.split(";"):
-                        if ":" in part:
-                            k, v = part.split(":", 1)
-                            proxy_headers[k.strip()] = v.strip()
-
-            headers_json = json.dumps(proxy_headers)
-            encoded_url = urllib.parse.quote(stream_url)
-            encoded_headers = urllib.parse.quote(headers_json)
-
-            if not proxy.PROXY_URL:
-                print_error("Proxy server not initialized.")
-                return False
-
-            endpoint = "stream"
-            if ("ext" in player_config and player_config["ext"] == "mp4") or is_mp4:
-                endpoint = "video"
-
-            local_stream_url = f"{proxy.PROXY_URL}/{endpoint}?url={encoded_url}&headers={encoded_headers}"
-
-            encoded_local_stream_url = urllib.parse.quote(local_stream_url)
-            browser_player_url = (
-                f"{proxy.PROXY_URL}/player?url={encoded_local_stream_url}"
-            )
-
-            if local_subtitle_path:
-                abs_sub_path = os.path.abspath(local_subtitle_path)
-                encoded_sub = urllib.parse.quote(abs_sub_path)
-                browser_player_url += f"&sub_path={encoded_sub}"
-
-            # Reset heartbeat and event
-            proxy.player_finished_event.clear()
-            proxy.player_heartbeat_time = time.time()
-
-            webbrowser.open(browser_player_url)
-            print_info(
-                "Waiting for playback to finish in browser... (Close the tab to continue)"
-            )
-
-            try:
-                # Polling loop
-                while True:
-                    time.sleep(1)
-                    if proxy.player_finished_event.is_set():
-                        print_success(
-                            "Playback finished (end of video or manually marked)."
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    console=console,
+                ) as progress:
+                    progress.add_task(description="Getting stream URL...", total=None)
+                    stream_res = player.get_hls_link(url, headers, return_subs=True)
+                    if isinstance(stream_res, tuple):
+                        stream_url, extracted_sub = stream_res
+                        if extracted_sub and not subtitle_url:
+                            subtitle_url = extracted_sub
+                    else:
+                        stream_url = stream_res
+    
+                    if stream_url and stream_url.startswith("/"):
+                        stream_url = (
+                            "https://"
+                            + url.removeprefix("https://")
+                            .removeprefix("http://")
+                            .split("/")[0]
+                            + stream_url
                         )
-                        return True
-
-                    # Check heartbeat timeout (e.g., > 6 seconds without heartbeat)
-                    if time.time() - proxy.player_heartbeat_time > 6.0:
-                        print_success("Browser tab closed or playback stopped.")
-                        return True
-            except KeyboardInterrupt:
-                print_info("\nPlayback interrupted by user.")
-                return True
             except Exception as e:
-                print_error(f"Error monitoring browser player: {e}")
+                print_error(f"Error resolving stream URL: {e}")
                 return False
-
-        # Determine Launch Mode from config
-        mode = player_config.get("mode", "proxy")  # Default to proxy
-
-        if mode == "proxy":
-            print_info(
-                f"Launching [bold cyan]{player_name}[/bold cyan] via Proxy ({player_executable})..."
-            )
-
-            # Construct Proxy URL
-            # We need to pass the headers to the proxy
-            # Combine all necessary headers
-            proxy_headers = headers.copy()
-            if referer:
-                proxy_headers["Referer"] = referer
-
-            # Add specific headers from config
-            if player_config.get("alt-used") is True:
-                proxy_headers["Alt-Used"] = domain
-
-            sec_headers = player_config.get("sec_headers")
-            if sec_headers:
-                # Parse sec_headers string if needed, or just add them
-                if isinstance(sec_headers, str):
-                    for part in sec_headers.split(";"):
-                        if ":" in part:
-                            k, v = part.split(":", 1)
-                            proxy_headers[k.strip()] = v.strip()
-
-            headers_json = json.dumps(proxy_headers)
-            encoded_url = urllib.parse.quote(stream_url)
-            encoded_headers = urllib.parse.quote(headers_json)
-
-            if not proxy.PROXY_URL:
-                print_error("Proxy server not initialized.")
-                return False
-
-            endpoint = "stream"
-            if ("ext" in player_config and player_config["ext"] == "mp4") or is_mp4:
-                endpoint = "video"
-
-            local_stream_url = f"{proxy.PROXY_URL}/{endpoint}?url={encoded_url}&headers={encoded_headers}"
-
-            try:
-                cmd = [player_executable, local_stream_url]
-                if player_name == "vlc":
-                    if subtitle_paths:
-                        print_warning(
-                            "Note: VLC natively struggles to sync external subtitles on HLS/M3U8 streams (subtitles may flash). Strongly recommend using MPV instead."
-                        )
-                    cmd.append(f"--meta-title={title}")
-                    for path in subtitle_paths:
-                        cmd.append(f"--sub-file={path}")
-                elif player_name == "mpv":
-                    cmd.append(f"--title={title}")
-                    for path in subtitle_paths:
-                        cmd.append(f"--sub-file={path}")
-
-                subprocess.run(cmd, check=True)
-                print_success("Playback completed successfully!")
-                return True
-            except subprocess.CalledProcessError as e:
-                hint = _player_exit_hint(e.returncode)
-                if hint:
-                    print_error(f"Error running player via proxy: {e} ({hint}).")
+    
+        if not stream_url:
+            print_error("Could not resolve stream URL.")
+            return False
+    
+        print_success(f"Stream URL: [cyan]{stream_url}[/cyan]")
+    
+        local_subtitle_path = subtitle_url
+        subtitle_items = list(subtitles or [])
+        if subtitle_url and subtitle_url.startswith("http"):
+            subtitle_items.insert(0, subtitle_url)
+    
+        if subtitle_items:
+            print_info("Downloading subtitle file(s) for compatibility...")
+            subtitle_paths = _download_subtitles(subtitle_items)
+            if subtitle_paths:
+                local_subtitle_path = subtitle_paths[0]
+                print_success(f"{len(subtitle_paths)} subtitle track(s) downloaded locally.")
+            else:
+                local_subtitle_path = None
+    
+        force_manual_mode = False
+        while True:  # Loop to allow retrying with another player
+            player_pref = tracker.get_player()
+            if force_manual_mode or not player_pref or player_pref == "manual":
+                players = ["mpv", "vlc", "browser", "← Back"]
+                player_choice = select_from_list(players, "🎮 Select video player:")
+    
+                if players[player_choice] == "← Back":
                     return False
-                print_error(f"Error running player via proxy: {e}")
-            except Exception as e:
-                print_error(f"Error running player via proxy: {e}")
-
-        elif mode == "direct":
-            print_info(
-                f"Launching [bold cyan]{player_name}[/bold cyan] directly ({player_executable})..."
-            )
-            try:
-                if player_name == "vlc":
-                    # VLC Command construction
-                    cmd = [
-                        player_executable,
-                        stream_url,
-                        f":http-referrer={referer}",
-                        f":http-user-agent={user_agent}",
-                        f"--meta-title={title}",
-                    ]
-                    if subtitle_paths:
-                        print_warning(
-                            "Note: VLC natively struggles to sync external subtitles on HLS/M3U8 streams (subtitles may flash). Strongly recommend using MPV instead."
-                        )
+    
+                player_name = players[player_choice]
+                player_executable = None
+    
+            else:
+                player_name = player_pref
+                player_executable = None
+    
+            # --- 1. Preparation of Headers & Referer for both players ---
+            # Calculate Referer
+            if not is_direct:
+                try:
+                    domain = url.split("/")[2].lower()
+                    referer = f"https://{domain}"
+                    if player_config.get("referrer") == "full":
+                        referer = url
+                    elif player_config.get("referrer") == "path":
+                        referer = f"https://{domain}/"
+                    elif isinstance(player_config.get("referrer"), str):
+                        referer = player_config.get("referrer")
+    
+                    referer = f"{referer}/"
+                except IndexError:
+                    referer = ""
+            else:
+                referer = headers.get("Referer", "")
+    
+            user_agent = headers.get("User-Agent", DEFAULT_USER_AGENT)
+    
+            if player_name == "browser":
+                pass  # No executable needed
+            elif player_name == "vlc":
+                player_executable = get_vlc_path()
+                if not player_executable:
+                    print_error("VLC not found. Please install it or add it to your PATH.")
+                    retry = handle_player_error("VLC")
+                    if retry == 1:  # Back
+                        return False
+                    force_manual_mode = True
+                    continue
+            else:
+                player_executable = shutil.which(player_name)
+                if not player_executable:
+                    print_error(f"{player_name} is not installed or not in PATH.")
+                    retry = handle_player_error(player_name)
+                    if retry == 1:  # Back
+                        return False
+                    force_manual_mode = True
+                    continue
+    
+            if player_name == "browser":
+                print_info(f"Launching [bold cyan]Browser[/bold cyan] Player...")
+    
+                # Construct Proxy URL
+                proxy_headers = headers.copy()
+                if referer:
+                    proxy_headers["Referer"] = referer
+    
+                if player_config.get("alt-used") is True:
+                    proxy_headers["Alt-Used"] = domain
+    
+                sec_headers = player_config.get("sec_headers")
+                if sec_headers:
+                    if isinstance(sec_headers, str):
+                        for part in sec_headers.split(";"):
+                            if ":" in part:
+                                k, v = part.split(":", 1)
+                                proxy_headers[k.strip()] = v.strip()
+    
+                headers_json = json.dumps(proxy_headers)
+                encoded_url = urllib.parse.quote(stream_url)
+                encoded_headers = urllib.parse.quote(headers_json)
+    
+                if not proxy.PROXY_URL:
+                    print_error("Proxy server not initialized.")
+                    return False
+    
+                endpoint = "stream"
+                if ("ext" in player_config and player_config["ext"] == "mp4") or is_mp4:
+                    endpoint = "video"
+    
+                local_stream_url = f"{proxy.PROXY_URL}/{endpoint}?url={encoded_url}&headers={encoded_headers}"
+    
+                encoded_local_stream_url = urllib.parse.quote(local_stream_url)
+                browser_player_url = (
+                    f"{proxy.PROXY_URL}/player?url={encoded_local_stream_url}"
+                )
+    
+                if local_subtitle_path:
+                    abs_sub_path = os.path.abspath(local_subtitle_path)
+                    encoded_sub = urllib.parse.quote(abs_sub_path)
+                    browser_player_url += f"&sub_path={encoded_sub}"
+    
+                # Reset heartbeat and event
+                proxy.player_finished_event.clear()
+                proxy.player_heartbeat_time = time.time()
+    
+                webbrowser.open(browser_player_url)
+                print_info(
+                    "Waiting for playback to finish in browser... (Close the tab to continue)"
+                )
+    
+                try:
+                    # Polling loop
+                    while True:
+                        time.sleep(1)
+                        if proxy.player_finished_event.is_set():
+                            print_success(
+                                "Playback finished (end of video or manually marked)."
+                            )
+                            return True
+    
+                        # Check heartbeat timeout (e.g., > 6 seconds without heartbeat)
+                        if time.time() - proxy.player_heartbeat_time > 6.0:
+                            print_success("Browser tab closed or playback stopped.")
+                            return True
+                except KeyboardInterrupt:
+                    print_info("\nPlayback interrupted by user.")
+                    return True
+                except Exception as e:
+                    print_error(f"Error monitoring browser player: {e}")
+                    return False
+    
+            # Determine Launch Mode from config
+            mode = player_config.get("mode", "proxy")  # Default to proxy
+    
+            if mode == "proxy":
+                print_info(
+                    f"Launching [bold cyan]{player_name}[/bold cyan] via Proxy ({player_executable})..."
+                )
+    
+                # Construct Proxy URL
+                # We need to pass the headers to the proxy
+                # Combine all necessary headers
+                proxy_headers = headers.copy()
+                if referer:
+                    proxy_headers["Referer"] = referer
+    
+                # Add specific headers from config
+                if player_config.get("alt-used") is True:
+                    proxy_headers["Alt-Used"] = domain
+    
+                sec_headers = player_config.get("sec_headers")
+                if sec_headers:
+                    # Parse sec_headers string if needed, or just add them
+                    if isinstance(sec_headers, str):
+                        for part in sec_headers.split(";"):
+                            if ":" in part:
+                                k, v = part.split(":", 1)
+                                proxy_headers[k.strip()] = v.strip()
+    
+                headers_json = json.dumps(proxy_headers)
+                encoded_url = urllib.parse.quote(stream_url)
+                encoded_headers = urllib.parse.quote(headers_json)
+    
+                if not proxy.PROXY_URL:
+                    print_error("Proxy server not initialized.")
+                    return False
+    
+                endpoint = "stream"
+                if ("ext" in player_config and player_config["ext"] == "mp4") or is_mp4:
+                    endpoint = "video"
+    
+                local_stream_url = f"{proxy.PROXY_URL}/{endpoint}?url={encoded_url}&headers={encoded_headers}"
+    
+                try:
+                    cmd = [player_executable, local_stream_url]
+                    if player_name == "vlc":
+                        if subtitle_paths:
+                            print_warning(
+                                "Note: VLC natively struggles to sync external subtitles on HLS/M3U8 streams (subtitles may flash). Strongly recommend using MPV instead."
+                            )
+                        cmd.append(f"--meta-title={title}")
                         for path in subtitle_paths:
                             cmd.append(f"--sub-file={path}")
+                    elif player_name == "mpv":
+                        cmd.append(f"--title={title}")
+                        for path in subtitle_paths:
+                            cmd.append(f"--sub-file={path}")
+    
                     subprocess.run(cmd, check=True)
-                else:
-                    # MPV Command construction
-                    headers_mpv = f"Origin: {referer.split('/')[2]}"
-                    add_default_sec_headers = False
-
-                    if player_config.get("alt-used") is True:
-                        headers_mpv = f"Alt-Used: {domain};" + headers_mpv
-
-                    sec_headers = player_config.get("sec_headers")
-                    if sec_headers:
-                        if isinstance(sec_headers, str):
-                            headers_mpv += ";" + sec_headers
-                        elif isinstance(sec_headers, bool) and sec_headers is True:
-                            add_default_sec_headers = True
+                    print_success("Playback completed successfully!")
+                    return True
+                except subprocess.CalledProcessError as e:
+                    hint = _player_exit_hint(e.returncode)
+                    if hint:
+                        print_error(f"Error running player via proxy: {e} ({hint}).")
+                        return False
+                    print_error(f"Error running player via proxy: {e}")
+                except Exception as e:
+                    print_error(f"Error running player via proxy: {e}")
+    
+            elif mode == "direct":
+                print_info(
+                    f"Launching [bold cyan]{player_name}[/bold cyan] directly ({player_executable})..."
+                )
+                try:
+                    if player_name == "vlc":
+                        # VLC Command construction
+                        cmd = [
+                            player_executable,
+                            stream_url,
+                            f":http-referrer={referer}",
+                            f":http-user-agent={user_agent}",
+                            f"--meta-title={title}",
+                        ]
+                        if subtitle_paths:
+                            print_warning(
+                                "Note: VLC natively struggles to sync external subtitles on HLS/M3U8 streams (subtitles may flash). Strongly recommend using MPV instead."
+                            )
+                            for path in subtitle_paths:
+                                cmd.append(f"--sub-file={path}")
+                        subprocess.run(cmd, check=True)
                     else:
-                        add_default_sec_headers = True
-
-                    if add_default_sec_headers:
-                        headers_mpv += ";Sec-Fetch-Dest: iframe;Sec-Fetch-Mode: navigate;Sec-Fetch-Site: same-origin"
-
-                    if player_config.get("no-header") is True:
-                        headers_mpv = ""
-
-                    print_info(f"Headers: {headers_mpv}")
-
-                    cmd = [
-                        player_executable,
-                        f'--referrer="{referer}"',
-                        f'--user-agent="{user_agent}"',
-                        f'--http-header-fields="{headers_mpv}"',
-                        f'--title="{title}"',
-                    ]
-                    for path in subtitle_paths:
-                        cmd.append(f"--sub-file={path}")
-                    cmd.append(stream_url)
-                    subprocess.run(cmd, check=True)
-
-                print_success("Playback completed successfully!")
-                return True
-
-            except subprocess.CalledProcessError as e:
-                hint = _player_exit_hint(e.returncode)
-                if hint:
-                    print_error(f"Error running player: {e} ({hint}).")
-                    return False
-                print_error(f"Error running player: {e}")
-                # Retry logic below
-            except Exception as e:
-                print_error(f"An unexpected error occurred: {e}")
-                # Retry logic below
-
-        # Common retry logic
-        retry = select_from_list(
-            [
-                "Try another player",
-                "Retry with same player",
-                "← Back",
-            ],
-            "The player failed. What would you like to do?",
-        )
-        if retry == 0:  # Try another player
-            continue
-        elif retry == 1:  # Retry with same player
-            continue
-        else:  # Back
-            force_manual_mode = True
-            return False
-
+                        # MPV Command construction
+                        headers_mpv = f"Origin: {referer.split('/')[2]}"
+                        add_default_sec_headers = False
+    
+                        if player_config.get("alt-used") is True:
+                            headers_mpv = f"Alt-Used: {domain};" + headers_mpv
+    
+                        sec_headers = player_config.get("sec_headers")
+                        if sec_headers:
+                            if isinstance(sec_headers, str):
+                                headers_mpv += ";" + sec_headers
+                            elif isinstance(sec_headers, bool) and sec_headers is True:
+                                add_default_sec_headers = True
+                        else:
+                            add_default_sec_headers = True
+    
+                        if add_default_sec_headers:
+                            headers_mpv += ";Sec-Fetch-Dest: iframe;Sec-Fetch-Mode: navigate;Sec-Fetch-Site: same-origin"
+    
+                        if player_config.get("no-header") is True:
+                            headers_mpv = ""
+    
+                        print_info(f"Headers: {headers_mpv}")
+    
+                        cmd = [
+                            player_executable,
+                            f'--referrer="{referer}"',
+                            f'--user-agent="{user_agent}"',
+                            f'--http-header-fields="{headers_mpv}"',
+                            f'--title="{title}"',
+                        ]
+                        for path in subtitle_paths:
+                            cmd.append(f"--sub-file={path}")
+                        cmd.append(stream_url)
+                        subprocess.run(cmd, check=True)
+    
+                    print_success("Playback completed successfully!")
+                    return True
+    
+                except subprocess.CalledProcessError as e:
+                    hint = _player_exit_hint(e.returncode)
+                    if hint:
+                        print_error(f"Error running player: {e} ({hint}).")
+                        return False
+                    print_error(f"Error running player: {e}")
+                    # Retry logic below
+                except Exception as e:
+                    print_error(f"An unexpected error occurred: {e}")
+                    # Retry logic below
+    
+            # Common retry logic
+            retry = select_from_list(
+                [
+                    "Try another player",
+                    "Retry with same player",
+                    "← Back",
+                ],
+                "The player failed. What would you like to do?",
+            )
+            if retry == 0:  # Try another player
+                continue
+            elif retry == 1:  # Retry with same player
+                continue
+            else:  # Back
+                force_manual_mode = True
+                return False
+    
+    
+    finally:
+        # Clean up temp subtitle files downloaded for playback compatibility.
+        for path in subtitle_paths:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
 def select_and_play_player(
     supported_players: list, referer: str, title: str, subtitle_url: str = None

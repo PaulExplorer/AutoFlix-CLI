@@ -1,4 +1,4 @@
-from autoflix_cli.scraping import arkanime
+from . import arkanime
 from curl_cffi import requests
 from .deobfuscate import deobfuscate
 from bs4 import BeautifulSoup
@@ -73,7 +73,7 @@ def get_hls_link_default(url: str, headers: dict) -> str:
 
     code = deobfuscate(response.text)
 
-    code.replace("cdn-tnmr", "tnmr") # this is for lulustream
+    code = code.replace("cdn-tnmr", "tnmr") # this is for lulustream
 
     return extract_hls_url(code)
 
