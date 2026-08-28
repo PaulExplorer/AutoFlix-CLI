@@ -2,13 +2,14 @@
 
 > Watch movies, series, and anime in **multiple languages** (FR, EN, and more) directly from your terminal.
 
-**Autoflix** is a CLI inspired by `ani-cli`. Originally focused on French content, it has evolved into a multi-language streaming tool. It scrapes links from various providers to let you stream content without ads or a browser.
+**Autoflix** is a CLI inspired by `ani-cli`, always focused on **French content** (VF, VOSTFR) while also supporting other languages like English. It scrapes links from various providers to let you stream content without ads or a browser.
 
 > ⚠️ **Warning:** This project was developed very quickly with heavy use of AI. The main goal was functionality over code cleanliness or optimization. I apologize for the "spaghetti code", I just wanted it to work!
 
 ## ✨ Features
 
-- 🌍 **Multi-language support:** Now supports French and English.
+- 🇫🇷 **French-first:** Always focused on French content (VF, VOSTFR) as primary target.
+- 🌍 **Multi-language support:** Also supports English and other languages.
 - 🚀 **Easily extendable:** The architecture allows adding new languages and providers with ease.
 - 🎬 **Massive Library:**
   - **French (VF & VOSTFR):** Reliable sources like **Coflix**, **French-Stream**, and **Anime‑Sama**.
