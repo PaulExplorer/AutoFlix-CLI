@@ -180,7 +180,7 @@ def handle_anilist_continue():
                 logo_url=series.img,
                 headers={"Referer": arkanime_scraper.website_origin},
                 anilist_callback=lambda: arkanime_handler._update_anilist_progress(
-                    series_dummy, season, selected_episode
+                    "ArkAnime", series_dummy, season, selected_episode
                 ),
             )
             if success and ep_idx + 1 < len(episodes):
@@ -235,7 +235,7 @@ def handle_anilist_continue():
                 logo_url=series.img,
                 headers={"Referer": anime_sama_scraper.website_origin},
                 anilist_callback=lambda: anime_sama_handler._update_anilist_progress(
-                    series_dummy, season, selected_episode
+                    "Anime-Sama", series_dummy, season, selected_episode
                 ),
             )
             if success and ep_idx + 1 < len(episodes):
