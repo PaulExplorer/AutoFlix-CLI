@@ -48,7 +48,6 @@ DEFAULT_PLAYERS = {
     "mivalyo": {"type": "default"},
     "dingtezuni": {"type": "default"},
     "bingezove": {"type": "default"},
-    "vidzy": {"type": "default"},
     "ok.ru": {"type": "default"},
     "ansembed": { "type": "default" },
     "morencius": { "type": "default" },
@@ -101,7 +100,8 @@ DEFAULT_PLAYERS = {
     "coflix.upn": {"type": "embed4me"},
     "veev": {"type": "veev", "ext": "mp4"},
     "xtremestream": {"type": "xtremestream"},
-    "montmyoboky": {"type": "montmyoboky"}
+    "montmyoboky": {"type": "montmyoboky"},
+    "vidzy": { "type": "vidzy", "referrer": "https://vidzy.org/", }
 }
 
 DEFAULT_NEW_URL = {

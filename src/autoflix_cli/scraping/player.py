@@ -7,7 +7,8 @@ from ..config_loader import load_remote_jsonc
 from ..defaults import DEFAULT_PLAYERS, DEFAULT_NEW_URL, DEFAULT_KAKAFLIX_PLAYERS
 from ..cli_utils import print_warning
 import re, base64
-
+import urllib.parse
+from urllib.parse import quote
 import json
 import binascii
 from Crypto.Cipher import AES
@@ -549,6 +550,69 @@ def get_hls_link_montmyoboky(url, headers):
 
     return player_data["videoUrl"], subtitle_url
 
+def get_hls_link_vidzy(embed_url: str, headers: dict) -> str:
+
+    response = scraper.get(
+        embed_url,
+        headers=headers,
+        impersonate="chrome",
+    )
+
+    response.raise_for_status()
+
+    page_html = response.text
+
+    source_block = re.search(
+        r'sources\s*:\s*\[\s*\{\s*src\s*:\s*'
+        r'\(function\(s\).*?\}\)\(\s*["\']([^"\']+)["\']\s*\)',
+        page_html,
+        re.I | re.S,
+    )
+    if not source_block:
+        raise RuntimeError(
+            "Vidzy: unable to find the obfuscated Video.js source"
+        )
+
+    encoded_source = source_block.group(1)
+
+    hostname = urllib.parse.urlparse(embed_url).hostname or ""
+
+    H = 0
+    for char in hostname:
+        H = (H + ord(char)) & 255
+
+    try:
+        decoded = base64.b64decode(encoded_source)
+    except Exception as e:
+        raise RuntimeError(
+            f"Vidzy: invalid base64 source: {e}"
+        ) from e
+
+    decoded = decoded[::-1]
+
+    result = bytearray()
+
+    for i, value in enumerate(decoded):
+        key = (0x3D + i * 89 + H) & 255
+        result.append(value ^ key)
+
+    try:
+        real_url = result.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise RuntimeError(
+            f"Vidzy: decoded source is not UTF-8: {e}"
+        ) from e
+
+    real_url = real_url.strip()
+
+    if not re.match(r"^https?://", real_url, re.I):
+        raise RuntimeError(
+            f"Vidzy: decoded source is not a valid HTTP URL: {real_url}"
+        )
+
+    return real_url
+
+
 def get_hls_link(url: str, headers: dict = {}, return_subs: bool = False) -> str | tuple[str | None, str | None] | None:
     """
     Extract HLS/video link from a player URL.
@@ -599,6 +663,8 @@ def get_hls_link(url: str, headers: dict = {}, return_subs: bool = False) -> str
                 stream_url = get_hls_link_xtremestream(url, headers)
             elif parse_type == "montmyoboky":
                 stream_url, subtitle_url = get_hls_link_montmyoboky(url, headers)
+            elif parse_type == "vidzy": 
+                stream_url = get_hls_link_vidzy(url, headers)
             else:
                 print_warning(
                     f"Player type '{parse_type}' is not supported in your version. "
