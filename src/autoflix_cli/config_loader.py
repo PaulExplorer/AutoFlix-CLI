@@ -60,3 +60,27 @@ def load_local_jsonc(file_path: str, default: dict = None) -> dict:
     except Exception as e:
         print(f"Warning: Failed to load local config from {file_path}: {e}")
         return default or {}
+
+
+def load_config(remote_url: str, default: dict, local_path: str = None) -> dict:
+    """
+    Load a config with three sources, from lowest to highest priority:
+    defaults -> remote -> local file.
+
+    The local file only exists in a source checkout (data/ is not shipped
+    in the package wheel), so it acts as a development override. In
+    production it is a no-op and the remote config is used.
+    """
+    config = dict(load_remote_jsonc(remote_url, default))
+    if local_path:
+        config.update(load_local_jsonc(local_path))
+
+    merged = {}
+    for name in set(default) | set(config):
+        if name not in config:
+            merged[name] = default[name]
+        elif isinstance(default.get(name), dict) and isinstance(config[name], dict):
+            merged[name] = {**default[name], **config[name]}
+        else:
+            merged[name] = config[name]
+    return merged
