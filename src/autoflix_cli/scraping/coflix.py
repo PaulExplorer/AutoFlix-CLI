@@ -149,12 +149,10 @@ def get_episode(url: str) -> Episode:
     soup = BeautifulSoup(content, "html5lib")
 
     title: str = soup.find("h1").text
-    players_url: str = soup.find("iframe").attrs["src"]
     
-    if "lecteurvideo.com" in players_url:
-        players = get_players(players_url)
-    else:
-        players = _parse_cfservers(content)
+    players = _parse_cfservers(content)
+    if len(players) > 0 and "lecteurvideo.com" in players[0].url:
+        players = get_players(players[0].url)
 
     return Episode(title, players)
 
@@ -187,12 +185,9 @@ def get_movie(url: str) -> CoflixMovie:
     img: str = get_content_img(soup)
     genres: list[str] = get_genres(soup)
 
-    players_url = soup.find("iframe", {"id": "cfPlayerFrame"}).attrs["src"]
-
-    if "lecteurvideo.com" in players_url:
-        players = get_players(players_url)
-    else:
-        players = _parse_cfservers(content)
+    players = _parse_cfservers(content)
+    if len(players) > 0 and "lecteurvideo.com" in players[0].url:
+        players = get_players(players[0].url)
 
     return CoflixMovie(title, url, img, genres, players)
 
