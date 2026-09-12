@@ -16,7 +16,7 @@ website_origin = portals["french-stream"]
 if not website_origin.startswith("http"):
     website_origin = "https://" + website_origin
 
-scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS)
+scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS, allow_redirects="safe")
 
 
 def search(query: str) -> list[SearchResult]:

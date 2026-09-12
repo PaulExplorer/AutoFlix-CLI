@@ -47,7 +47,7 @@ def get_or_create_session(url, headers_dict=None):
     domain = urllib.parse.urlparse(url).netloc
     
     if domain not in _session_cache:
-        session = requests.Session(impersonate="chrome")
+        session = requests.Session(impersonate="chrome", allow_redirects="safe")
         session.curl_options.update(DNS_OPTIONS)
         _session_cache[domain] = session
     

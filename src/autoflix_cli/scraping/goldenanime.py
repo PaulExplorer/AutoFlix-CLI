@@ -2,7 +2,7 @@ from curl_cffi import requests as cffi_requests
 
 from .config import portals
 
-scraper = cffi_requests.Session(impersonate="chrome")
+scraper = cffi_requests.Session(impersonate="chrome", allow_redirects="safe")
 
 
 class AnimeExtractor:

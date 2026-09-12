@@ -4,7 +4,7 @@ from ..proxy import DNS_OPTIONS
 
 website_origin = ""
 
-scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS)
+scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS, allow_redirects="safe")
 
 from .config import portals
 

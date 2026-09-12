@@ -4,7 +4,7 @@ from curl_cffi import requests as cffi_requests
 from .config import portals
 from ..proxy import DNS_OPTIONS
 
-scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS)
+scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS, allow_redirects="safe")
 
 # Public player key embedded in MoviesAPI's own web player JS (de-facto public).
 MOVIESAPI_KEY = (

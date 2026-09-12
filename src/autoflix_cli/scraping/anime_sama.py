@@ -7,7 +7,7 @@ from random import randint
 
 website_origin = ""
 
-scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS)
+scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS, allow_redirects="safe")
 
 # info_class = "mt-0.5 text-gray-300 font-medium text-xs truncate"
 info_class = "info-value"

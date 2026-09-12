@@ -14,7 +14,7 @@ import binascii
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
-scraper = requests.Session(curl_options=DNS_OPTIONS)
+scraper = requests.Session(curl_options=DNS_OPTIONS, allow_redirects="safe")
 
 
 # Player mapping: domain name -> parser type

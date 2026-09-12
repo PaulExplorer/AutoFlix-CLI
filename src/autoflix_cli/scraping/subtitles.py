@@ -26,7 +26,7 @@ class SubtitleExtractor:
             endpoint = f"{base_url}/subtitles/movie/{imdb_id}.json"
 
         try:
-            response = requests.get(endpoint, timeout=10, impersonate="chrome")
+            response = requests.get(endpoint, timeout=10, impersonate="chrome", allow_redirects="safe")
             response.raise_for_status()
             data = response.json()
             return data.get("subtitles", [])
@@ -130,6 +130,7 @@ class SubtitleExtractor:
                 f"{base}/json?t=search&aid={anidb_id}&max=50",
                 timeout=15,
                 impersonate="chrome",
+                allow_redirects="safe",
             )
             r.raise_for_status()
             releases = r.json()
@@ -165,6 +166,7 @@ class SubtitleExtractor:
                     f"{base}/json?show=torrent&id={rid}",
                     timeout=15,
                     impersonate="chrome",
+                    allow_redirects="safe",
                 )
                 r.raise_for_status()
                 data = r.json()
