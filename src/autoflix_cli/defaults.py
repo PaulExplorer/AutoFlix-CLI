@@ -49,7 +49,7 @@ DEFAULT_PLAYERS = {
     "dingtezuni": {"type": "default"},
     "bingezove": {"type": "default"},
     "ok.ru": {"type": "default"},
-    "ansembed": { "type": "default" },
+    "ansembed": { "type": "vidmoly" },
     "morencius": { "type": "default" },
     "videzz": {
         "type": "vidoza",
