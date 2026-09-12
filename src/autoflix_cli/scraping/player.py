@@ -74,14 +74,37 @@ def extract_hls_url(unpacked_code):
     return None
 
 
-def get_hls_link_default(url: str, headers: dict, config: dict = None) -> str:
+def extract_video_url(unpacked_code):
+    pattern = r'(https?://[^"\'\\\s]*\.(?:mp4|webm|m4v|mov)[^"\'\\\s]*)'
+    match = re.search(pattern, unpacked_code)
+    if match:
+        return match.group(1)
+
+    return None
+
+
+# Maximum depth for following iframe redirects in get_hls_link_default.
+# Prevents infinite recursion on players that embed each other in a loop.
+MAX_IFRAME_DEPTH = 3
+
+
+def get_hls_link_default(
+    url: str, headers: dict, config: dict = None, _depth: int = 0
+) -> str:
     """
-    Extract HLS link from default player.
+    Extract stream link from default player.
 
     Config keys (all optional):
         no-header: send the request without HTTP headers
         url-replacements: dict of str replacements applied to the deobfuscated
-            JavaScript before searching for the HLS URL
+            page before searching for the stream URL
+
+    The page is searched in two forms: raw (HTML attributes stay intact)
+    and deobfuscated (unpacked JavaScript, where packed players hide the
+    URL). Extractions, in order:
+        - HLS playlist URL (master.*, *.m3u8)          [primary]
+        - classic video file URL (.mp4, .webm, .m4v, .mov)
+        - iframe redirect (container players)
     """
     config = config or {}
 
@@ -92,11 +115,44 @@ def get_hls_link_default(url: str, headers: dict, config: dict = None) -> str:
     response.raise_for_status()
 
     code = deobfuscate(response.text)
-
     for old, new in (config.get("url-replacements") or {}).items():
         code = code.replace(old, new)
 
-    return extract_hls_url(code)
+    # 1. HLS playlist URL. Raw page first (JS beautification turns
+    # "https://" into "https: //", so it cannot be trusted for plain HTML),
+    # then deobfuscated JavaScript.
+    stream_url = extract_hls_url(response.text) or extract_hls_url(code)
+    if stream_url:
+        return stream_url
+
+    # 2. Classic video file URL (direct MP4/WebM players)
+    stream_url = extract_video_url(response.text) or extract_video_url(code)
+    if stream_url:
+        return stream_url
+
+    # 3. iframe redirect (container players)
+    soup = BeautifulSoup(response.text, "html.parser")
+    iframe = soup.find("iframe")
+    if iframe and iframe.get("src"):
+        iframe_src = iframe["src"].strip()
+        if iframe_src.startswith("//"):
+            iframe_src = "https:" + iframe_src
+        elif iframe_src.startswith("/"):
+            parsed = urllib.parse.urlparse(url)
+            iframe_src = f"{parsed.scheme}://{parsed.netloc}{iframe_src}"
+        elif not iframe_src.startswith("http"):
+            iframe_src = "https://" + iframe_src
+
+        # Guard against self-reference / deep chains to avoid infinite recursion
+        if iframe_src != url and _depth < MAX_IFRAME_DEPTH:
+            # First: resolve through a registered player if the iframe points to one
+            resolved = get_hls_link(iframe_src, headers)
+            if resolved:
+                return resolved
+            # Then: try generic extraction for unregistered inner players
+            return get_hls_link_default(iframe_src, headers, config, _depth + 1)
+
+    return None
 
 
 def get_hls_link_embed4me(embed_url: str, headers: dict = None, config: dict = None) -> str:
@@ -712,14 +768,9 @@ def is_supported(url: str) -> bool:
     Returns:
         True if the player is supported, False otherwise
     """
-    for player in players.keys():
-        if "kakaflix" in url.lower():
-            for player in kakaflix_players.keys():
-                if player in url.lower():
-                    return True
-            return False
+    url_lower = url.lower()
 
-        elif player in url.lower():
-            return True
+    if "kakaflix" in url_lower:
+        return any(kp in url_lower for kp in kakaflix_players.keys())
 
-    return False
+    return any(player in url_lower for player in players.keys())
