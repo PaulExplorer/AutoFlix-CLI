@@ -3,7 +3,7 @@ from curl_cffi import requests
 from .deobfuscate import deobfuscate
 from bs4 import BeautifulSoup
 from ..proxy import DNS_OPTIONS
-from ..config_loader import load_remote_jsonc
+from ..config_loader import load_config
 from ..defaults import DEFAULT_PLAYERS, DEFAULT_NEW_URL, DEFAULT_KAKAFLIX_PLAYERS
 from ..cli_utils import print_warning
 import re, base64
@@ -11,32 +11,48 @@ import urllib.parse
 from urllib.parse import quote
 import json
 import binascii
+import os
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
 scraper = requests.Session(curl_options=DNS_OPTIONS, allow_redirects="safe")
 
+# Local data dir (dev override, not shipped in the package wheel):
+# src/autoflix_cli/scraping/player.py -> ../../../data
+LOCAL_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data")
 
-# Player mapping: domain name -> parser type
-# Player mapping and configuration
-players = load_remote_jsonc(
-    "https://raw.githubusercontent.com/PaulExplorer/AutoFlix-CLI/refs/heads/main/data/players_info.jsonc",
+REMOTE_PLAYERS_URL = (
+    "https://raw.githubusercontent.com/PaulExplorer/AutoFlix-CLI/refs/heads/main/data/players_info.jsonc"
+)
+REMOTE_NEW_URL_URL = (
+    "https://raw.githubusercontent.com/PaulExplorer/AutoFlix-CLI/refs/heads/main/data/new_url.jsonc"
+)
+REMOTE_KAKAFLIX_URL = (
+    "https://raw.githubusercontent.com/PaulExplorer/AutoFlix-CLI/refs/heads/main/data/kakaflix_players.jsonc"
+)
+
+
+# Player mapping: domain name -> parser type / configuration.
+# Order is: defaults -> remote -> local file (dev override in data/).
+players = load_config(
+    REMOTE_PLAYERS_URL,
     DEFAULT_PLAYERS,
+    os.path.join(LOCAL_DATA_DIR, "players_info.jsonc"),
 )
 
 # URL replacements for compatibility
-new_url = load_remote_jsonc(
-    "https://raw.githubusercontent.com/PaulExplorer/AutoFlix-CLI/refs/heads/main/data/new_url.jsonc",
+new_url = load_config(
+    REMOTE_NEW_URL_URL,
     DEFAULT_NEW_URL,
+    os.path.join(LOCAL_DATA_DIR, "new_url.jsonc"),
 )
 
 # kakaflix supported players
-kakaflix_players = load_remote_jsonc(
-    "https://raw.githubusercontent.com/PaulExplorer/AutoFlix-CLI/refs/heads/main/data/kakaflix_players.jsonc",
+kakaflix_players = load_config(
+    REMOTE_KAKAFLIX_URL,
     DEFAULT_KAKAFLIX_PLAYERS,
+    os.path.join(LOCAL_DATA_DIR, "kakaflix_players.jsonc"),
 )
-
-actual_player_config = None
 
 
 def extract_hls_url(unpacked_code):
@@ -58,27 +74,88 @@ def extract_hls_url(unpacked_code):
     return None
 
 
-def get_hls_link_default(url: str, headers: dict) -> str:
-    """
-    Extract HLS link from default player.
-    """
-    global actual_player_config
+def extract_video_url(unpacked_code):
+    pattern = r'(https?://[^"\'\\\s]*\.(?:mp4|webm|m4v|mov)[^"\'\\\s]*)'
+    match = re.search(pattern, unpacked_code)
+    if match:
+        return match.group(1)
 
-    if actual_player_config.get("m3u8-extractor"):
-        if actual_player_config.get("m3u8-extractor").get("no-header"):
-            headers = {}
+    return None
+
+
+# Maximum depth for following iframe redirects in get_hls_link_default.
+# Prevents infinite recursion on players that embed each other in a loop.
+MAX_IFRAME_DEPTH = 3
+
+
+def get_hls_link_default(
+    url: str, headers: dict, config: dict = None, _depth: int = 0
+) -> str:
+    """
+    Extract stream link from default player.
+
+    Config keys (all optional):
+        no-header: send the request without HTTP headers
+        url-replacements: dict of str replacements applied to the deobfuscated
+            page before searching for the stream URL
+
+    The page is searched in two forms: raw (HTML attributes stay intact)
+    and deobfuscated (unpacked JavaScript, where packed players hide the
+    URL). Extractions, in order:
+        - HLS playlist URL (master.*, *.m3u8)          [primary]
+        - classic video file URL (.mp4, .webm, .m4v, .mov)
+        - iframe redirect (container players)
+    """
+    config = config or {}
+
+    if config.get("no-header") or (config.get("m3u8-extractor") or {}).get("no-header"):
+        headers = {}
 
     response = scraper.get(url, headers=headers, impersonate="chrome")
     response.raise_for_status()
 
     code = deobfuscate(response.text)
+    for old, new in (config.get("url-replacements") or {}).items():
+        code = code.replace(old, new)
 
-    code = code.replace("cdn-tnmr", "tnmr") # this is for lulustream
+    # 1. HLS playlist URL. Raw page first (JS beautification turns
+    # "https://" into "https: //", so it cannot be trusted for plain HTML),
+    # then deobfuscated JavaScript.
+    stream_url = extract_hls_url(response.text) or extract_hls_url(code)
+    if stream_url:
+        return stream_url
 
-    return extract_hls_url(code)
+    # 2. Classic video file URL (direct MP4/WebM players)
+    stream_url = extract_video_url(response.text) or extract_video_url(code)
+    if stream_url:
+        return stream_url
+
+    # 3. iframe redirect (container players)
+    soup = BeautifulSoup(response.text, "html.parser")
+    iframe = soup.find("iframe")
+    if iframe and iframe.get("src"):
+        iframe_src = iframe["src"].strip()
+        if iframe_src.startswith("//"):
+            iframe_src = "https:" + iframe_src
+        elif iframe_src.startswith("/"):
+            parsed = urllib.parse.urlparse(url)
+            iframe_src = f"{parsed.scheme}://{parsed.netloc}{iframe_src}"
+        elif not iframe_src.startswith("http"):
+            iframe_src = "https://" + iframe_src
+
+        # Guard against self-reference / deep chains to avoid infinite recursion
+        if iframe_src != url and _depth < MAX_IFRAME_DEPTH:
+            # First: resolve through a registered player if the iframe points to one
+            resolved = get_hls_link(iframe_src, headers)
+            if resolved:
+                return resolved
+            # Then: try generic extraction for unregistered inner players
+            return get_hls_link_default(iframe_src, headers, config, _depth + 1)
+
+    return None
 
 
-def get_hls_link_embed4me(embed_url: str) -> str:
+def get_hls_link_embed4me(embed_url: str, headers: dict = None, config: dict = None) -> str:
     """
     Extract HLS link from embed4me player.
     Code adapted from: https://github.com/SertraFurr/Anime-Sama-Downloader/blob/main/src/utils/extract/extract_embed4me_video_source.py
@@ -128,7 +205,7 @@ def get_hls_link_embed4me(embed_url: str) -> str:
     return source
 
 
-def get_hls_link_uqload(url: str, headers: dict) -> str:
+def get_hls_link_uqload(url: str, headers: dict, config: dict = None) -> str:
     """
     Extract HLS link from uqload players.
 
@@ -151,7 +228,7 @@ def get_hls_link_uqload(url: str, headers: dict) -> str:
     return link
 
 
-def get_hls_link_sendvid(url: str) -> str:
+def get_hls_link_sendvid(url: str, headers: dict = None, config: dict = None) -> str:
     """
     Extract video link from sendvid using Open Graph meta tag.
 
@@ -171,7 +248,7 @@ def get_hls_link_sendvid(url: str) -> str:
     return link
 
 
-def get_hls_link_sibnet(url: str) -> str:
+def get_hls_link_sibnet(url: str, headers: dict = None, config: dict = None) -> str:
     """
     Extract video link from sibnet.
 
@@ -190,7 +267,7 @@ def get_hls_link_sibnet(url: str) -> str:
     return link
 
 
-def get_hls_link_filemoon(url: str, headers: dict) -> str:
+def get_hls_link_filemoon(url: str, headers: dict, config: dict = None) -> str:
     """
     Extract HLS link from filemoon players.
     Follows iframe redirect and deobfuscates JavaScript.
@@ -293,7 +370,7 @@ def get_hls_link_filemoon(url: str, headers: dict) -> str:
         return get_hls_link(url, headers)
 
 
-def get_hls_link_vidoza(url: str, headers: dict) -> str:
+def get_hls_link_vidoza(url: str, headers: dict, config: dict = None) -> str:
     """
     Extract HLS link from vidoza players.
 
@@ -319,7 +396,7 @@ def get_hls_link_vidoza(url: str, headers: dict) -> str:
     return link
 
 
-def get_hls_link_kakaflix(url: str, headers: dict) -> str:
+def get_hls_link_kakaflix(url: str, headers: dict, config: dict = None) -> str:
     """
     Extract HLS link from kakaflix players.
 
@@ -347,7 +424,7 @@ def get_hls_link_kakaflix(url: str, headers: dict) -> str:
         return get_hls_link(link, headers)
 
 
-def get_hls_link_myvidplay(url: str, headers: dict) -> str:
+def get_hls_link_myvidplay(url: str, headers: dict, config: dict = None) -> str:
     """
     Extract HLS link from myvidplay players.
 
@@ -370,7 +447,7 @@ def get_hls_link_myvidplay(url: str, headers: dict) -> str:
     return link
 
 
-def get_hls_link_vidmoly(url: str, headers: dict) -> str:
+def get_hls_link_vidmoly(url: str, headers: dict, config: dict = None) -> str:
     """
     Dedicated parser for Vidmoly to bypass transitional page.
     Mimics an iframe request behavior.
@@ -401,7 +478,7 @@ def get_hls_link_vidmoly(url: str, headers: dict) -> str:
     return extract_hls_url(response.text)
 
 
-def get_hls_link_veev(url):
+def get_hls_link_veev(url, headers: dict = None, config: dict = None):
     """
     Extract HLS link from Veev players.
     Converted from https://github.com/phisher98/cloudstream-extensions-phisher/blob/master/Coflix/src/main/kotlin/com/Coflix/Extractor.kt
@@ -521,13 +598,13 @@ def get_hls_link_veev(url):
     return None
 
 
-def get_hls_link_xtremestream(url, headers):
+def get_hls_link_xtremestream(url, headers, config: dict = None):
     data_id = url.split("?data=")[1]
     url_root = url.removeprefix("https://").removesuffix("http://").split("/")[0]
 
     return f"https://{url_root}/player/xs1.php?data={data_id}"
 
-def get_hls_link_montmyoboky(url, headers):
+def get_hls_link_montmyoboky(url, headers, config: dict = None):
     if "movie" in url:
         response = scraper.post(url=arkanime.website_origin + "/api/watch/movie-token", data={
             "movieId": url.split(":")[1]
@@ -550,7 +627,7 @@ def get_hls_link_montmyoboky(url, headers):
 
     return player_data["videoUrl"], subtitle_url
 
-def get_hls_link_vidzy(embed_url: str, headers: dict) -> str:
+def get_hls_link_vidzy(embed_url: str, headers: dict, config: dict = None) -> str:
 
     response = scraper.get(
         embed_url,
@@ -613,6 +690,28 @@ def get_hls_link_vidzy(embed_url: str, headers: dict) -> str:
     return real_url
 
 
+# Player type -> extractor function registry.
+# Adding a new player type = write one extractor here (signature:
+# extractor(url: str, headers: dict, config: dict)) + add one entry below
+# (and set its "type" in the player config).
+PLAYER_EXTRACTORS = {
+    "default": get_hls_link_default,
+    "sendvid": get_hls_link_sendvid,
+    "sibnet": get_hls_link_sibnet,
+    "uqload": get_hls_link_uqload,
+    "vidoza": get_hls_link_vidoza,
+    "filemoon": get_hls_link_filemoon,
+    "kakaflix": get_hls_link_kakaflix,
+    "myvidplay": get_hls_link_myvidplay,
+    "vidmoly": get_hls_link_vidmoly,
+    "embed4me": get_hls_link_embed4me,
+    "veev": get_hls_link_veev,
+    "xtremestream": get_hls_link_xtremestream,
+    "montmyoboky": get_hls_link_montmyoboky,
+    "vidzy": get_hls_link_vidzy,
+}
+
+
 def get_hls_link(url: str, headers: dict = {}, return_subs: bool = False) -> str | tuple[str | None, str | None] | None:
     """
     Extract HLS/video link from a player URL.
@@ -626,56 +725,34 @@ def get_hls_link(url: str, headers: dict = {}, return_subs: bool = False) -> str
     Returns:
         HLS/video stream URL if successful, None otherwise. If return_subs is True, returns (stream_url, subtitle_url).
     """
-    global actual_player_config
 
     # Find matching player and parse accordingly
     for player_name, config in players.items():
         if player_name in url.lower():
-            actual_player_config = config
             parse_type = config["type"]
+            extractor = PLAYER_EXTRACTORS.get(parse_type)
 
-            stream_url = None
-            subtitle_url = None
-
-            if parse_type == "default":
-                stream_url = get_hls_link_default(url, headers)
-            elif parse_type == "sendvid":
-                stream_url = get_hls_link_sendvid(url)
-            elif parse_type == "sibnet":
-                stream_url = get_hls_link_sibnet(url)
-            elif parse_type == "uqload":
-                stream_url = get_hls_link_uqload(url, headers)
-            elif parse_type == "vidoza":
-                stream_url = get_hls_link_vidoza(url, headers)
-            elif parse_type == "filemoon":
-                stream_url = get_hls_link_filemoon(url, headers)
-            elif parse_type == "kakaflix":
-                stream_url = get_hls_link_kakaflix(url, headers)
-            elif parse_type == "myvidplay":
-                stream_url = get_hls_link_myvidplay(url, headers)
-            elif parse_type == "vidmoly":
-                stream_url = get_hls_link_vidmoly(url, headers)
-            elif parse_type == "embed4me":
-                stream_url = get_hls_link_embed4me(url)
-            elif parse_type == "veev":
-                stream_url = get_hls_link_veev(url)
-            elif parse_type == "xtremestream":
-                stream_url = get_hls_link_xtremestream(url, headers)
-            elif parse_type == "montmyoboky":
-                stream_url, subtitle_url = get_hls_link_montmyoboky(url, headers)
-            elif parse_type == "vidzy": 
-                stream_url = get_hls_link_vidzy(url, headers)
-            else:
+            if extractor is None:
                 print_warning(
                     f"Player type '{parse_type}' is not supported in your version. "
                     "Please update: pip install --upgrade autoflix-cli"
                 )
+                if return_subs:
+                    return None, None
+                return None
+
+            result = extractor(url, headers, config)
+
+            if isinstance(result, tuple):
+                stream_url, subtitle_url = result
+            else:
+                stream_url = result
+                subtitle_url = None
 
             if return_subs:
                 return stream_url, subtitle_url
             return stream_url
 
-    actual_player_config = None
     if return_subs:
         return None, None
     return None
@@ -691,14 +768,9 @@ def is_supported(url: str) -> bool:
     Returns:
         True if the player is supported, False otherwise
     """
-    for player in players.keys():
-        if "kakaflix" in url.lower():
-            for player in kakaflix_players.keys():
-                if player in url.lower():
-                    return True
-            return False
+    url_lower = url.lower()
 
-        elif player in url.lower():
-            return True
+    if "kakaflix" in url_lower:
+        return any(kp in url_lower for kp in kakaflix_players.keys())
 
-    return False
+    return any(player in url_lower for player in players.keys())

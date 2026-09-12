@@ -16,13 +16,16 @@ DEFAULT_PLAYERS = {
     "vidmoly": {"type": "vidmoly"},
     # "oneupload": {"type": "default"},
     "tipfly": {"type": "default"},
-    "lulustream": {"type": "default"},
+    "lulustream": {
+        "type": "default",
+        "url-replacements": {"cdn-tnmr": "tnmr"},
+    },
     "luluvdo": {"type": "default"},
     "luluvdoo": {"type": "default"},
     "luluvid": {"type": "default"},
     "ups2up": {"type": "default"},
     "ico3c": {"type": "default"},
-    "fsvid": {"type": "default", "m3u8-extractor": {"no-header": True}},
+    "fsvid": {"type": "default", "no-header": True},
     "darkibox": {"type": "default"},
     "minochinos": {"type": "default"},
     "movearnpre": {
@@ -71,11 +74,8 @@ DEFAULT_PLAYERS = {
         "referrer": "full",
         "no-header": True,
     },
-    "uqload.is": {
-        "type": "default"
-    },
     "uqload": {
-        "type": "uqload",
+        "type": "default",
         "sec_headers": "Sec-Fetch-Dest:video;Sec-Fetch-Mode:no-cors;Sec-Fetch-Site:same-site",
         "ext": "mp4",
     },
