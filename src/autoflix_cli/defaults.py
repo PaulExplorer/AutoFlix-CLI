@@ -74,11 +74,8 @@ DEFAULT_PLAYERS = {
         "referrer": "full",
         "no-header": True,
     },
-    "uqload.is": {
-        "type": "default"
-    },
     "uqload": {
-        "type": "uqload",
+        "type": "default",
         "sec_headers": "Sec-Fetch-Dest:video;Sec-Fetch-Mode:no-cors;Sec-Fetch-Site:same-site",
         "ext": "mp4",
     },
