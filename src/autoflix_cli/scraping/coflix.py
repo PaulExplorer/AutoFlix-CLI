@@ -10,16 +10,28 @@ from .objects import (
     CoflixMovie,
 )
 from .utils import parse_episodes_from_js
+from .botblocker import is_check_page, solve
 import base64
 import json
 import re
 from ..proxy import DNS_OPTIONS
 
 website_origin = ""
-scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS, allow_redirects="safe")
+scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS, allow_redirects=True)
 
 
 from .config import portals
+
+
+def _get(url, headers=None, retries=3):
+    """GET a page, automatically resolving a BotBlocker check when detected."""
+    for attempt in range(retries):
+        response = scraper.get(url, headers=headers)
+        if not is_check_page(response.text):
+            return response
+        if not solve(scraper, response.text, url=url) and attempt == retries - 1:
+            break
+    raise RuntimeError(f"Unable to bypass BotBlocker for {url}")
 
 
 def get_website_url(portal=portals["coflix"]):
@@ -28,21 +40,31 @@ def get_website_url(portal=portals["coflix"]):
     if website_origin:
         return
 
-    if portal.startswith("http"):
-        response = scraper.get(portal)
-    else:
-        response = scraper.get("https://" + portal)
+    if not portal.startswith("http"):
+        portal = "https://" + portal
+
+    response = _get(portal)
     response.raise_for_status()
 
     content = response.text
 
-    website_origin = content.split('redirect_url":"')[1].split('"')[0]
+    if 'redirect_url":"' in content:
+        website_origin = content.split('redirect_url":"')[1].split('"')[0]
+        if website_origin.startswith("http://"):
+            website_origin = "https://" + website_origin[7:]
+    else:
+        website_origin = response.url
+
+    website_origin = website_origin.rstrip("/")
+    scraper.headers.update({"Accept-Language": "fr-FR,en-US;q=0.7,en;q=0.3"})
+
+    _get(website_origin)
 
 
 def search(query: str) -> list[SearchResult]:
     page = website_origin + f"/?s={query}"
 
-    response = scraper.get(page)
+    response = _get(page)
     response.raise_for_status()
 
     content = response.text
@@ -89,7 +111,7 @@ def get_players(players_url: str) -> list[Player]:
         "Referer": website_origin,
     }
 
-    response = scraper.get(players_url, headers=headers)
+    response = _get(players_url, headers=headers)
     response.raise_for_status()
 
     content = response.text
@@ -142,7 +164,7 @@ def get_episode(url: str) -> Episode:
     Returns:
         Episode object with title and players
     """
-    response = scraper.get(url)
+    response = _get(url)
     response.raise_for_status()
 
     content = response.text
@@ -175,7 +197,7 @@ def get_content_img(soup) -> str:
     return None
 
 def get_movie(url: str) -> CoflixMovie:
-    response = scraper.get(url)
+    response = _get(url)
     response.raise_for_status()
 
     content = response.text
@@ -210,7 +232,7 @@ def get_season_name(soup, id):
         return "Saison Inconnu"
 
 def get_series(url: str) -> CoflixSeries:
-    response = scraper.get(url)
+    response = _get(url)
     response.raise_for_status()
 
     content = response.text
