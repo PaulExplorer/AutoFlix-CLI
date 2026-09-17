@@ -1,0 +1,43 @@
+name: Publish
+
+on:
+  push:
+    branches: [main]
+    paths: ['pyproject.toml']
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Get version from pyproject.toml
+        id: version
+        run: echo "version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")" >> "$GITHUB_OUTPUT"
+
+      - name: Get latest version published on PyPI
+        id: pypi
+        run: echo "latest=$(curl -s https://pypi.org/pypi/autoflix-cli/json | python3 -c "import sys,json; print(json.load(sys.stdin)['info']['version'])")" >> "$GITHUB_OUTPUT"
+
+      - name: Check if publishing is needed
+        id: should
+        run: echo "run=${{ steps.version.outputs.version != steps.pypi.outputs.latest }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        if: steps.should.outputs.run == 'true'
+        run: uv build
+
+      - name: Publish to PyPI (Trusted Publishing)
+        if: steps.should.outputs.run == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Create tag and GitHub release
+        if: steps.should.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "v${{ steps.version.outputs.version }}" --generate-notes
