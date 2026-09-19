@@ -43,15 +43,47 @@ def get_base_url(url):
 
 _session_cache = {}
 
-def get_or_create_session(url, headers_dict=None):
+def get_or_create_session(url, headers_dict=None, fresh=False):
     domain = urllib.parse.urlparse(url).netloc
     
-    if domain not in _session_cache:
+    # On retry, a "fresh" session is used: it opens a brand new connection for
+    # every attempt (never reuses a questionable one), like browsers do after
+    # a failed segment. The base session (with connection reuse) is untouched.
+    cache_key = f"{domain}:fresh" if fresh else domain
+
+    # Fresh sessions inherit the base session cookies/headers so CDN auth
+    # (Cloudflare, etc.) keeps working on the retry.
+    if fresh and domain not in _session_cache:
+        get_or_create_session(url, headers_dict)
+
+    if cache_key not in _session_cache:
         session = requests.Session(impersonate="chrome", allow_redirects="safe")
         session.curl_options.update(DNS_OPTIONS)
-        _session_cache[domain] = session
+        # curl_cffi converts the per-request `timeout` into a low-speed abort
+        # for streamed transfers (LOW_SPEED_LIMIT=1 over `timeout` seconds).
+        # These session-level options are applied last (they override the
+        # per-request ones), so a CDN that stalls briefly no longer kills the
+        # segment at 15s. The 15s connect timeout is still enforced separately.
+        session.curl_options.update(
+            {
+                CurlOpt.LOW_SPEED_TIME: 60,
+                CurlOpt.LOW_SPEED_LIMIT: 1,
+            }
+        )
+        if fresh:
+            session.curl_options.update(
+                {
+                    CurlOpt.FRESH_CONNECT: 1,
+                    CurlOpt.FORBID_REUSE: 1,
+                }
+            )
+            base = _session_cache.get(domain)
+            if base is not None:
+                session.cookies.update(base.cookies)
+                session.headers.update(base.headers)
+        _session_cache[cache_key] = session
     
-    session = _session_cache[domain]
+    session = _session_cache[cache_key]
 
     if headers_dict:
         session.headers.update(headers_dict)
@@ -95,6 +127,70 @@ def fetch_with_retry(url, headers, method="GET", stream=False, max_retries=3):
                     f"[ERROR] Failed to fetch {url} after {max_retries} attempts: {e}"
                 )
                 return None
+
+
+def fetch_segment(url, headers, max_retries=3):
+    """Download a full segment/key/init body before serving it.
+
+    Unlike fetch_with_retry this reads the whole body into memory (and verifies
+    it) before anything is sent downstream. Combined with retries it mimics the
+    segment-retry behavior of browser players: a slow or flaky CDN can no
+    longer produce truncated/corrupt segments on the client side.
+
+    Returns ``(data, status_code)`` or ``(None, None)`` after ``max_retries``.
+    """
+    attempt = 0
+
+    while attempt < max_retries:
+        try:
+            # First attempt reuses pooled connections; any retry goes through
+            # a brand-new session/connection (browser-style segment retries).
+            session = get_or_create_session(url, headers, fresh=(attempt > 0))
+            req_headers = headers.copy() if headers else {}
+
+            response = session.request(
+                method="GET",
+                url=url,
+                headers=req_headers,
+                stream=True,
+                timeout=15,  # connect timeout; low-speed grace is 60s
+            )
+
+            status = response.status_code
+
+            # If 429 error (Rate Limit) or 5xx, retry
+            if status == 429 or status >= 500:
+                response.close()
+                raise requests.RequestsError(f"Status {status}")
+
+            data = b"".join(response.iter_content())
+
+            # Defensive check for silent truncation (chunked response cut early).
+            # Skipped when the body was content-encoded: curl auto-decompresses,
+            # so Content-Length then reflects the compressed size.
+            content_length = response.headers.get("Content-Length")
+            if (
+                content_length
+                and not response.headers.get("Content-Encoding")
+                and len(data) != int(content_length)
+            ):
+                response.close()
+                raise requests.RequestsError(
+                    f"Truncated body: {len(data)}/{content_length} bytes"
+                )
+
+            response.close()
+            return data, status
+
+        except Exception as e:
+            attempt += 1
+            # Simple backoff: waits 0.5s, then 1s, etc.
+            time.sleep(0.5 * attempt)
+            if attempt >= max_retries:
+                print(
+                    f"[ERROR] Failed to fetch {url} after {max_retries} attempts: {e}"
+                )
+                return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -221,30 +317,22 @@ def proxy_ts():
     except:
         headers = {}
 
-    # Fetch in stream mode
-    resp = fetch_with_retry(target_url, headers, stream=True)
-    if not resp:
+    # Download the segment fully (with retries), so a mid-transfer cut from a
+    # flaky CDN can never truncate a segment on the client side.
+    data, status = fetch_segment(target_url, headers)
+    if data is None:
         return "Error fetching segment", 502
 
     # Force Content-Type so VLC doesn't bug if the server sends .html
-    # video/mp2t is the standard for TS segments
+    # video/mp2t is the standard for TS segments. An exact Content-Length
+    # gives players a clean segment boundary (no "corrupt packet" tails).
     response_headers = {
         "Content-Type": "video/mp2t",
         "Access-Control-Allow-Origin": "*",
+        "Content-Length": str(len(data)),
     }
 
-    # Use stream_with_context to return chunks as they come
-    # This is where memory efficiency happens
-    def generate():
-        for chunk in resp.iter_content(chunk_size=8192):
-            if chunk:
-                yield chunk
-
-    return Response(
-        stream_with_context(generate()),
-        status=resp.status_code,
-        headers=response_headers,
-    )
+    return Response(data, status=status, headers=response_headers)
 
 
 # ---------------------------------------------------------------------------
