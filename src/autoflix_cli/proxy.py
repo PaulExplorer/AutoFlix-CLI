@@ -2,11 +2,13 @@ import threading
 import socket
 import json
 import time
+import random
+import select
 import urllib.parse
 import re
+import m3u8
 from flask import Flask, request, Response, stream_with_context
 from curl_cffi import requests, CurlOpt
-import m3u8
 
 # Global Configuration
 PROXY_PORT = 0
@@ -41,20 +43,83 @@ def get_base_url(url):
     return url.rsplit("/", 1)[0] + "/"
 
 
+def make_proxy_url(endpoint, original_uri, base_uri, headers):
+    """Build a proxy URL pointing back to this server for a given upstream URI."""
+    absolute_url = urllib.parse.urljoin(base_uri, original_uri)
+    encoded_url = urllib.parse.quote(absolute_url)
+    encoded_headers = urllib.parse.quote(json.dumps(headers))
+    return (
+        f"http://{PROXY_HOST}:{PROXY_PORT}/{endpoint}?url={encoded_url}"
+        f"&headers={encoded_headers}"
+    )
+
+
+# Statuses browsers / hls.js treat as transient and retry (fragment or playlist).
+TRANSIENT_STATUS = {403, 404, 410, 429}
+
+
+def _is_retryable_status(status):
+    return status in TRANSIENT_STATUS or status >= 500
+
+
+def _is_blocked_page(data, content_type=""):
+    """True when the body looks like an anti-bot/challenge page (or is empty)."""
+    ct = (content_type or "").lower()
+    if "html" in ct:
+        return True
+    head = bytes(data)[:512].lstrip().lower()
+    return not head or head.startswith((b"<html", b"<!doctype html", b"<script"))
+
+
+def _client_gone_check(environ):
+    """Return a predicate detecting that the client (mpv) closed this request.
+
+    Werkzeug exposes the underlying connection in the WSGI environ. We only
+    probe it with MSG_PEEK (no data consumed); a clean EOF means the player
+    abandoned the transfer (seek/cancel/resize), so the upstream download can
+    be stopped instead of being leaked into the void.
+    """
+    sock = None
+    try:
+        sock = environ.get("werkzeug.socket")
+    except Exception:
+        sock = None
+    if sock is None:
+        return lambda: False
+
+    def is_gone():
+        try:
+            readable, _, _ = select.select([sock], [], [], 0)
+            if not readable:
+                return False
+            return sock.recv(1, socket.MSG_PEEK) == b""
+        except Exception:
+            return False
+
+    return is_gone
+
+
+class _SegmentCancelled(Exception):
+    """The player abandoned the request while a segment was being fetched."""
+
+
 _session_cache = {}
 
-def get_or_create_session(url, headers_dict=None, fresh=False):
-    domain = urllib.parse.urlparse(url).netloc
-    
-    # On retry, a "fresh" session is used: it opens a brand new connection for
-    # every attempt (never reuses a questionable one), like browsers do after
-    # a failed segment. The base session (with connection reuse) is untouched.
-    cache_key = f"{domain}:fresh" if fresh else domain
+def get_or_create_session(url, fresh=False):
+    """Return the per-domain session (or a one-shot connection for retries).
 
-    # Fresh sessions inherit the base session cookies/headers so CDN auth
+    Headers travel per-request and are never mutated on the shared session, so
+    concurrent segment/playlist downloads can no longer overwrite each other's
+    headers or Referer. A ``fresh`` session opens a brand-new connection and
+    inherits the base session cookies, mirroring how hls.js retries a fragment.
+    """
+    domain = urllib.parse.urlparse(url).netloc
+
+    # Fresh sessions inherit the base session cookies so CDN auth
     # (Cloudflare, etc.) keeps working on the retry.
+    cache_key = f"{domain}:fresh" if fresh else domain
     if fresh and domain not in _session_cache:
-        get_or_create_session(url, headers_dict)
+        get_or_create_session(url)
 
     if cache_key not in _session_cache:
         session = requests.Session(impersonate="chrome", allow_redirects="safe")
@@ -80,27 +145,21 @@ def get_or_create_session(url, headers_dict=None, fresh=False):
             base = _session_cache.get(domain)
             if base is not None:
                 session.cookies.update(base.cookies)
-                session.headers.update(base.headers)
         _session_cache[cache_key] = session
-    
-    session = _session_cache[cache_key]
 
-    if headers_dict:
-        session.headers.update(headers_dict)
-
-    return session
+    return _session_cache[cache_key]
 
 
 def fetch_with_retry(url, headers, method="GET", stream=False, max_retries=3):
     attempt = 0
-    session = get_or_create_session(url, headers)
 
     while attempt < max_retries:
+        # First attempt reuses pooled connections; retries go through a fresh
+        # session/connection (hls.js-style retry after a failed fetch).
+        session = get_or_create_session(url, fresh=(attempt > 0))
         try:
             # Forward the Range header if present (for MP4 seeking)
-            req_headers = headers.copy() if headers else {}
-
-            # Handle the Range header coming from the client (VLC)
+            req_headers = dict(headers or {})
             if "Range" in request.headers:
                 req_headers["Range"] = request.headers["Range"]
 
@@ -112,41 +171,50 @@ def fetch_with_retry(url, headers, method="GET", stream=False, max_retries=3):
                 timeout=15,  # Reasonable timeout
             )
 
-            # If 429 error (Rate Limit) or 5xx, retry
-            if response.status_code == 429 or response.status_code >= 500:
+            # Transient error (rate limit / 5xx / challenge) -> retry
+            if _is_retryable_status(response.status_code):
+                response.close()
                 raise requests.RequestsError(f"Status {response.status_code}")
 
             return response
 
         except Exception as e:
             attempt += 1
-            # Simple backoff: waits 0.5s, then 1s, etc.
-            time.sleep(0.5 * attempt)
             if attempt >= max_retries:
                 print(
                     f"[ERROR] Failed to fetch {url} after {max_retries} attempts: {e}"
                 )
                 return None
+            # Backoff with a little jitter: ~0.5s, then ~1s, etc.
+            time.sleep(0.5 * attempt + random.uniform(0, 0.5))
 
 
-def fetch_segment(url, headers, max_retries=3):
-    """Download a full segment/key/init body before serving it.
+def fetch_segment(url, headers, environ=None, client_range=None, max_retries=3):
+    """Download a full segment/key/init body before serving it, with retries.
 
     Unlike fetch_with_retry this reads the whole body into memory (and verifies
-    it) before anything is sent downstream. Combined with retries it mimics the
-    segment-retry behavior of browser players: a slow or flaky CDN can no
-    longer produce truncated/corrupt segments on the client side.
+    it) before anything is sent downstream, so a flaky CDN can no longer
+    truncate a segment mid-transfer. Client Range requests (mpv byterange HLS,
+    seeking) are forwarded and answered with the exact slice as a 206.
+    retries mimic the fragment-retry behavior of browser players.
 
-    Returns ``(data, status_code)`` or ``(None, None)`` after ``max_retries``.
+    Returns ``(data, status_code, extra_headers)`` or ``(None, None, {})``
+    after ``max_retries``. Raises ``_SegmentCancelled`` when the client is
+    detected gone, so the in-flight upstream transfer is not leaked.
     """
+    is_cancelled = _client_gone_check(environ or {})
     attempt = 0
 
     while attempt < max_retries:
+        response = None
         try:
             # First attempt reuses pooled connections; any retry goes through
             # a brand-new session/connection (browser-style segment retries).
-            session = get_or_create_session(url, headers, fresh=(attempt > 0))
-            req_headers = headers.copy() if headers else {}
+            session = get_or_create_session(url, fresh=(attempt > 0))
+            req_headers = dict(headers or {})
+            req_headers.setdefault("Accept", "*/*")
+            if client_range:
+                req_headers["Range"] = client_range
 
             response = session.request(
                 method="GET",
@@ -158,39 +226,129 @@ def fetch_segment(url, headers, max_retries=3):
 
             status = response.status_code
 
-            # If 429 error (Rate Limit) or 5xx, retry
-            if status == 429 or status >= 500:
-                response.close()
+            # Transient error (rate limit / 5xx / challenge) -> retry
+            if _is_retryable_status(status):
                 raise requests.RequestsError(f"Status {status}")
 
-            data = b"".join(response.iter_content())
+            data = bytearray()
+            for chunk in response.iter_content():
+                if is_cancelled():
+                    raise _SegmentCancelled()
+                data.extend(chunk)
 
-            # Defensive check for silent truncation (chunked response cut early).
-            # Skipped when the body was content-encoded: curl auto-decompresses,
-            # so Content-Length then reflects the compressed size.
+            # A challenge/empty page back where a segment was expected is
+            # treated as a failure and retried rather than served to the
+            # player as a corrupt segment.
+            if _is_blocked_page(
+                bytes(data), response.headers.get("Content-Type") or ""
+            ):
+                raise requests.RequestsError("Blocked/empty body")
+
+            # Defensive check for silent truncation (chunked response cut
+            # early). Skipped when the body was content-encoded: curl
+            # auto-decompresses, so Content-Length then reflects the
+            # compressed size.
             content_length = response.headers.get("Content-Length")
             if (
                 content_length
                 and not response.headers.get("Content-Encoding")
                 and len(data) != int(content_length)
             ):
-                response.close()
                 raise requests.RequestsError(
                     f"Truncated body: {len(data)}/{content_length} bytes"
                 )
 
-            response.close()
-            return data, status
+            # Preserve the range-slice metadata so the player gets a proper 206.
+            extra = {}
+            if status == 206 and client_range:
+                for h in ("Content-Range", "Accept-Ranges"):
+                    if response.headers.get(h):
+                        extra[h] = response.headers[h]
 
+            return bytes(data), status, extra
+
+        except _SegmentCancelled:
+            raise
         except Exception as e:
             attempt += 1
-            # Simple backoff: waits 0.5s, then 1s, etc.
-            time.sleep(0.5 * attempt)
             if attempt >= max_retries:
                 print(
                     f"[ERROR] Failed to fetch {url} after {max_retries} attempts: {e}"
                 )
-                return None, None
+                return None, None, {}
+            # Simple backoff with jitter: waits ~0.5s, then ~1s, etc.
+            time.sleep(0.5 * attempt + random.uniform(0, 0.5))
+        finally:
+            if response is not None:
+                try:
+                    response.close()
+                except Exception:
+                    pass
+
+
+# ---------------------------------------------------------------------------
+# M3U8 rewriting (preserves the upstream bytes, only the URIs are proxied)
+# ---------------------------------------------------------------------------
+# Tags whose quoted URI="..." attribute designates another playlist (rewrite
+# through /stream). Any other URI="..."-bearing tag (ext-IV keys, init
+# segments, LL-HLS parts ...) is binary data fetched through /ts.
+_PLAYLIST_URI_TAGS = {
+    "EXT-X-MEDIA",
+    "EXT-X-I-FRAME-STREAM-INF",
+    "EXT-X-RENDITION-REPORT",
+    "EXT-X-IMAGE-STREAM-INF",
+}
+
+
+def _rewrite_m3u8(content, target_url, headers, plain_endpoint):
+    """Rewrite every URI of a playlist to go through this proxy.
+
+    Works on the raw text instead of a parse/dump round-trip, so tags mpv and
+    hls.js rely on (EXT-X-KEY / EXT-X-MAP / EXT-X-SESSION-KEY / EXT-X-MAP with
+    BYTERANGE, LL-HLS preload hints ...) are never dropped or reformatted.
+    `plain_endpoint` ("stream" or "ts") decides where bare segment/playlist URI
+    lines go; it is derived structurally by the m3u8 parser in /stream.
+    """
+    base_uri = get_base_url(target_url)
+    proxied_prefix = f"http://{PROXY_HOST}:{PROXY_PORT}/"
+
+    def proxify(endpoint, uri):
+        if not uri or uri.startswith(proxied_prefix):
+            return uri
+        return make_proxy_url(endpoint, uri, base_uri, headers)
+
+    def rewrite_body(body):
+        text = body
+        stripped = text.strip()
+        if not stripped:
+            return body
+
+        if stripped.startswith("#"):
+            # Attribute-based URI: KEY/MAP/MEDIA/I-FRAME-STREAM-INF/...
+            if 'URI="' not in text:
+                return body
+            endpoint = (
+                "stream"
+                if any(
+                    stripped.startswith(f"#{t}:") for t in _PLAYLIST_URI_TAGS
+                )
+                else "ts"
+            )
+            return re.sub(
+                r'URI="([^"]*)"',
+                lambda m: f'URI="{proxify(endpoint, m.group(1))}"',
+                text,
+            )
+
+        # Plain URI line: a segment (media playlist) or a variant playlist
+        # (master playlist).
+        return proxify(plain_endpoint, stripped)
+
+    # Rebuild, keeping the original newlines.
+    return "".join(
+        rewrite_body(line.rstrip("\r\n")) + line[len(line.rstrip("\r\n")):]
+        for line in content.splitlines(keepends=True)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -215,74 +373,33 @@ def proxy_stream():
         return "Error fetching upstream m3u8", 502
 
     content = resp.text
-    base_uri = get_base_url(target_url)
 
-    # 2. Parsing with m3u8 library
-    try:
-        m3u8_obj = m3u8.loads(content, uri=target_url)
-    except Exception as e:
-        # If parsing fails, return as is (fallback)
-        return Response(content, mimetype="application/vnd.apple.mpegurl")
-
-    # Helper function to build the proxy URL to our routes
-    def make_proxy_url(endpoint, original_uri):
-        # Absolute URL resolution if relative
-        absolute_url = urllib.parse.urljoin(base_uri, original_uri)
-        encoded_url = urllib.parse.quote(absolute_url)
-        encoded_headers = urllib.parse.quote(json.dumps(headers))
-        # Points to localhost:PORT
-        return f"http://{PROXY_HOST}:{PROXY_PORT}/{endpoint}?url={encoded_url}&headers={encoded_headers}"
-
-    # 3. Rewriting segments (.ts)
-    # We directly modify the m3u8 object or perform string replace if the object is too complex.
-    # The most reliable approach is often rewriting the text, but m3u8 obj allows managing keys.
-
-    # If it's a Master Playlist (contains other playlists)
-    if m3u8_obj.playlists:
-        for p in m3u8_obj.playlists:
-            p.uri = make_proxy_url("stream", p.uri)
-
-        # Handle Media (Alternative Audio/Subtitles)
-        for m in m3u8_obj.media:
-            if m.uri:
-                m.uri = make_proxy_url("stream", m.uri)
-
-    # If it's a Media Playlist (contains segments)
+    # 2. Rewrite the playlist URIs to point back at this proxy while keeping
+    #    the upstream bytes exactly as served (tags mpv cares about are never
+    #    dropped or reformatted by a parse/dump round-trip).
+    if "#EXTM3U" in content:
+        # The m3u8 parser (lenient) is used as a structural detector only: it
+        # knows whether this is a master/variant doc or a media playlist, which
+        # decides where bare playlist/segment URI lines must be routed. The
+        # actual rewriting stays byte-faithful (regex).
+        try:
+            parsed = m3u8.loads(content, uri=target_url)
+        except Exception:
+            parsed = None
+        plain_endpoint = (
+            "stream"
+            if parsed
+            and (
+                parsed.playlists
+                or parsed.is_variant
+                or parsed.iframe_playlists
+                or parsed.image_playlists
+            )
+            else "ts"
+        )
+        new_content = _rewrite_m3u8(content, target_url, headers, plain_endpoint)
     else:
-        # Rewrite encryption keys (AES-128 etc)
-        # CRUCIAL: keys must pass through the proxy otherwise 403/CORS
-        for key in m3u8_obj.keys:
-            if key and key.uri:
-                key.uri = make_proxy_url(
-                    "ts", key.uri
-                )  # Using /ts to fetch the key (it's just a binary)
-
-        # Rewrite initialization segment (for fMP4 HLS)
-        # We also use a regex fallback at the end because m3u8 library sometimes fails to dump the changes to segment_map
-        if hasattr(m3u8_obj, "segment_map"):
-            for seg_map in m3u8_obj.segment_map:
-                if seg_map and seg_map.uri:
-                    seg_map.uri = make_proxy_url("ts", seg_map.uri)
-
-        # Rewrite segments
-        for segment in m3u8_obj.segments:
-            segment.uri = make_proxy_url("ts", segment.uri)
-
-    # 4. Rebuild M3U8
-    new_content = m3u8_obj.dumps()
-
-    # Regex Fallback for EXT-X-MAP if m3u8 library didn't update the text
-    def replace_map_uri(match):
-        original_uri = match.group(1)
-        # If already proxied (by the object manipulation), skip
-        if str(PROXY_PORT) in original_uri and "/ts?url=" in original_uri:
-            return match.group(0)
-
-        # It's an un-proxied URI provided by dumps()
-        new_uri = make_proxy_url("ts", original_uri)
-        return f'#EXT-X-MAP:URI="{new_uri}"'
-
-    new_content = re.sub(r'#EXT-X-MAP:URI="([^"]+)"', replace_map_uri, new_content)
+        new_content = content
 
     return Response(
         new_content,
@@ -317,9 +434,19 @@ def proxy_ts():
     except:
         headers = {}
 
-    # Download the segment fully (with retries), so a mid-transfer cut from a
-    # flaky CDN can never truncate a segment on the client side.
-    data, status = fetch_segment(target_url, headers)
+    # mpv issues Range requests for byterange-based HLS (EXT-X-BYTERANGE, some
+    # fMP4 init segments). Forward them so the exact slice is fetched and
+    # served, instead of returning the whole file (misaligned => corruption).
+    client_range = request.headers.get("Range")
+
+    try:
+        data, status, extra_headers = fetch_segment(
+            target_url, headers, request.environ, client_range=client_range
+        )
+    except _SegmentCancelled:
+        # The player abandoned this transfer; nothing to serve anymore.
+        return "Cancelled", 499
+
     if data is None:
         return "Error fetching segment", 502
 
@@ -331,6 +458,7 @@ def proxy_ts():
         "Access-Control-Allow-Origin": "*",
         "Content-Length": str(len(data)),
     }
+    response_headers.update(extra_headers)
 
     return Response(data, status=status, headers=response_headers)
 
@@ -375,11 +503,18 @@ def proxy_video():
     status_code = resp.status_code
 
     def generate():
-        for chunk in resp.iter_content(
-            chunk_size=16384
-        ):  # Slightly larger chunks for MP4
-            if chunk:
-                yield chunk
+        try:
+            for chunk in resp.iter_content(
+                chunk_size=16384
+            ):  # Slightly larger chunks for MP4
+                if chunk:
+                    yield chunk
+        finally:
+            # Stop pulling upstream as soon as the client disconnects (seek).
+            try:
+                resp.close()
+            except Exception:
+                pass
 
     return Response(
         stream_with_context(generate()), status=status_code, headers=response_headers
