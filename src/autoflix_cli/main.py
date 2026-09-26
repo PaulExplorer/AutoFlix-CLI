@@ -137,9 +137,9 @@ def main():
             menu_items.append(resume_text)
             resume_idx = 0
 
-        # 2. Continue from AniList
+        # 2. AniList
         if tracker.get_anilist_token():
-            menu_items.append("▶ Continue from AniList")
+            menu_items.append("📋 AniList Lists (Continue, Planning, Completed...)")
             anilist_resume_idx = len(menu_items) - 1
 
         # 3. My History
