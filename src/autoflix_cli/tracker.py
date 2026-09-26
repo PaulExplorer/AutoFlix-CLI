@@ -179,6 +179,17 @@ class ProgressTracker:
         self.data["player"] = player_code
         self._save_data()
 
+    # --- Developer Mode ---
+
+    def get_developer_mode(self) -> bool:
+        """Get developer mode status."""
+        return self.data.get("developer_mode", False)
+
+    def set_developer_mode(self, enabled: bool):
+        """Enable or disable developer mode."""
+        self.data["developer_mode"] = enabled
+        self._save_data()
+
 
 
     def get_anilist_mapping(

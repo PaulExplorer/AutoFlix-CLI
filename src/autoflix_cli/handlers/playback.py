@@ -3,10 +3,13 @@ from ..cli_utils import (
     print_info,
     print_warning,
     print_error,
+    print_success
 )
 from ..player_manager import play_video
 from ..tracker import tracker
 from ..scraping import player
+from ..scraping.player import PLAYER_EXTRACTORS, test_all_scrapers
+from ..scraping.objects import Player
 
 
 def play_episode_flow(
@@ -36,8 +39,11 @@ def play_episode_flow(
         print_warning("No players found for this episode.")
         return False
 
+    dev_mode = tracker.get_developer_mode()
     supported_players = [p for p in episode.players if player.is_supported(p.url)]
-    if not supported_players:
+    unsupported_players = [p for p in episode.players if not player.is_supported(p.url)]
+
+    if not supported_players and not (dev_mode and unsupported_players):
         print_warning("No supported players found.")
         return False
 
@@ -47,13 +53,30 @@ def play_episode_flow(
 
     while True:
         # Player Selection Menu
-        player_options = [
-        ]
+        player_options = []
+        player_map = []  # maps option index -> Player object
+
         for p in supported_players:
             try:
                 player_options.append(f"{p.name} : {p.url.split('/')[2].split('.')[-2]}")
             except:
                 player_options.append(p.name)
+            player_map.append(p)
+
+        # In dev mode, show unsupported players with a clear marker
+        if dev_mode and unsupported_players:
+            player_options.append("")
+            player_options.append("── Unsupported players (dev mode) ──")
+            player_map.append(None)  # separator
+            player_map.append(None)  # separator header
+            for p in unsupported_players:
+                try:
+                    domain = p.url.split('/')[2].split('.')[-2]
+                except:
+                    domain = p.url
+                player_options.append(f"⚠ {p.name} ({domain}) [NOT SUPPORTED]")
+                player_map.append(p)
+
         player_options.append("← Back")
 
         player_idx = select_from_list(
@@ -61,10 +84,40 @@ def play_episode_flow(
             "🎮 Select Player:",
         )
 
-        if player_idx == len(supported_players):  # Back selected
+        if player_idx == len(player_options) - 1:  # Back selected
             return False
 
-        selected_player = supported_players[player_idx]
+        selected_player = player_map[player_idx]
+
+        # Skip separator lines (user shouldn't land here, but guard anyway)
+        if selected_player is None:
+            continue
+
+        # --- Dev mode: test unsupported players with all scrapers ---
+        if not player.is_supported(selected_player.url):
+            print_info(f"Testing {selected_player.name} with all available scrapers...")
+            scraper_results = test_all_scrapers(selected_player.url, headers)
+
+            if scraper_results:
+                scraper_names = list(scraper_results.keys())
+                print_success(f"Found {len(scraper_names)} working scraper(s): {', '.join(scraper_names)}")
+                scraper_opts = [f"{name} -> {scraper_results[name][:80]}..." for name in scraper_names]
+                scraper_opts.append("← Back to player selection")
+                scraper_idx = select_from_list(scraper_opts, "Select scraper to use:")
+
+                if scraper_idx == len(scraper_names):
+                    continue  # back to player list
+
+                chosen_name = scraper_names[scraper_idx]
+                stream_url = scraper_results[chosen_name]
+                print_info(f"Using scraper '{chosen_name}' -> {stream_url[:100]}...")
+
+                # Create a fake player with the resolved stream URL
+                selected_player = Player(name=f"{selected_player.name} [dev:{chosen_name}]", url=stream_url)
+            else:
+                print_warning("No scraper could extract a stream from this player.")
+                print_info("This player is not supported and no existing scraper works with it.")
+                continue
 
         # Construct title for player window
         window_title = f"{series_title} - {season_title} - {episode.title}"

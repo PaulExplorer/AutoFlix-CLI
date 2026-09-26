@@ -774,3 +774,30 @@ def is_supported(url: str) -> bool:
         return any(kp in url_lower for kp in kakaflix_players.keys())
 
     return any(player in url_lower for player in players.keys())
+
+
+def test_all_scrapers(url: str, headers: dict = {}) -> dict[str, str]:
+    """
+    Test all available scrapers on a given URL to find which ones work.
+
+    Args:
+        url: Player URL to test
+        headers: HTTP headers for the request (default: {})
+
+    Returns:
+        dict mapping scraper name -> stream URL for scrapers that succeeded
+    """
+    results = {}
+    for name, extractor in PLAYER_EXTRACTORS.items():
+        try:
+            result = extractor(url, headers, {})
+            if result:
+                if isinstance(result, tuple):
+                    stream_url = result[0]
+                else:
+                    stream_url = result
+                if stream_url:
+                    results[name] = stream_url
+        except Exception:
+            pass
+    return results

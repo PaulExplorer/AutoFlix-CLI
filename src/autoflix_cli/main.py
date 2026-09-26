@@ -189,15 +189,17 @@ def main():
                 token = tracker.get_anilist_token()
                 lang = tracker.get_language()
                 player = tracker.get_player()
-
+                dev_mode = tracker.get_developer_mode()
 
                 lang_display = get_language_display(lang)
                 player_display = get_player_display(player)
+                dev_display = "ON" if dev_mode else "OFF"
 
                 opts = [
                     f"Update AniList Token ({'Set' if token else 'Not Set'})",
                     f"Update Language ({lang_display})",
                     f"Choose default Player ({player_display})",
+                    f"Developer Mode ({dev_display})",
                     "Back",
                 ]
 
@@ -228,9 +230,13 @@ def main():
                     print_success(f"Player updated to: {players[p_choice][1]}")
                     pause()
 
+                if s_choice == 3:
+                    tracker.set_developer_mode(not dev_mode)
+                    state = "enabled" if not dev_mode else "disabled"
+                    print_success(f"Developer mode {state}.")
+                    pause()
 
-
-                else:
+                if s_choice >= 4:
                     break
             continue
 
