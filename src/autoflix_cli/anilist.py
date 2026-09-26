@@ -128,15 +128,17 @@ class AniListClient:
         data = self._query(query, variables)
         return data is not None and "SaveMediaListEntry" in data
 
-    def get_user_watching(self, user_id: int) -> List[Dict[str, Any]]:
-        """Get the user's current watching list."""
+    def get_user_list(self, user_id: int, status: str) -> List[Dict[str, Any]]:
+        """Get the user's anime list for a given status (CURRENT, PLANNING, COMPLETED, DROPPED, PAUSED)."""
         query = """
-        query ($userId: Int) {
-            MediaListCollection(userId: $userId, type: ANIME, status: CURRENT, sort: UPDATED_TIME_DESC) {
+        query ($userId: Int, $status: MediaListStatus) {
+            MediaListCollection(userId: $userId, type: ANIME, status: $status, sort: UPDATED_TIME_DESC) {
                 lists {
                     entries {
                         mediaId
                         progress
+                        status
+                        score
                         media {
                             title {
                                 romaji
@@ -160,19 +162,64 @@ class AniListClient:
             }
         }
         """
-        variables = {"userId": user_id}
+        variables = {"userId": user_id, "status": status}
         data = self._query(query, variables)
         if (
             data
             and data.get("MediaListCollection")
             and data["MediaListCollection"].get("lists")
         ):
-            # Flatten lists (there should be only one for CURRENT usually, but structure is a list of lists)
             entries = []
             for lst in data["MediaListCollection"]["lists"]:
                 entries.extend(lst.get("entries", []))
             return entries
         return []
+
+    def get_user_watching(self, user_id: int) -> List[Dict[str, Any]]:
+        """Get the user's current watching list (CURRENT)."""
+        return self.get_user_list(user_id, "CURRENT")
+
+    def get_user_planning(self, user_id: int) -> List[Dict[str, Any]]:
+        """Get the user's planning list (anime à voir)."""
+        return self.get_user_list(user_id, "PLANNING")
+
+    def get_user_completed(self, user_id: int) -> List[Dict[str, Any]]:
+        """Get the user's completed list."""
+        return self.get_user_list(user_id, "COMPLETED")
+
+    def get_user_dropped(self, user_id: int) -> List[Dict[str, Any]]:
+        """Get the user's dropped list."""
+        return self.get_user_list(user_id, "DROPPED")
+
+    def update_status(self, media_id: int, status: str, progress: int = None) -> bool:
+        """Update the status for a media item. Valid statuses: CURRENT, PLANNING, COMPLETED, DROPPED, PAUSED, REPEATING."""
+        query = """
+        mutation ($mediaId: Int, $status: MediaListStatus, $progress: Int) {
+            SaveMediaListEntry(mediaId: $mediaId, status: $status, progress: $progress) {
+                id
+                progress
+                status
+            }
+        }
+        """
+        variables = {"mediaId": media_id, "status": status}
+        if progress is not None:
+            variables["progress"] = progress
+        data = self._query(query, variables)
+        return data is not None and "SaveMediaListEntry" in data
+
+    def remove_from_list(self, media_id: int) -> bool:
+        """Remove a media item from the user's list by setting status to null (DELETE)."""
+        query = """
+        mutation ($mediaId: Int) {
+            DeleteMediaListEntry(mediaId: $mediaId) {
+                deleted
+            }
+        }
+        """
+        variables = {"mediaId": media_id}
+        data = self._query(query, variables)
+        return data is not None and data.get("DeleteMediaListEntry", {}).get("deleted", False)
 
     def get_media_with_relations(self, media_id: int) -> Optional[Dict[str, Any]]:
         """Get media details including episode count and relations (sequels)."""

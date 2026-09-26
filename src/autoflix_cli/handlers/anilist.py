@@ -9,6 +9,8 @@ from ..cli_utils import (
     print_success,
     get_user_input,
     clean_title,
+    clear_screen,
+    print_header,
 )
 from . import anime_sama as anime_sama_handler
 from ..scraping import anime_sama as anime_sama_scraper
@@ -22,80 +24,341 @@ from ..scraping.objects import ArkMovie
 
 
 def handle_anilist_continue():
-    """Handle the 'Continue from AniList' flow."""
+    """Handle the 'Continue from AniList' flow - main menu."""
     token = tracker.get_anilist_token()
     if not token:
         print_error("Please configure your AniList token in Settings > AniList first.")
         return
 
     anilist_client.set_token(token)
-    print_info("Fetching your watching list from AniList...")
-
-    # Needs user ID first
     user = anilist_client.validate_token()
     if not user:
         print_error("Invalid AniList token.")
         return
 
-    entries = anilist_client.get_user_watching(user["id"])
+    while True:
+        clear_screen()
+        print_header("📋 AniList Lists")
+
+        opts = [
+            "▶ Continue Watching (CURRENT)",
+            "📅 Planning / To Watch (PLANNING)",
+            "✅ Completed (COMPLETED)",
+            "❌ Dropped (DROPPED)",
+            "← Back to Main Menu",
+        ]
+
+        choice = select_from_list(opts, "Select List to Browse:")
+
+        if choice == 0:
+            _browse_anilist_list(user["id"], "CURRENT", "Continue Watching")
+        elif choice == 1:
+            _browse_anilist_list(user["id"], "PLANNING", "Planning")
+        elif choice == 2:
+            _browse_anilist_list(user["id"], "COMPLETED", "Completed")
+        elif choice == 3:
+            _browse_anilist_list(user["id"], "DROPPED", "Dropped")
+        else:
+            break
+
+
+def _browse_anilist_list(user_id: int, status: str, display_name: str):
+    """Browse and interact with an AniList list (CURRENT, PLANNING, COMPLETED, DROPPED)."""
+    print_info(f"Fetching your {display_name.lower()} list from AniList...")
+    entries = anilist_client.get_user_list(user_id, status)
+    
     if not entries:
-        print_warning("No anime currently watching found on AniList.")
+        print_warning(f"No anime found in {display_name}.")
+        from ..cli_utils import pause
+        pause()
         return
 
-    # Create display options
-    display_options = []
-    for e in entries:
-        title = e["media"]["title"]["english"] or e["media"]["title"]["romaji"]
-        progress = e["progress"] or 0
-        total = e["media"]["episodes"] or "?"
+    while True:
+        clear_screen()
+        print_header(f"📋 {display_name}")
 
-        # Calculate latest released episode & episodes behind
-        next_airing = e["media"].get("nextAiringEpisode")
-        latest_released = None
-        if next_airing and isinstance(next_airing, dict) and next_airing.get("episode"):
-            latest_released = max(0, next_airing["episode"] - 1)
-        elif isinstance(e["media"].get("episodes"), int):
-            latest_released = e["media"]["episodes"]
+        display_options = []
+        for e in entries:
+            title = e["media"]["title"]["english"] or e["media"]["title"]["romaji"]
+            progress = e["progress"] or 0
+            total = e["media"]["episodes"] or "?"
+            score = e.get("score")
+            
+            # Calculate latest released episode & episodes behind (like before)
+            next_airing = e["media"].get("nextAiringEpisode")
+            latest_released = None
+            if next_airing and isinstance(next_airing, dict) and next_airing.get("episode"):
+                latest_released = max(0, next_airing["episode"] - 1)
+            elif isinstance(e["media"].get("episodes"), int):
+                latest_released = e["media"]["episodes"]
 
-        if latest_released is not None:
-            behind = max(0, latest_released - progress)
-            behind_str = f"{behind} ep behind" if behind > 0 else "Up to date"
+            if isinstance(total, int) and progress >= total:
+                status_info = f"Finished {progress}/{total}"
+            else:
+                status_info = f"Ep {progress+1}/{total}" if isinstance(total, int) else f"Ep {progress+1}/?"
+
+            if latest_released is not None:
+                behind = max(0, latest_released - progress)
+                if behind > 0:
+                    status_info += f" - {behind} ep behind"
+                else:
+                    status_info += " - Up to date"
+            
+            if score:
+                status_info += f" - ⭐ {score}/100"
+
+            display_options.append(f"{title} ({status_info})")
+
+        display_options.append("← Back")
+
+        choice_idx = select_from_list(display_options, f"Select Anime ({display_name}):")
+        if choice_idx == len(entries):  # Back
+            # Refresh entries in case something changed
+            entries = anilist_client.get_user_list(user_id, status)
+            return
+
+        selected_entry = entries[choice_idx]
+        _handle_entry_actions(user_id, selected_entry, status, entries)
+        
+        # After action, refresh the list
+        entries = anilist_client.get_user_list(user_id, status)
+
+
+def _handle_entry_actions(user_id: int, entry: dict, current_status: str, entries: list):
+    """Handle actions for a selected AniList entry."""
+    media = entry["media"]
+    media_title = media["title"]["english"] or media["title"]["romaji"]
+    media_id = entry["mediaId"]
+    progress = entry["progress"] or 0
+    total = media["episodes"] or "?"
+    
+    while True:
+        clear_screen()
+        print_header(f"📺 {media_title}")
+        
+        status_display = {
+            "CURRENT": "🟢 Currently Watching",
+            "PLANNING": "📅 Planning",
+            "COMPLETED": "✅ Completed",
+            "DROPPED": "❌ Dropped",
+            "PAUSED": "⏸️ Paused",
+        }.get(current_status, current_status)
+        
+        print_info(f"Status: {status_display}")
+        print_info(f"Progress: {progress}/{total}" if isinstance(total, int) else f"Progress: {progress}/{total}")
+        if entry.get("score"):
+            print_info(f"Score: {entry['score']}/100")
+
+        # Build action menu based on current status
+        actions = []
+        
+        if current_status == "CURRENT":
+            actions = [
+                "▶ Continue Watching",
+                "✅ Mark as Completed",
+                "❌ Mark as Dropped",
+                "⏸️ Mark as Paused",
+                "🔄 Update Progress",
+                "← Back to List",
+            ]
+        elif current_status == "PLANNING":
+            actions = [
+                "▶ Start Watching (mark as CURRENT)",
+                "✅ Mark as Completed",
+                "❌ Mark as Dropped",
+                "🗑️ Remove from List",
+                "← Back to List",
+            ]
+        elif current_status == "COMPLETED":
+            actions = [
+                "🔄 Rewatch (mark as CURRENT)",
+                "❌ Mark as Dropped",
+                "🗑️ Remove from List",
+                "← Back to List",
+            ]
+        elif current_status == "DROPPED":
+            actions = [
+                "▶ Give Another Try (mark as CURRENT)",
+                "📅 Move to Planning",
+                "🗑️ Remove from List",
+                "← Back to List",
+            ]
         else:
-            behind_str = None
+            actions = [
+                "🗑️ Remove from List",
+                "← Back to List",
+            ]
 
-        if isinstance(total, int) and progress >= total:
-            status_info = f"Finished {progress}/{total}"
+        action_idx = select_from_list(actions, "Action:")
+
+        # --- CURRENT actions ---
+        if current_status == "CURRENT":
+            if action_idx == 0:  # Continue Watching
+                _continue_watching_entry(user_id, entry)
+                return  # Go back to main AniList menu after watching
+            elif action_idx == 1:  # Mark Completed
+                if anilist_client.update_status(media_id, "COMPLETED", total if isinstance(total, int) else progress):
+                    print_success("Marked as Completed!")
+                else:
+                    print_error("Failed to update status.")
+                from ..cli_utils import pause
+                pause()
+                return
+            elif action_idx == 2:  # Mark Dropped
+                if anilist_client.update_status(media_id, "DROPPED", progress):
+                    print_success("Marked as Dropped!")
+                else:
+                    print_error("Failed to update status.")
+                from ..cli_utils import pause
+                pause()
+                return
+            elif action_idx == 3:  # Mark Paused
+                if anilist_client.update_status(media_id, "PAUSED", progress):
+                    print_success("Marked as Paused!")
+                else:
+                    print_error("Failed to update status.")
+                from ..cli_utils import pause
+                pause()
+                return
+            elif action_idx == 4:  # Update Progress
+                new_progress = get_user_input(f"New episode number (current: {progress})")
+                if new_progress and new_progress.isdigit():
+                    new_progress = int(new_progress)
+                    if anilist_client.update_status(media_id, "CURRENT", new_progress):
+                        print_success(f"Progress updated to episode {new_progress}!")
+                    else:
+                        print_error("Failed to update progress.")
+                else:
+                    print_error("Invalid number or cancelled.")
+                from ..cli_utils import pause
+                pause()
+            else:  # Back
+                return
+
+        # --- PLANNING actions ---
+        elif current_status == "PLANNING":
+            if action_idx == 0:  # Start Watching
+                if anilist_client.update_status(media_id, "CURRENT", 0):
+                    print_success("Moved to Currently Watching!")
+                    _continue_watching_entry(user_id, entry)
+                    return
+                else:
+                    print_error("Failed to update status.")
+                    from ..cli_utils import pause
+                    pause()
+            elif action_idx == 1:  # Mark Completed
+                if anilist_client.update_status(media_id, "COMPLETED", total if isinstance(total, int) else 1):
+                    print_success("Marked as Completed!")
+                else:
+                    print_error("Failed to update status.")
+                from ..cli_utils import pause
+                pause()
+                return
+            elif action_idx == 2:  # Mark Dropped
+                if anilist_client.update_status(media_id, "DROPPED", 0):
+                    print_success("Marked as Dropped!")
+                else:
+                    print_error("Failed to update status.")
+                from ..cli_utils import pause
+                pause()
+                return
+            elif action_idx == 3:  # Remove from List
+                if anilist_client.remove_from_list(media_id):
+                    print_success("Removed from list!")
+                else:
+                    print_error("Failed to remove from list.")
+                from ..cli_utils import pause
+                pause()
+                return
+            else:  # Back
+                return
+
+        # --- COMPLETED actions ---
+        elif current_status == "COMPLETED":
+            if action_idx == 0:  # Rewatch
+                if anilist_client.update_status(media_id, "CURRENT", 0):
+                    print_success("Moved to Currently Watching for rewatch!")
+                    _continue_watching_entry(user_id, entry)
+                    return
+                else:
+                    print_error("Failed to update status.")
+                    from ..cli_utils import pause
+                    pause()
+            elif action_idx == 1:  # Mark Dropped
+                if anilist_client.update_status(media_id, "DROPPED", total if isinstance(total, int) else progress):
+                    print_success("Marked as Dropped!")
+                else:
+                    print_error("Failed to update status.")
+                from ..cli_utils import pause
+                pause()
+                return
+            elif action_idx == 2:  # Remove from List
+                if anilist_client.remove_from_list(media_id):
+                    print_success("Removed from list!")
+                else:
+                    print_error("Failed to remove from list.")
+                from ..cli_utils import pause
+                pause()
+                return
+            else:  # Back
+                return
+
+        # --- DROPPED actions ---
+        elif current_status == "DROPPED":
+            if action_idx == 0:  # Give Another Try
+                if anilist_client.update_status(media_id, "CURRENT", progress):
+                    print_success("Moved to Currently Watching!")
+                    _continue_watching_entry(user_id, entry)
+                    return
+                else:
+                    print_error("Failed to update status.")
+                    from ..cli_utils import pause
+                    pause()
+            elif action_idx == 1:  # Move to Planning
+                if anilist_client.update_status(media_id, "PLANNING", progress):
+                    print_success("Moved to Planning!")
+                else:
+                    print_error("Failed to update status.")
+                from ..cli_utils import pause
+                pause()
+                return
+            elif action_idx == 2:  # Remove from List
+                if anilist_client.remove_from_list(media_id):
+                    print_success("Removed from list!")
+                else:
+                    print_error("Failed to remove from list.")
+                from ..cli_utils import pause
+                pause()
+                return
+            else:  # Back
+                return
         else:
-            status_info = f"Ep {progress+1}/{total}"
+            if action_idx == 0:  # Remove from List
+                if anilist_client.remove_from_list(media_id):
+                    print_success("Removed from list!")
+                else:
+                    print_error("Failed to remove from list.")
+                from ..cli_utils import pause
+                pause()
+                return
+            else:  # Back
+                return
 
-        if behind_str:
-            status = f"{status_info} - {behind_str}"
-        else:
-            status = status_info
 
-        display_options.append(f"{title} ({status})")
-
-    display_options.append("← Back")
-
-    choice_idx = select_from_list(display_options, "Select Anime to Continue:")
-    if choice_idx == len(entries):  # Back
-        return
-
-    selected_entry = entries[choice_idx]
-    media_title = (
-        selected_entry["media"]["title"]["english"]
-        or selected_entry["media"]["title"]["romaji"]
-    )
-    media_id = selected_entry["mediaId"]
-    progress = selected_entry["progress"] or 0
-    total = selected_entry["media"]["episodes"] or "?"
+def _continue_watching_entry(user_id: int, entry: dict):
+    """Launch the provider selection and playback flow for an entry."""
+    media = entry["media"]
+    media_title = media["title"]["english"] or media["title"]["romaji"]
+    media_id = entry["mediaId"]
+    progress = entry["progress"] or 0
+    total = media["episodes"] or "?"
     next_episode_num = progress + 1
+    romaji_title = media["title"]["romaji"]
 
     if isinstance(total, int) and progress >= total:
         print_info(
             f"Target: [cyan]{media_title}[/cyan] - [yellow]Completed ({progress}/{total})[/yellow]"
         )
-        # Reset to last episode for easier replay or just stay at progress
         next_episode_num = progress
     else:
         print_info(f"Target: [cyan]{media_title}[/cyan] - Episode {next_episode_num}")
@@ -107,10 +370,10 @@ def handle_anilist_continue():
     if p_choice == 3:  # Back
         return
 
-    # Extract cover URL for both providers
-    cover_url = selected_entry["media"].get("coverImage", {}).get(
+    # Extract cover URL
+    cover_url = media.get("coverImage", {}).get(
         "large"
-    ) or selected_entry["media"].get("coverImage", {}).get("medium")
+    ) or media.get("coverImage", {}).get("medium")
 
     if p_choice == 1:  # GoldenAnime
         goldenanime.handle_goldenanime_episode(
@@ -120,8 +383,6 @@ def handle_anilist_continue():
             cover_url=cover_url,
         )
         return
-
-    romaji_title = selected_entry["media"]["title"]["romaji"]
 
     if p_choice == 2:  # ArkAnime
         content = _search_and_select_series(arkanime_scraper, media_title, romaji_title)
