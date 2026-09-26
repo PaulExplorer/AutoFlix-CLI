@@ -101,7 +101,7 @@ def play_episode_flow(
             if scraper_results:
                 scraper_names = list(scraper_results.keys())
                 print_success(f"Found {len(scraper_names)} working scraper(s): {', '.join(scraper_names)}")
-                scraper_opts = [f"{name} -> {scraper_results[name][:80]}..." for name in scraper_names]
+                scraper_opts = [f"{name} -> {scraper_results[name]}" for name in scraper_names]
                 scraper_opts.append("← Back to player selection")
                 scraper_idx = select_from_list(scraper_opts, "Select scraper to use:")
 
@@ -110,7 +110,7 @@ def play_episode_flow(
 
                 chosen_name = scraper_names[scraper_idx]
                 stream_url = scraper_results[chosen_name]
-                print_info(f"Using scraper '{chosen_name}' -> {stream_url[:100]}...")
+                print_info(f"Using scraper '{chosen_name}' -> {stream_url}")
 
                 # Create a fake player with the resolved stream URL
                 selected_player = Player(name=f"{selected_player.name} [dev:{chosen_name}]", url=stream_url)
