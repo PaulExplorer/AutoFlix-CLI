@@ -63,12 +63,17 @@ def _is_retryable_status(status):
 
 
 def _is_blocked_page(data, content_type=""):
-    """True when the body looks like an anti-bot/challenge page (or is empty)."""
-    ct = (content_type or "").lower()
-    if "html" in ct:
-        return True
+    """True when the body looks like an anti-bot/challenge page (or is empty).
+
+    Only the body bytes are inspected: some CDNs (e.g. xtremestream's
+    xslecteurcdn*) serve valid MPEG-TS segments with ``Content-Type:
+    text/html`` and a ``.html`` extension, so the content type alone can
+    never decide. Real TS/fMP4/key payloads never start with an HTML tag.
+    """
     head = bytes(data)[:512].lstrip().lower()
-    return not head or head.startswith((b"<html", b"<!doctype html", b"<script"))
+    return not head or head.startswith(
+        (b"<html", b"<!doctype html", b"<script", b"<head", b"<body")
+    )
 
 
 def _client_gone_check(environ):
