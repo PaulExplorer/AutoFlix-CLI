@@ -566,6 +566,11 @@ def _auto_select_season(series_seasons, media_title, romaji_title):
         if match:
             target_season_num = int(match.group(1))
             break
+        # Match patterns like "2nd Season", "1st Season", "3rd Season", "4th Season"
+        match = re.search(r"\b(\d+)(?:st|nd|rd|th)\s+Season\b", t, re.IGNORECASE)
+        if match:
+            target_season_num = int(match.group(1))
+            break
 
     if target_season_num is None:
         for t in [media_title, romaji_title]:
@@ -579,6 +584,11 @@ def _auto_select_season(series_seasons, media_title, romaji_title):
     if target_season_num is not None:
         for i, s in enumerate(series_seasons):
             s_match = re.search(r"(?:Saison|Season)\s+(\d+)", s.title, re.IGNORECASE)
+            if s_match and int(s_match.group(1)) == target_season_num:
+                default_season_idx = i
+                break
+            # Match patterns like "2nd Season", "1st Season", "3rd Season", "4th Season" in provider season titles
+            s_match = re.search(r"\b(\d+)(?:st|nd|rd|th)\s+Season\b", s.title, re.IGNORECASE)
             if s_match and int(s_match.group(1)) == target_season_num:
                 default_season_idx = i
                 break
