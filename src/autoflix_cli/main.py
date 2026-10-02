@@ -50,7 +50,7 @@ def check_language_setup():
         pause()
 
 
-def main():
+def _run():
     # Register Providers
     registry.register(
         "🎌 Anime-Sama (Anime and animated movies)",
@@ -243,6 +243,24 @@ def main():
         # Exit
         print_success("Goodbye!")
         proxy.stop_proxy_server()
+        os._exit(0)
+
+
+def main():
+    """Application entry point with a clean exit on Ctrl-C.
+
+    The installed ``autoflix`` script calls this directly, bypassing the
+    ``__main__`` guard below, so interruption must be handled here to
+    avoid a traceback and to always stop the proxy server.
+    """
+    try:
+        _run()
+    except KeyboardInterrupt:
+        print("\nGoodbye!")
+        try:
+            proxy.stop_proxy_server()
+        except Exception:
+            pass
         os._exit(0)
 
 

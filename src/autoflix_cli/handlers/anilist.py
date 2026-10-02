@@ -536,6 +536,8 @@ def _search_and_select_series(scraper, media_title, romaji_title):
         choice = select_from_list(["Try Manual Search", "Cancel"], "What would you like to do?")
         if choice == 0:
             manual_query = get_user_input("Enter search query")
+            if not manual_query:
+                return None
             results = scraper.search(manual_query)
             if not results:
                 print_error("Still no results found.")

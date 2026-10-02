@@ -135,8 +135,12 @@ def handle_goldenms():
                 return
             elif s_idx == len(sorted_seasons):
                 season_str = get_user_input("Enter season number", default="1")
+                if season_str is None:
+                    return
                 season = int(season_str) if season_str.isdigit() else 1
                 ep_str = get_user_input("Enter episode number", default="1")
+                if ep_str is None:
+                    return
                 episode = int(ep_str) if ep_str.isdigit() else 1
             else:
                 season = sorted_seasons[s_idx]
@@ -154,14 +158,20 @@ def handle_goldenms():
                     return
                 elif ep_idx == len(episodes_list):
                     ep_str = get_user_input("Enter episode number", default="1")
+                    if ep_str is None:
+                        return
                     episode = int(ep_str) if ep_str.isdigit() else 1
                 else:
                     episode = episodes_list[ep_idx][0]
         else:
             season_str = get_user_input("Enter season number", default="1")
+            if season_str is None:
+                return
             season = int(season_str) if season_str.isdigit() else 1
 
             ep_str = get_user_input("Enter episode number", default="1")
+            if ep_str is None:
+                return
             episode = int(ep_str) if ep_str.isdigit() else 1
 
     _flow_goldenms_stream(
