@@ -105,37 +105,9 @@ def _run():
         anilist_resume_idx = -1
 
         if last_watch:
-            series_name = last_watch["series_title"]
-            season_name = last_watch["season_title"]
-            ep_name = last_watch["episode_title"]
+            resume_text = history_ui.format_history_entry(last_watch)
 
-            # Formatting logic similar to history_ui
-            if last_watch["provider"] == "Coflix":
-                if season_name == "Movie" or ep_name == "Movie":
-                    resume_text = f"▶ Resume: {series_name} (Movie)"
-                else:
-                    clean_season = season_name.replace(series_name, "").strip(" -")
-                    if not clean_season:
-                        clean_season = season_name
-                    resume_text = (
-                        f"▶ Resume: {series_name} - {clean_season} - {ep_name}"
-                    )
-            elif last_watch["provider"] == "French-Stream":
-                if season_name == "Movie" or ep_name == "Movie":
-                    resume_text = f"▶ Resume: {series_name} (Movie)"
-                else:
-                    resume_text = f"▶ Resume: {series_name} - {ep_name}"
-            elif last_watch["provider"] == "GoldenAnime":
-                resume_text = f"▶ Resume: {series_name} - {ep_name}"
-            elif last_watch["provider"] == "GoldenMS":
-                if season_name == "Movie" or ep_name == "Movie":
-                    resume_text = f"▶ Resume: {series_name} (Movie)"
-                else:
-                    resume_text = f"▶ Resume: {series_name} - {season_name} - {ep_name}"
-            else:
-                resume_text = f"▶ Resume: {series_name} - {season_name} - {ep_name}"
-
-            menu_items.append(resume_text)
+            menu_items.append(f"▶ Resume: {resume_text}")
             resume_idx = 0
 
         # 2. AniList

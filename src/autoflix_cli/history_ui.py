@@ -26,6 +26,38 @@ def handle_resume(data):
         arkanime.resume_arkanime(data)
 
 
+def format_history_entry(entry: dict) -> str:
+    """Format the 'Series - Season - Episode' part of a history entry.
+
+    Shared by the history view and the home "Resume" shortcut so the
+    two can never diverge.
+    """
+    provider = entry.get("provider", "")
+    series = entry.get("series_title", "")
+    season = entry.get("season_title", "")
+    episode = entry.get("episode_title", "")
+    is_movie = season == "Movie" or episode == "Movie"
+
+    if provider == "Coflix":
+        if is_movie:
+            return f"{series} (Movie)"
+        clean_season = season.replace(series, "").strip(" -")
+        if not clean_season:
+            clean_season = season
+        return f"{series} - {clean_season} - {episode}"
+    if provider == "French-Stream":
+        if is_movie:
+            return f"{series} (Movie)"
+        return f"{series} - {episode}"
+    if provider == "GoldenAnime":
+        return f"{series} - {episode}"
+    if provider == "GoldenMS":
+        if is_movie:
+            return f"{series} (Movie)"
+        return f"{series} - {season} - {episode}"
+    return f"{series} - {season} - {episode}"
+
+
 def handle_history():
     """Display history list and allow resume/delete."""
     while True:
@@ -41,33 +73,7 @@ def handle_history():
         options = []
         for entry in history:
             provider = entry["provider"]
-            series = entry["series_title"]
-            season = entry["season_title"]
-            episode = entry["episode_title"]
-
-            if provider == "Coflix":
-                if season == "Movie" or episode == "Movie":
-                    text = f"[{provider}] {series} (Movie)"
-                else:
-                    clean_season = season.replace(series, "").strip(" -")
-                    if not clean_season:
-                        clean_season = season
-                    text = f"[{provider}] {series} - {clean_season} - {episode}"
-            elif provider == "French-Stream":
-                if season == "Movie" or episode == "Movie":
-                    text = f"[{provider}] {series} (Movie)"
-                else:
-                    text = f"[{provider}] {series} - {episode}"
-            elif provider == "GoldenAnime":
-                text = f"[{provider}] {series} - {episode}"
-            elif provider == "GoldenMS":
-                if season == "Movie" or episode == "Movie":
-                    text = f"[{provider}] {series} (Movie)"
-                else:
-                    text = f"[{provider}] {series} - {season} - {episode}"
-            else:
-                text = f"[{provider}] {series} - {season} - {episode}"
-
+            text = f"[{provider}] {format_history_entry(entry)}"
             options.append(text)
 
         options.append("← Back")
