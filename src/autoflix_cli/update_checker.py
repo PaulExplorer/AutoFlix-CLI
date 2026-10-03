@@ -46,7 +46,7 @@ def check_update(package_name: str = "autoflix-cli"):
     if latest_version and _version_tuple(latest_version) > _version_tuple(current_version):
         panel_content = Text()
         panel_content.append(
-            f"\nExample: A new version of {package_name} is available!\n",
+            f"\nA new version of {package_name} is available!\n",
             style="bold yellow",
         )
         panel_content.append(f"Installed: {current_version}\n", style="red")
