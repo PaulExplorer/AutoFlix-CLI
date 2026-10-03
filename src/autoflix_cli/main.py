@@ -27,8 +27,6 @@ from .handlers import (
 from . import history_ui
 from . import proxy
 import sys
-import os
-import signal
 
 
 def check_language_setup():
@@ -243,7 +241,7 @@ def _run():
         # Exit
         print_success("Goodbye!")
         proxy.stop_proxy_server()
-        os._exit(0)
+        return
 
 
 def main():
@@ -261,13 +259,8 @@ def main():
             proxy.stop_proxy_server()
         except Exception:
             pass
-        os._exit(0)
+        sys.exit(0)
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\nGoodbye!")
-        proxy.stop_proxy_server()
-        os._exit(0)
+    main()
