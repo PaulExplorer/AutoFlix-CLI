@@ -7,6 +7,14 @@ from platformdirs import user_data_dir
 from urllib.parse import urlparse
 
 
+def _entry_sort_key(entry: Dict[str, Any]) -> datetime:
+    """Sort key for history entries; malformed dates sort last."""
+    try:
+        return datetime.fromisoformat(entry.get("last_watched") or "")
+    except (ValueError, TypeError):
+        return datetime.min
+
+
 class ProgressTracker:
     def __init__(self):
         self.app_name = "AutoFlixCLI"
@@ -25,6 +33,13 @@ class ProgressTracker:
             with open(self.data_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError):
+            # Keep a backup of the corrupt file before starting fresh,
+            # so no history is silently lost.
+            try:
+                backup = self.data_file.with_suffix(".json.bak")
+                self.data_file.replace(backup)
+            except OSError:
+                pass
             return {}
 
     def _save_data(self):
@@ -123,10 +138,9 @@ class ProgressTracker:
             return []
 
         entries = list(self.data["history"].values())
-        # Parse date and sort
-        entries.sort(
-            key=lambda x: datetime.fromisoformat(x["last_watched"]), reverse=True
-        )
+        # Parse date and sort; malformed entries go last instead of
+        # crashing the whole history menu.
+        entries.sort(key=_entry_sort_key, reverse=True)
         return entries
 
     def delete_history_item(self, provider: str, series_title: str):
@@ -138,15 +152,20 @@ class ProgressTracker:
         if key in self.data["history"]:
             del self.data["history"][key]
 
-            # If this was the last global watched, we might want to clear it or find the next one
-            # For simplicity, we just check if it matches and clear it
+            # If this was the last global watched, resume the most
+            # recent remaining entry (if any) instead of losing it.
             last_global = self.data.get("last_watched_global")
             if (
                 last_global
                 and last_global.get("provider") == provider
                 and last_global.get("series_title") == series_title
             ):
-                self.data["last_watched_global"] = None
+                remaining = list(self.data["history"].values())
+                if remaining:
+                    remaining.sort(key=_entry_sort_key, reverse=True)
+                    self.data["last_watched_global"] = remaining[0]
+                else:
+                    self.data["last_watched_global"] = None
 
             self._save_data()
 
