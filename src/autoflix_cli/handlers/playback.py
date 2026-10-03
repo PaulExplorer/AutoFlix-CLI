@@ -59,7 +59,7 @@ def play_episode_flow(
         for p in supported_players:
             try:
                 player_options.append(f"{p.name} : {p.url.split('/')[2].split('.')[-2]}")
-            except:
+            except (IndexError, AttributeError):
                 player_options.append(p.name)
             player_map.append(p)
 
@@ -72,7 +72,7 @@ def play_episode_flow(
             for p in unsupported_players:
                 try:
                     domain = p.url.split('/')[2].split('.')[-2]
-                except:
+                except (IndexError, AttributeError):
                     domain = p.url
                 player_options.append(f"⚠ {p.name} ({domain}) [NOT SUPPORTED]")
                 player_map.append(p)

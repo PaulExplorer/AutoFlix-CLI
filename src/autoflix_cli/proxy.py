@@ -369,7 +369,7 @@ def proxy_stream():
 
     try:
         headers = json.loads(headers_str)
-    except:
+    except ValueError:
         headers = {}
 
     # 1. Fetch original M3U8 content
@@ -436,7 +436,7 @@ def proxy_ts():
 
     try:
         headers = json.loads(headers_str)
-    except:
+    except ValueError:
         headers = {}
 
     # mpv issues Range requests for byterange-based HLS (EXT-X-BYTERANGE, some
@@ -481,7 +481,7 @@ def proxy_video():
 
     try:
         headers = json.loads(headers_str)
-    except:
+    except ValueError:
         headers = {}
 
     # Fetch stream
