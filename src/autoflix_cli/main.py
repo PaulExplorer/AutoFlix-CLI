@@ -26,6 +26,7 @@ from .handlers import (
 )
 from . import history_ui
 from . import proxy
+from .log import setup_logging
 import sys
 
 
@@ -49,6 +50,8 @@ def check_language_setup():
 
 
 def _run():
+    setup_logging()
+
     # Register Providers
     registry.register(
         "🎌 Anime-Sama (Anime and animated movies)",

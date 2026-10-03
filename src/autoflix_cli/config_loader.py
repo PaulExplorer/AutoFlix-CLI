@@ -2,6 +2,8 @@ import json
 import re
 from curl_cffi import requests
 
+from .log import log
+
 
 def strip_json_comments(json_str: str) -> str:
     """
@@ -35,7 +37,7 @@ def load_remote_jsonc(url: str, default: dict) -> dict:
 
         return json.loads(clean_json)
     except Exception as e:
-        print(f"Warning: Failed to load remote config from {url}: {e}")
+        log.warning("Failed to load remote config from %s: %s", url, e)
         return default
 
 
@@ -58,7 +60,7 @@ def load_local_jsonc(file_path: str, default: dict = None) -> dict:
 
         return json.loads(clean_json)
     except Exception as e:
-        print(f"Warning: Failed to load local config from {file_path}: {e}")
+        log.warning("Failed to load local config from %s: %s", file_path, e)
         return default or {}
 
 

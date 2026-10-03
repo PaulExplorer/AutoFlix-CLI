@@ -2,6 +2,8 @@ import json
 from curl_cffi import requests
 from typing import Optional, Dict, Any, List
 
+from .log import log
+
 
 class AniListClient:
     def __init__(self, token: Optional[str] = None):
@@ -33,11 +35,11 @@ class AniListClient:
             response.raise_for_status()
             data = response.json()
             if "errors" in data:
-                print(f"AniList API Error: {data['errors']}")
+                log.warning("AniList API Error: %s", data["errors"])
                 return None
             return data["data"]
         except Exception as e:
-            print(f"Request Error: {e}")
+            log.warning("Request Error: %s", e)
             return None
 
     def validate_token(self) -> Optional[Dict[str, Any]]:

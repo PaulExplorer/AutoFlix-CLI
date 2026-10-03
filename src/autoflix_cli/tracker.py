@@ -6,6 +6,8 @@ from typing import Optional, Dict, Any
 from platformdirs import user_data_dir
 from urllib.parse import urlparse
 
+from .log import log
+
 
 def _entry_sort_key(entry: Dict[str, Any]) -> datetime:
     """Sort key for history entries; malformed dates sort last."""
@@ -49,7 +51,7 @@ class ProgressTracker:
             with open(self.data_file, "w", encoding="utf-8") as f:
                 json.dump(self.data, f, indent=4, ensure_ascii=False)
         except OSError as e:
-            print(f"Warning: Could not save progress: {e}")
+            log.warning("Could not save progress: %s", e)
 
     def _to_relative(self, url: str) -> str:
         """Convert an absolute URL to a relative path."""

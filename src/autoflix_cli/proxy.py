@@ -10,6 +10,8 @@ import m3u8
 from flask import Flask, request, Response, stream_with_context
 from curl_cffi import requests, CurlOpt
 
+from .log import log
+
 # Global Configuration
 PROXY_PORT = 0
 PROXY_HOST = "127.0.0.1"
@@ -186,8 +188,11 @@ def fetch_with_retry(url, headers, method="GET", stream=False, max_retries=3):
         except Exception as e:
             attempt += 1
             if attempt >= max_retries:
-                print(
-                    f"[ERROR] Failed to fetch {url} after {max_retries} attempts: {e}"
+                log.warning(
+                    "Failed to fetch %s after %s attempts: %s",
+                    url,
+                    max_retries,
+                    e,
                 )
                 return None
             # Backoff with a little jitter: ~0.5s, then ~1s, etc.
@@ -277,8 +282,11 @@ def fetch_segment(url, headers, environ=None, client_range=None, max_retries=3):
         except Exception as e:
             attempt += 1
             if attempt >= max_retries:
-                print(
-                    f"[ERROR] Failed to fetch {url} after {max_retries} attempts: {e}"
+                log.warning(
+                    "Failed to fetch %s after %s attempts: %s",
+                    url,
+                    max_retries,
+                    e,
                 )
                 return None, None, {}
             # Simple backoff with jitter: waits ~0.5s, then ~1s, etc.
@@ -419,7 +427,7 @@ def proxy_stream():
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def catch_all(path):
-    print(f"[PROXY 404 HIT] Invalid path requested: {path}")
+    log.debug("Invalid path requested: %s", path)
     return f"Not Found: {path}", 404
 
 
@@ -809,7 +817,7 @@ def start_proxy_server(port=0):
     t.daemon = True
     t.start()
 
-    print(f"[*] M3U8 Proxy started on http://{PROXY_HOST}:{PROXY_PORT}")
+    log.info("M3U8 proxy started on http://%s:%s", PROXY_HOST, PROXY_PORT)
     return port
 
 
