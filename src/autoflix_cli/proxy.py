@@ -56,8 +56,10 @@ def make_proxy_url(endpoint, original_uri, base_uri, headers):
     )
 
 
-# Statuses browsers / hls.js treat as transient and retry (fragment or playlist).
-TRANSIENT_STATUS = {403, 404, 410, 429}
+# Statuses worth retrying: rate limits, challenges and server
+# errors. 404/410 are permanent: retrying them only wastes
+# time (the URL will never come back to life).
+TRANSIENT_STATUS = {403, 429}
 
 
 def _is_retryable_status(status):
@@ -131,14 +133,16 @@ def get_or_create_session(url, fresh=False):
     if cache_key not in _session_cache:
         session = requests.Session(impersonate="chrome", allow_redirects="safe")
         session.curl_options.update(DNS_OPTIONS)
-        # curl_cffi converts the per-request `timeout` into a low-speed abort
-        # for streamed transfers (LOW_SPEED_LIMIT=1 over `timeout` seconds).
-        # These session-level options are applied last (they override the
-        # per-request ones), so a CDN that stalls briefly no longer kills the
-        # segment at 15s. The 15s connect timeout is still enforced separately.
+        # For streamed transfers curl_cffi turns the per-request
+        # timeout into a low-speed abort (LOW_SPEED_LIMIT=1 over
+        # `timeout` seconds). Session-level options are applied
+        # last (they override the per-request ones), so this caps
+        # the grace period for a stalled CDN at 30s instead of
+        # letting a dead transfer hang for a minute. The connect
+        # timeout comes from the per-request REQUEST_TIMEOUT.
         session.curl_options.update(
             {
-                CurlOpt.LOW_SPEED_TIME: 60,
+                CurlOpt.LOW_SPEED_TIME: 30,
                 CurlOpt.LOW_SPEED_LIMIT: 1,
             }
         )
@@ -157,6 +161,13 @@ def get_or_create_session(url, fresh=False):
     return _session_cache[cache_key]
 
 
+# Per-request timeout for streamed transfers, as (connect, read).
+# curl_cffi maps it to a 5s connect timeout plus a low-speed
+# abort; a CDN that never connects now fails fast instead of
+# stalling the player for 15s per attempt.
+REQUEST_TIMEOUT = (5, 30)
+
+
 def fetch_with_retry(url, headers, method="GET", stream=False, max_retries=3):
     attempt = 0
 
@@ -164,6 +175,7 @@ def fetch_with_retry(url, headers, method="GET", stream=False, max_retries=3):
         # First attempt reuses pooled connections; retries go through a fresh
         # session/connection (hls.js-style retry after a failed fetch).
         session = get_or_create_session(url, fresh=(attempt > 0))
+        started = time.monotonic()
         try:
             # Forward the Range header if present (for MP4 seeking)
             req_headers = dict(headers or {})
@@ -175,7 +187,7 @@ def fetch_with_retry(url, headers, method="GET", stream=False, max_retries=3):
                 url=url,
                 headers=req_headers,
                 stream=stream,
-                timeout=15,  # Reasonable timeout
+                timeout=REQUEST_TIMEOUT,
             )
 
             # Transient error (rate limit / 5xx / challenge) -> retry
@@ -186,27 +198,37 @@ def fetch_with_retry(url, headers, method="GET", stream=False, max_retries=3):
             return response
 
         except Exception as e:
+            log.debug(
+                "Fetch attempt %s/%s for %s failed after %.1fs: %s",
+                attempt + 1,
+                max_retries,
+                url,
+                time.monotonic() - started,
+                e,
+            )
             attempt += 1
             if attempt >= max_retries:
                 log.warning(
-                    "Failed to fetch %s after %s attempts: %s",
+                    "Failed to fetch %s after %s attempts (%.1fs): %s",
                     url,
                     max_retries,
+                    time.monotonic() - started,
                     e,
                 )
                 return None
-            # Backoff with a little jitter: ~0.5s, then ~1s, etc.
-            time.sleep(0.5 * attempt + random.uniform(0, 0.5))
+            # Backoff with a little jitter: ~0.3s, then ~0.6s, etc.
+            time.sleep(0.3 * attempt + random.uniform(0, 0.3))
 
 
-def fetch_segment(url, headers, environ=None, client_range=None, max_retries=3):
+def fetch_segment(url, headers, environ=None, client_range=None, max_retries=2):
     """Download a full segment/key/init body before serving it, with retries.
 
     Unlike fetch_with_retry this reads the whole body into memory (and verifies
     it) before anything is sent downstream, so a flaky CDN can no longer
     truncate a segment mid-transfer. Client Range requests (mpv byterange HLS,
     seeking) are forwarded and answered with the exact slice as a 206.
-    retries mimic the fragment-retry behavior of browser players.
+    Two attempts are enough: the player (mpv/ffmpeg) retries segments
+    itself, so proxy-side retries only multiply the delay.
 
     Returns ``(data, status_code, extra_headers)`` or ``(None, None, {})``
     after ``max_retries``. Raises ``_SegmentCancelled`` when the client is
@@ -217,6 +239,7 @@ def fetch_segment(url, headers, environ=None, client_range=None, max_retries=3):
 
     while attempt < max_retries:
         response = None
+        started = time.monotonic()
         try:
             # First attempt reuses pooled connections; any retry goes through
             # a brand-new session/connection (browser-style segment retries).
@@ -231,7 +254,7 @@ def fetch_segment(url, headers, environ=None, client_range=None, max_retries=3):
                 url=url,
                 headers=req_headers,
                 stream=True,
-                timeout=15,  # connect timeout; low-speed grace is 60s
+                timeout=REQUEST_TIMEOUT,
             )
 
             status = response.status_code
@@ -280,17 +303,26 @@ def fetch_segment(url, headers, environ=None, client_range=None, max_retries=3):
         except _SegmentCancelled:
             raise
         except Exception as e:
+            log.debug(
+                "Segment attempt %s/%s for %s failed after %.1fs: %s",
+                attempt + 1,
+                max_retries,
+                url,
+                time.monotonic() - started,
+                e,
+            )
             attempt += 1
             if attempt >= max_retries:
                 log.warning(
-                    "Failed to fetch %s after %s attempts: %s",
+                    "Failed to fetch %s after %s attempts (%.1fs): %s",
                     url,
                     max_retries,
+                    time.monotonic() - started,
                     e,
                 )
                 return None, None, {}
-            # Simple backoff with jitter: waits ~0.5s, then ~1s, etc.
-            time.sleep(0.5 * attempt + random.uniform(0, 0.5))
+            # Simple backoff with jitter: waits ~0.3s, then ~0.6s, etc.
+            time.sleep(0.3 * attempt + random.uniform(0, 0.3))
         finally:
             if response is not None:
                 try:
