@@ -184,7 +184,7 @@ def _run():
                         tracker.set_anilist_token(new_token)
                         print_success("Token saved.")
                         pause()
-                if s_choice == 1:
+                elif s_choice == 1:
                     langs = get_all_languages()
                     l_choice = select_from_list(
                         [l[1] for l in langs], "Select Language:"
@@ -193,7 +193,7 @@ def _run():
                     print_success(f"Language updated to: {langs[l_choice][1]}")
                     pause()
 
-                if s_choice == 2:
+                elif s_choice == 2:
 
                     players = get_all_players()
                     p_choice = select_from_list(
@@ -203,13 +203,13 @@ def _run():
                     print_success(f"Player updated to: {players[p_choice][1]}")
                     pause()
 
-                if s_choice == 3:
+                elif s_choice == 3:
                     tracker.set_developer_mode(not dev_mode)
                     state = "enabled" if not dev_mode else "disabled"
                     print_success(f"Developer mode {state}.")
                     pause()
 
-                if s_choice >= 4:
+                elif s_choice >= 4:
                     break
             continue
 
