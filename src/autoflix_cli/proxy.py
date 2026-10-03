@@ -711,10 +711,8 @@ def proxy_player_ui():
 
 @app.route("/player/subtitle")
 def proxy_player_subtitle():
-    import os
-
     sub_path = request.args.get("path")
-    if not sub_path or not os.path.exists(sub_path):
+    if not _is_allowed_subtitle_path(sub_path):
         return "Subtitle not found", 404
 
     try:
@@ -741,6 +739,29 @@ def proxy_player_subtitle():
         )
     except Exception as e:
         return f"Error loading subtitle: {e}", 500
+
+
+def _is_allowed_subtitle_path(path: str | None) -> bool:
+    """Only serve subtitle files downloaded by this app to the temp dir.
+
+    ``_download_subtitles`` (player_manager) stores them with the
+    ``autoflix_sub_`` prefix inside ``tempfile.gettempdir()``; any
+    other path is rejected so the route cannot be used to read
+    arbitrary local files.
+    """
+    if not path:
+        return False
+    import tempfile
+    from pathlib import Path
+
+    try:
+        resolved = Path(path).resolve()
+        temp_root = Path(tempfile.gettempdir()).resolve()
+        return resolved.is_relative_to(temp_root) and resolved.name.startswith(
+            "autoflix_sub_"
+        )
+    except (OSError, ValueError):
+        return False
 
 
 @app.route("/player/heartbeat")
