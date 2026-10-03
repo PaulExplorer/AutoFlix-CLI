@@ -101,7 +101,11 @@ DEFAULT_PLAYERS = {
     "veev": {"type": "veev", "ext": "mp4"},
     "xtremestream": {"type": "xtremestream"},
     "montmyoboky": {"type": "montmyoboky"},
-    "vidzy": { "type": "vidzy", "referrer": "https://vidzy.org/", }
+    "vidzy": { "type": "vidzy", "referrer": "https://vidzy.org/", },
+    "voe": { "type": "voe" },
+    "voe.sx": { "type": "voe" },
+    "jeremyparticipantanything": { "type": "voe" },
+    "teresapoliticallearn": { "type": "voe" }
 }
 
 DEFAULT_NEW_URL = {
