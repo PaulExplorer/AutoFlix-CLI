@@ -294,6 +294,83 @@ def test_get_player_modes():
     assert pm.get_player_modes("unknown") == ("proxy",)
 
 
+def test_launch_player_dispatches_to_requested_mode(monkeypatch):
+    calls = []
+    monkeypatch.setattr(proxy, "PROXY_URL", "http://127.0.0.1:9999")
+    monkeypatch.setattr(
+        pm, "_get_player_executable", lambda code: f"/usr/bin/{code}"
+    )
+    monkeypatch.setattr(
+        pm,
+        "_play_direct",
+        lambda *a, **kw: calls.append(("direct", a[5])) or True,
+    )
+    monkeypatch.setattr(
+        pm,
+        "_play_via_proxy",
+        lambda *a, **kw: calls.append(("proxy", a[6])) or True,
+    )
+    monkeypatch.setattr(
+        pm, "_play_in_browser", lambda *a, **kw: calls.append(("browser", None)) or True
+    )
+
+    kwargs = dict(
+        stream_url="https://cdn/f.m3u8",
+        headers={},
+        player_config={},
+        is_mp4=False,
+        referer="https://e.com/",
+        domain="e.com",
+        title="T",
+        subtitle_paths=[],
+    )
+    pm._launch_player(player_code="mpv", mode="direct", **kwargs)
+    pm._launch_player(player_code="mpv", mode="proxy", **kwargs)
+    pm._launch_player(player_code="browser", mode="proxy", **kwargs)
+
+    assert calls == [("direct", "mpv"), ("proxy", "mpv"), ("browser", None)]
+
+
+def test_launch_player_unknown_mode():
+    assert (
+        pm._launch_player(
+            stream_url="https://cdn/f.m3u8",
+            headers={},
+            player_config={},
+            player_code="mpv",
+            mode="nope",
+            is_mp4=False,
+            referer="",
+            domain="cdn",
+            title="T",
+            subtitle_paths=[],
+        )
+        is False
+    )
+
+
+def test_devtest_candidates_cover_every_mode():
+    from autoflix_cli.handlers.devtest import _launch_candidates
+
+    candidates = _launch_candidates({})
+    assert set(candidates) == {
+        ("mpv", "proxy"),
+        ("mpv", "direct"),
+        ("vlc", "proxy"),
+        ("vlc", "direct"),
+        ("browser", "proxy"),
+    }
+    # A browser is never offered in direct mode
+    assert ("browser", "direct") not in candidates
+
+
+def test_devtest_candidates_put_current_mode_first():
+    from autoflix_cli.handlers.devtest import _launch_candidates
+
+    candidates = _launch_candidates({"modes": {"mpv": "direct"}})
+    assert candidates[0] == ("mpv", "direct")
+
+
 def test_match_player_config():
     config = player.players["vidoza"]
     assert pm._match_player_config("https://vidoza.stream/e/abc") == (

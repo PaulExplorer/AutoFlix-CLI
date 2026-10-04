@@ -1,5 +1,19 @@
-from ..cli_utils import get_user_input, pause, print_error, print_info, print_success
+import os
+import time
+
+from ..cli_utils import (
+    confirm,
+    get_user_input,
+    pause,
+    print_divider,
+    print_error,
+    print_header,
+    print_info,
+    print_success,
+    print_warning,
+)
 from ..scraping.player import PLAYER_EXTRACTORS, test_all_scrapers_verbose
+from .. import player_manager as pm
 
 
 def handle_dev_scraper_test() -> None:
@@ -23,4 +37,160 @@ def handle_dev_scraper_test() -> None:
         print_success(f"{len(working)} working scraper(s): {', '.join(working)}")
     else:
         print_info("No scraper extracted a stream from this URL.")
+    pause()
+
+
+def _ask_headers() -> dict:
+    """Ask for the embed page headers, as an optional JSON object."""
+    raw = get_user_input(
+        'Headers as JSON, e.g. {"Referer": "https://x.com/"} (empty = none)'
+    )
+    if not raw:
+        return {}
+
+    import json
+
+    try:
+        headers = json.loads(raw)
+    except ValueError as e:
+        print_error(f"Invalid JSON headers: {e}")
+        return {}
+
+    if not isinstance(headers, dict):
+        print_error("Headers must be a JSON object.")
+        return {}
+    return headers
+
+
+def _launch_candidates(player_config: dict) -> list:
+    """Build the (player, mode) combinations available for this embed."""
+    candidates = []
+    for player_code, modes in pm.PLAYER_MODES.items():
+        for mode in modes:
+            candidates.append((player_code, mode))
+
+    # Put the combination the config currently resolves to first.
+    current = pm.resolve_launch_mode(player_config, "mpv")
+    candidates.sort(key=lambda c: 0 if c[1] == current else 1)
+    return candidates
+
+
+def handle_dev_playback_mode_test() -> None:
+    """Try every player/mode combination on an embed and report what works."""
+    url = get_user_input("Paste embed URL to test")
+    if not url:
+        return
+
+    headers = _ask_headers()
+    player_config, matched = pm._match_player_config(url)
+
+    print_divider()
+    if matched:
+        print_info(f"Matched embed config: [cyan]{matched}[/cyan]")
+    else:
+        print_warning("No embed config matched this URL (defaults will be used).")
+    print_info(f"Config: {player_config}")
+    print_divider()
+
+    stream_url, subtitle_url = pm._resolve_stream(url, headers, False)
+    if not stream_url:
+        print_error("Could not resolve the stream URL, aborting.")
+        pause()
+        return
+
+    print_success(f"Stream URL: [cyan]{stream_url}[/cyan]")
+
+    try:
+        domain = url.split("/")[2].lower()
+    except IndexError:
+        domain = ""
+
+    referer = pm._compute_referer(url, headers, player_config, domain, False)
+    title = "AutoFlix Mode Test"
+    subtitle_paths = (
+        pm._download_subtitles([subtitle_url]) if subtitle_url else []
+    )
+
+    results = []
+    try:
+        for player_code, mode in _launch_candidates(player_config):
+            executable = pm._get_player_executable(player_code)
+            if executable is None:
+                print_warning(
+                    f"Skipping [bold cyan]{player_code}[/bold cyan]: not installed."
+                )
+                continue
+
+            print_divider()
+            label = f"{player_code} / {mode}"
+            active = pm.resolve_launch_mode(player_config, player_code) == mode
+            marker = " [cyan](current default)[/cyan]" if active else ""
+            print_header(f"Test: {label}{marker}")
+
+            if not confirm("Launch this combination?"):
+                print_info("Skipped.")
+                results.append((player_code, mode, "skipped"))
+                continue
+
+            started = time.time()
+            try:
+                ok = pm._launch_player(
+                    stream_url=stream_url,
+                    headers=headers,
+                    player_config=player_config,
+                    player_code=player_code,
+                    mode=mode,
+                    is_mp4=player_config.get("ext") == "mp4",
+                    referer=referer,
+                    domain=domain,
+                    title=title,
+                    subtitle_paths=subtitle_paths,
+                )
+            except Exception as e:  # a broken player must not kill the tester
+                print_error(f"Unexpected error: {e}")
+                ok = False
+
+            elapsed = time.time() - started
+            if ok:
+                print_success(f"{label} played in {elapsed:.1f}s")
+                results.append((player_code, mode, "ok"))
+            else:
+                print_error(f"{label} failed after {elapsed:.1f}s")
+                results.append((player_code, mode, "failed"))
+    finally:
+        for path in subtitle_paths:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    _report_mode_results(results)
+
+
+def _report_mode_results(results: list) -> None:
+    """Summarise the test run and suggest the config to pin the winner."""
+    print_divider()
+    print_header("Results")
+    for player_code, mode, status in results:
+        icon = {"ok": "[green]OK[/green]", "failed": "[red]FAILED[/red]"}.get(
+            status, "[yellow]skipped[/yellow]"
+        )
+        print_info(f"  {player_code} / {mode}: {icon}")
+
+    working = {p for p, m, s in results if s == "ok" and m == "direct"}
+    if working:
+        print_success(
+            "Direct mode works with: " + ", ".join(sorted(working))
+        )
+        print_info('Pin it in players_info.jsonc with:')
+        entries = ", ".join(f'"{p}": "direct"' for p in sorted(working))
+        print_info(f'  "modes": {{ {entries} }}')
+    else:
+        print_info("No combination played in direct mode, keep the proxy.")
+
+    saved = pm._write_dev_debug_report(
+        [f"[dev] {p} / {m}: {s}" for p, m, s in results]
+    )
+    if saved:
+        print_info(f"Report saved to: {saved}")
     pause()

@@ -26,7 +26,10 @@ from .handlers import (
 )
 from . import history_ui
 from . import proxy
-from .handlers.devtest import handle_dev_scraper_test
+from .handlers.devtest import (
+    handle_dev_playback_mode_test,
+    handle_dev_scraper_test,
+)
 from .log import apply_developer_logging, setup_logging
 import sys
 
@@ -178,6 +181,7 @@ def _run():
                 ]
                 if dev_mode:
                     opts.append("Test embed URL (dev)")
+                    opts.append("Test playback modes (dev)")
                 opts.append("Back")
 
                 s_choice = select_from_list(opts, "Select Setting:")
@@ -216,6 +220,8 @@ def _run():
 
                 elif dev_mode and s_choice == 4:
                     handle_dev_scraper_test()
+                elif dev_mode and s_choice == 5:
+                    handle_dev_playback_mode_test()
 
                 else:
                     break
