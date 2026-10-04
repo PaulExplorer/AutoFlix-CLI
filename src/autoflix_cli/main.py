@@ -26,7 +26,8 @@ from .handlers import (
 )
 from . import history_ui
 from . import proxy
-from .log import setup_logging
+from .handlers.devtest import handle_dev_scraper_test
+from .log import apply_developer_logging, setup_logging
 import sys
 
 
@@ -51,6 +52,7 @@ def check_language_setup():
 
 def _run():
     setup_logging()
+    apply_developer_logging(tracker.get_developer_mode())
 
     # Register Providers
     registry.register(
@@ -173,8 +175,10 @@ def _run():
                     f"Update Language ({lang_display})",
                     f"Choose default Player ({player_display})",
                     f"Developer Mode ({dev_display})",
-                    "Back",
                 ]
+                if dev_mode:
+                    opts.append("Test embed URL (dev)")
+                opts.append("Back")
 
                 s_choice = select_from_list(opts, "Select Setting:")
 
@@ -205,11 +209,15 @@ def _run():
 
                 elif s_choice == 3:
                     tracker.set_developer_mode(not dev_mode)
+                    apply_developer_logging(not dev_mode)
                     state = "enabled" if not dev_mode else "disabled"
                     print_success(f"Developer mode {state}.")
                     pause()
 
-                elif s_choice >= 4:
+                elif dev_mode and s_choice == 4:
+                    handle_dev_scraper_test()
+
+                else:
                     break
             continue
 

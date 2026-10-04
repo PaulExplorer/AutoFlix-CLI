@@ -8,8 +8,31 @@ from ..cli_utils import (
 from ..player_manager import play_video
 from ..tracker import tracker
 from ..scraping import player
-from ..scraping.player import PLAYER_EXTRACTORS, test_all_scrapers
+from ..scraping.player import PLAYER_EXTRACTORS, test_all_scrapers_verbose
 from ..scraping.objects import Player
+import json
+
+
+def _print_dev_episode_context(
+    episode: object,
+    selected_player: object,
+    headers: dict,
+    series_url: str,
+    season_url: str,
+) -> None:
+    """Show episode and embed details before resolving the stream."""
+    embed_url = getattr(selected_player, "url", "")
+    matched = next(
+        (name for name in player.players if name in embed_url.lower()), "none"
+    )
+    config = player.players.get(matched, {})
+    print_info(f"[dev] episode URL: {getattr(episode, 'url', '')}")
+    print_info(f"[dev] series URL: {series_url}")
+    print_info(f"[dev] season URL: {season_url}")
+    print_info(f"[dev] embed URL: {embed_url}")
+    print_info(f"[dev] headers: {json.dumps(headers or {})}")
+    print_info(f"[dev] matched player: {matched}")
+    print_info(f"[dev] extractor type: {config.get('type', 'unknown')}")
 
 
 def play_episode_flow(
@@ -96,7 +119,15 @@ def play_episode_flow(
         # --- Dev mode: test unsupported players with all scrapers ---
         if not player.is_supported(selected_player.url):
             print_info(f"Testing {selected_player.name} with all available scrapers...")
-            scraper_results = test_all_scrapers(selected_player.url, headers)
+            verbose_results = test_all_scrapers_verbose(selected_player.url, headers)
+            for name, res in verbose_results.items():
+                if res["ok"]:
+                    print_success(f"{name} [{res['elapsed']:.1f}s] -> {res['stream_url']}")
+                else:
+                    print_info(f"{name} [{res['elapsed']:.1f}s] failed: {res['error']}")
+            scraper_results = {
+                n: r["stream_url"] for n, r in verbose_results.items() if r["ok"]
+            }
 
             if scraper_results:
                 scraper_names = list(scraper_results.keys())
@@ -121,6 +152,11 @@ def play_episode_flow(
 
         # Construct title for player window
         window_title = f"{series_title} - {season_title} - {episode.title}"
+
+        if dev_mode:
+            _print_dev_episode_context(
+                episode, selected_player, headers, series_url, season_url
+            )
 
         success = play_video(
             selected_player.url,

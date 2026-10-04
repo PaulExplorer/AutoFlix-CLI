@@ -438,6 +438,44 @@ def _play_direct(
     return False
 
 
+def _write_dev_debug_report(lines: list) -> str | None:
+    """Save dev stream details to a file. Returns the path or None."""
+    try:
+        debug_dir = tracker.data_dir / "dev_debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        path = debug_dir / f"stream-{time.strftime('%Y%m%d-%H%M%S')}.txt"
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return str(path)
+    except OSError:
+        return None
+
+
+def _print_dev_stream_details(
+    url: str,
+    headers: dict,
+    matched_player: str,
+    player_config: dict,
+    stream_url: str | None,
+    extracted_sub: str | None,
+) -> None:
+    """Show resolved stream details in developer mode and save them."""
+    extractor = (player_config or {}).get("type", "direct" if stream_url else "unknown")
+    lines = [
+        "[dev] embed URL: " + url,
+        "[dev] headers: " + json.dumps(headers or {}),
+        "[dev] matched player: " + (matched_player or "none"),
+        "[dev] extractor type: " + str(extractor),
+        "[dev] player config: " + json.dumps(player_config or {}),
+        "[dev] stream URL: " + str(stream_url),
+        "[dev] subtitle URL: " + str(extracted_sub),
+    ]
+    for line in lines:
+        print_info(line)
+    saved = _write_dev_debug_report(lines)
+    if saved:
+        print_info(f"[dev] details saved to: {saved}")
+
+
 def play_video(
     url: str,
     headers: dict,
@@ -474,12 +512,18 @@ def play_video(
     try:
         # Determine player configuration
         player_config = {}
+        matched_player = ""
         for player_name, config in player.players.items():
             if player_name in url.lower():
                 player_config = config
+                matched_player = player_name
                 break
 
         stream_url, extracted_sub = _resolve_stream(url, headers, is_direct)
+        if tracker.get_developer_mode():
+            _print_dev_stream_details(
+                url, headers, matched_player, player_config, stream_url, extracted_sub
+            )
         if extracted_sub and not subtitle_url:
             subtitle_url = extracted_sub
 

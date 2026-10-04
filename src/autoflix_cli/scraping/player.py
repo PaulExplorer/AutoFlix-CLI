@@ -12,6 +12,7 @@ from urllib.parse import quote
 import json
 import binascii
 import os
+import time
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
@@ -881,6 +882,49 @@ def is_supported(url: str) -> bool:
     return any(player in url_lower for player in players.keys())
 
 
+def test_all_scrapers_verbose(url: str, headers: dict = {}) -> dict[str, dict]:
+    """
+    Test all scrapers with timing and error details.
+
+    Args:
+        url: Player URL to test
+        headers: HTTP headers for the request (default: {})
+
+    Returns:
+        dict mapping scraper name -> {"ok": bool, "stream_url": str | None,
+        "error": str | None, "elapsed": float}
+    """
+    results: dict[str, dict] = {}
+    for name, extractor in PLAYER_EXTRACTORS.items():
+        started = time.monotonic()
+        try:
+            result = extractor(url, headers, {})
+            elapsed = time.monotonic() - started
+            stream_url = result[0] if isinstance(result, tuple) else result
+            if stream_url:
+                results[name] = {
+                    "ok": True,
+                    "stream_url": stream_url,
+                    "error": None,
+                    "elapsed": elapsed,
+                }
+            else:
+                results[name] = {
+                    "ok": False,
+                    "stream_url": None,
+                    "error": "no stream found",
+                    "elapsed": elapsed,
+                }
+        except Exception as e:
+            results[name] = {
+                "ok": False,
+                "stream_url": None,
+                "error": f"{type(e).__name__}: {e}",
+                "elapsed": time.monotonic() - started,
+            }
+    return results
+
+
 def test_all_scrapers(url: str, headers: dict = {}) -> dict[str, str]:
     """
     Test all available scrapers on a given URL to find which ones work.
@@ -892,17 +936,8 @@ def test_all_scrapers(url: str, headers: dict = {}) -> dict[str, str]:
     Returns:
         dict mapping scraper name -> stream URL for scrapers that succeeded
     """
-    results = {}
-    for name, extractor in PLAYER_EXTRACTORS.items():
-        try:
-            result = extractor(url, headers, {})
-            if result:
-                if isinstance(result, tuple):
-                    stream_url = result[0]
-                else:
-                    stream_url = result
-                if stream_url:
-                    results[name] = stream_url
-        except Exception:
-            pass
-    return results
+    return {
+        name: res["stream_url"]
+        for name, res in test_all_scrapers_verbose(url, headers).items()
+        if res["ok"]
+    }
