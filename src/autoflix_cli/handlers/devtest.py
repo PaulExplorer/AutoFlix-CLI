@@ -42,6 +42,32 @@ def handle_dev_scraper_test() -> None:
     pause()
 
 
+def _ask_headers() -> dict:
+    """Ask for the embed page headers as a JSON object (all optional).
+
+    Most headers are computed from the embed config, but some providers
+    (Coflix being one) require their own Referer to be forwarded as is.
+    """
+    raw = get_user_input(
+        'Headers as JSON, e.g. {"Referer": "https://coflix.domains"} (empty = none)'
+    )
+    if not raw:
+        return {}
+
+    import json
+
+    try:
+        headers = json.loads(raw)
+    except ValueError as e:
+        print_error(f"Invalid JSON headers: {e}")
+        return {}
+
+    if not isinstance(headers, dict):
+        print_error("Headers must be a JSON object.")
+        return {}
+    return headers
+
+
 def _launch_candidates(player_config: dict) -> list:
     """Build the (player, mode) combinations available for this embed."""
     candidates = []
@@ -76,6 +102,8 @@ def handle_dev_playback_mode_test() -> None:
     arkanime.get_website_url()
 
     headers = {"Referer": arkanime.website_origin}
+    headers.update(_ask_headers())
+
     stream_url, subtitle_url = pm._resolve_stream(url, headers, False)
     if not stream_url:
         print_error("Could not resolve the stream URL, aborting.")
