@@ -1,5 +1,6 @@
 import os
 import time
+from urllib.parse import urlparse
 
 from ..cli_utils import (
     confirm,
@@ -13,6 +14,7 @@ from ..cli_utils import (
     print_warning,
 )
 from ..scraping.player import PLAYER_EXTRACTORS, test_all_scrapers_verbose
+from ..scraping import arkanime
 from .. import player_manager as pm
 
 
@@ -40,28 +42,6 @@ def handle_dev_scraper_test() -> None:
     pause()
 
 
-def _ask_headers() -> dict:
-    """Ask for the embed page headers, as an optional JSON object."""
-    raw = get_user_input(
-        'Headers as JSON, e.g. {"Referer": "https://x.com/"} (empty = none)'
-    )
-    if not raw:
-        return {}
-
-    import json
-
-    try:
-        headers = json.loads(raw)
-    except ValueError as e:
-        print_error(f"Invalid JSON headers: {e}")
-        return {}
-
-    if not isinstance(headers, dict):
-        print_error("Headers must be a JSON object.")
-        return {}
-    return headers
-
-
 def _launch_candidates(player_config: dict) -> list:
     """Build the (player, mode) combinations available for this embed."""
     candidates = []
@@ -81,7 +61,6 @@ def handle_dev_playback_mode_test() -> None:
     if not url:
         return
 
-    headers = _ask_headers()
     player_config, matched = pm._match_player_config(url)
 
     print_divider()
@@ -92,6 +71,11 @@ def handle_dev_playback_mode_test() -> None:
     print_info(f"Config: {player_config}")
     print_divider()
 
+    # Some extractors (montmyoboky) resolve streams through a provider API
+    # whose origin is only set once that provider has been opened.
+    arkanime.get_website_url()
+
+    headers = {"Referer": arkanime.website_origin}
     stream_url, subtitle_url = pm._resolve_stream(url, headers, False)
     if not stream_url:
         print_error("Could not resolve the stream URL, aborting.")
@@ -103,7 +87,9 @@ def handle_dev_playback_mode_test() -> None:
     try:
         domain = url.split("/")[2].lower()
     except IndexError:
-        domain = ""
+        # Shorthand embeds ("montmyoboky:9646") have no host: the stream
+        # lives on the provider, so its origin is the relevant one.
+        domain = urlparse(arkanime.website_origin).hostname or ""
 
     referer = pm._compute_referer(url, headers, player_config, domain, False)
     title = "AutoFlix Mode Test"
