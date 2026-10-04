@@ -1,3 +1,51 @@
+// ============================================================================
+// Per-embed configuration for AutoFlix-CLI (JSONC: // comments allowed).
+// Key = a fragment of the embed host, matched against the embed URL.
+// ============================================================================
+//
+// type        Which extractor in scraping/player.py resolves the m3u8.
+//             Values: default, sendvid, sibnet, uqload, vidoza, filemoon,
+//             kakaflix, myvidplay, vidmoly, embed4me, veev, xtremestream,
+//             montmyoboky, vidzy, voe.
+//
+// mode        DEFAULT MODE FOR EVERY PLAYER. "proxy" or "direct".
+//             Optional (defaults to "proxy"). Kept for backward
+//             compatibility, prefer "modes" below.
+//
+// modes       PER-PLAYER MODE, overrides "mode".
+//             "modes": { "mpv": "direct", "vlc": "proxy" }
+//             "proxy"  = stream through the local proxy (curl_cffi,
+//                        browser-like TLS, retries, buffering). Works
+//                        everywhere, but adds a layer of latency.
+//             "direct" = hand the upstream URL + headers straight to the
+//                        player. Faster and more stable for mpv, but the
+//                        player must be able to fake the headers itself,
+//                        which rules out Cloudflare-protected hosts.
+//             Only "mpv" and "vlc" accept "direct"; a browser player always
+//             goes through the proxy (no way to set a Referer on a <video>).
+//             Use the "Test playback modes" dev tool to find what works,
+//             then pin it here.
+//
+// referrer    Referer sent upstream. "full" = the whole embed page URL,
+//             "path" = the host root, or any explicit URL string.
+//
+// alt-used    Add "Alt-Used: <embed domain>" (some CDNs need it).
+//
+// sec_headers Extra Sec-Fetch-* headers, as "Name: value;Name2: value2",
+//             or true for the default iframe-like set. Unset means the
+//             default iframe set is used in direct mode.
+//
+// no-header   Send no Referer/custom header at all. Widespread on mp4 hosts.
+//
+// ext         "mp4" when the stream is a progressive file, so the proxy
+//             serves ranges correctly instead of rewriting a playlist.
+//
+// mpv_options Extra mpv CLI options, ONLY used in "direct" mode.
+//             e.g. "mpv_options": ["--tls-verify=no"]
+//
+// url-replacements   String replacements applied to the decoded page.
+// ============================================================================
+
 {
   "wishonly": {
     "type": "default",

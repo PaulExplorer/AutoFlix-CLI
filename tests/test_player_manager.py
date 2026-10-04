@@ -3,6 +3,7 @@ import urllib.parse
 
 from autoflix_cli import player_manager as pm
 from autoflix_cli import proxy
+from autoflix_cli.scraping import player
 
 
 def test_guess_subtitle_ext():
@@ -72,3 +73,231 @@ def test_resolve_stream_direct(monkeypatch):
         "https://x.com/f.mp4",
         None,
     )
+
+
+def test_resolve_launch_mode_defaults_to_proxy():
+    # Existing configs without any mode key must keep using the proxy.
+    assert pm.resolve_launch_mode({}, "mpv") == "proxy"
+    assert pm.resolve_launch_mode(None, "vlc") == "proxy"
+    assert pm.resolve_launch_mode({"type": "default"}, "mpv") == "proxy"
+
+
+def test_resolve_launch_mode_legacy_key():
+    assert pm.resolve_launch_mode({"mode": "direct"}, "mpv") == "direct"
+    assert pm.resolve_launch_mode({"mode": "proxy"}, "mpv") == "proxy"
+
+
+def test_resolve_launch_mode_per_player():
+    config = {"modes": {"mpv": "direct", "vlc": "proxy"}}
+    assert pm.resolve_launch_mode(config, "mpv") == "direct"
+    assert pm.resolve_launch_mode(config, "vlc") == "proxy"
+    # Not listed -> legacy key -> default
+    assert pm.resolve_launch_mode({"modes": {"mpv": "direct"}}, "vlc") == "proxy"
+    # Per-player entry wins over the legacy global key
+    config = {"mode": "direct", "modes": {"mpv": "proxy"}}
+    assert pm.resolve_launch_mode(config, "mpv") == "proxy"
+    assert pm.resolve_launch_mode(config, "vlc") == "direct"
+
+
+def test_resolve_launch_mode_browser_is_proxy_only():
+    # A browser cannot carry a Referer on the upstream request.
+    assert pm.resolve_launch_mode({"modes": {"browser": "direct"}}, "browser") == (
+        "proxy"
+    )
+
+
+def test_resolve_launch_mode_invalid_falls_back_to_proxy():
+    assert pm.resolve_launch_mode({"mode": "dirtect"}, "mpv") == "proxy"
+    assert pm.resolve_launch_mode({"modes": {"mpv": True}}, "mpv") == "proxy"
+
+
+def test_build_direct_headers_comma_separated():
+    config = {"alt-used": True, "sec_headers": "A: 1;B: 2"}
+    built = pm._build_direct_headers(
+        {"User-Agent": "ua"}, "https://ref.com/page", config, "ref.com"
+    )
+    pairs = dict(item.split(": ", 1) for item in built.split(","))
+    assert pairs["Origin"] == "https://ref.com"
+    assert "Referer" not in pairs  # passed via --referrer
+    assert "User-Agent" not in pairs  # passed via --user-agent
+    assert pairs["Alt-Used"] == "ref.com"
+    assert pairs["A"] == "1"
+    assert pairs["B"] == "2"
+    assert "Sec-Fetch-Dest" not in pairs
+
+
+def test_build_direct_headers_default_sec_headers():
+    built = pm._build_direct_headers({}, "https://ref.com/", {}, "ref.com")
+    pairs = dict(item.split(": ", 1) for item in built.split(","))
+    assert pairs["Sec-Fetch-Dest"] == "iframe"
+    assert pairs["Sec-Fetch-Mode"] == "navigate"
+    assert pairs["Sec-Fetch-Site"] == "same-origin"
+    assert pairs["Origin"] == "https://ref.com"
+
+
+def test_build_direct_headers_sec_headers_true():
+    config = {"sec_headers": True}
+    built = pm._build_direct_headers({}, "https://ref.com/", config, "ref.com")
+    assert "Sec-Fetch-Dest: iframe" in built
+
+
+def test_build_direct_headers_no_header():
+    config = {"no-header": True, "alt-used": True}
+    assert pm._build_direct_headers({"User-Agent": "ua"}, "https://ref.com/", config, "ref.com") == ""
+
+
+def test_build_direct_headers_without_referer():
+    # Must not raise: a direct URL may carry no Referer at all.
+    built = pm._build_direct_headers({}, "", {}, "")
+    assert "Origin" not in built
+
+
+def test_origin_from_referer():
+    assert pm._origin_from_referer("https://a.com/x?y=1") == "https://a.com"
+    assert pm._origin_from_referer("http://a.com:8080/") == "http://a.com:8080"
+    assert pm._origin_from_referer("") == ""
+    assert pm._origin_from_referer("not a url") == ""
+
+
+def test_compute_referer():
+    config = {"referrer": "full"}
+    assert (
+        pm._compute_referer("https://e.com/embed", {}, config, "e.com", False)
+        == "https://e.com/embed/"
+    )
+    # An already complete URL is left untouched
+    assert (
+        pm._compute_referer("https://e.com/embed/", {}, config, "e.com", False)
+        == "https://e.com/embed/"
+    )
+    config = {"referrer": "path"}
+    assert pm._compute_referer("https://e.com/a/b", {}, config, "e.com", False) == (
+        "https://e.com/"
+    )
+    config = {"referrer": "https://other.com/"}
+    assert pm._compute_referer("https://e.com/a", {}, config, "e.com", False) == (
+        "https://other.com/"
+    )
+    # No referrer setting -> domain root
+    assert pm._compute_referer("https://e.com/a", {}, {}, "e.com", False) == (
+        "https://e.com/"
+    )
+    # Direct URLs reuse the header provided by the caller
+    assert pm._compute_referer(
+        "https://cdn/f.m3u8", {"Referer": "https://e.com/"}, {}, "cdn", True
+    ) == "https://e.com/"
+
+
+def test_build_direct_command_mpv():
+    cmd = pm._build_direct_command(
+        "https://cdn/f.m3u8",
+        {"User-Agent": "ua"},
+        {"referrer": "https://e.com/"},
+        "https://e.com/",
+        "e.com",
+        "mpv",
+        "/usr/bin/mpv",
+        "My Title",
+        ["/tmp/sub.srt"],
+    )
+    assert cmd[0] == "/usr/bin/mpv"
+    assert "--referrer=https://e.com/" in cmd
+    assert "--user-agent=ua" in cmd
+    assert any(c.startswith("--http-header-fields=Origin: https://e.com") for c in cmd)
+    assert "--title=My Title" in cmd
+    assert "--sub-file=/tmp/sub.srt" in cmd
+    # Direct playback is more resilient than the bare default
+    assert any(c.startswith("--stream-lavf-o=reconnect=1") for c in cmd)
+    # The URL is always the last argument
+    assert cmd[-1] == "https://cdn/f.m3u8"
+
+
+def test_build_direct_command_mpv_options():
+    config = {"mpv_options": ["--tls-verify=no", "--demuxer-max-bytes=64MiB"]}
+    cmd = pm._build_direct_command(
+        "https://cdn/f.m3u8", {}, config, "", "cdn", "mpv", "mpv", "T", []
+    )
+    assert "--tls-verify=no" in cmd
+    assert "--demuxer-max-bytes=64MiB" in cmd
+
+
+def test_build_direct_command_vlc():
+    cmd = pm._build_direct_command(
+        "https://cdn/f.mp4",
+        {"User-Agent": "ua"},
+        {},
+        "https://e.com/",
+        "e.com",
+        "vlc",
+        "/usr/bin/vlc",
+        "T",
+        [],
+    )
+    assert ":http-referrer=https://e.com/" in cmd
+    assert ":http-user-agent=ua" in cmd
+    assert "--meta-title=T" in cmd
+    assert cmd[-1] == "https://cdn/f.mp4"
+
+
+def test_build_proxy_command(monkeypatch):
+    monkeypatch.setattr(proxy, "PROXY_URL", "http://127.0.0.1:9999")
+    cmd = pm._build_proxy_command(
+        "https://cdn/f.m3u8",
+        {"User-Agent": "ua"},
+        {},
+        "https://e.com/",
+        "e.com",
+        False,
+        "mpv",
+        "mpv",
+        "T",
+        ["/tmp/sub.srt"],
+    )
+    assert cmd[0] == "mpv"
+    assert cmd[1].startswith("http://127.0.0.1:9999/stream?url=")
+    assert "--title=T" in cmd
+    assert "--sub-file=/tmp/sub.srt" in cmd
+
+
+def test_build_proxy_command_without_proxy(monkeypatch):
+    monkeypatch.setattr(proxy, "PROXY_URL", None)
+    assert (
+        pm._build_proxy_command(
+            "https://cdn/f.m3u8", {}, {}, "", "cdn", False, "mpv", "mpv", "T", []
+        )
+        is None
+    )
+
+
+def test_build_browser_player_url(monkeypatch):
+    monkeypatch.setattr(proxy, "PROXY_URL", "http://127.0.0.1:9999")
+    url = pm._build_browser_player_url(
+        "https://cdn/f.m3u8", {}, {}, "https://e.com/", "e.com", False, None
+    )
+    assert url.startswith("http://127.0.0.1:9999/player?url=")
+    assert "sub_path" not in url
+
+
+def test_build_browser_player_url_without_proxy(monkeypatch):
+    monkeypatch.setattr(proxy, "PROXY_URL", None)
+    assert (
+        pm._build_browser_player_url(
+            "https://cdn/f.m3u8", {}, {}, "", "cdn", False, None
+        )
+        is None
+    )
+
+
+def test_get_player_modes():
+    assert pm.get_player_modes("mpv") == ("proxy", "direct")
+    assert pm.get_player_modes("browser") == ("proxy",)
+    assert pm.get_player_modes("unknown") == ("proxy",)
+
+
+def test_match_player_config():
+    config = player.players["vidoza"]
+    assert pm._match_player_config("https://vidoza.stream/e/abc") == (
+        config,
+        "vidoza",
+    )
+    assert pm._match_player_config("https://unknown-host.tld/e") == ({}, "")
