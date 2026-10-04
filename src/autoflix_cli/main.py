@@ -26,6 +26,7 @@ from .handlers import (
 )
 from . import history_ui
 from . import proxy
+from .handlers.devtest import handle_dev_scraper_test
 from .log import apply_developer_logging, setup_logging
 import sys
 
@@ -174,8 +175,10 @@ def _run():
                     f"Update Language ({lang_display})",
                     f"Choose default Player ({player_display})",
                     f"Developer Mode ({dev_display})",
-                    "Back",
                 ]
+                if dev_mode:
+                    opts.append("Test embed URL (dev)")
+                opts.append("Back")
 
                 s_choice = select_from_list(opts, "Select Setting:")
 
@@ -211,7 +214,10 @@ def _run():
                     print_success(f"Developer mode {state}.")
                     pause()
 
-                elif s_choice >= 4:
+                elif dev_mode and s_choice == 4:
+                    handle_dev_scraper_test()
+
+                else:
                     break
             continue
 
