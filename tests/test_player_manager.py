@@ -207,9 +207,11 @@ def test_build_direct_command_mpv():
     assert "--title=My Title" in cmd
     assert "--sub-file=/tmp/sub.srt" in cmd
     # Direct playback is more resilient than the bare default
-    assert any(c.startswith("--stream-lavf-o=reconnect=1") for c in cmd)
-    # reconnect_at_eof makes ffmpeg retry every clean EOF and stall playback
-    assert "reconnect_at_eof" not in " ".join(cmd)
+    assert any(c.startswith("--stream-lavf-o=reconnect_streamed=1") for c in cmd)
+    # These retry every clean EOF and stall playback with "End of file" logs
+    joined = " ".join(cmd)
+    assert "reconnect_at_eof" not in joined
+    assert "reconnect=1" not in joined
     # The URL is always the last argument
     assert cmd[-1] == "https://cdn/f.m3u8"
 

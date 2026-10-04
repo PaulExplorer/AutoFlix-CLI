@@ -128,8 +128,9 @@ def handle_dev_playback_mode_test() -> None:
     results = []
     try:
         for player_code, mode in _launch_candidates(player_config):
-            executable = pm._get_player_executable(player_code)
-            if executable is None:
+            # The browser player has no executable to look up, it just needs
+            # a working webbrowser.open().
+            if player_code != "browser" and pm._get_player_executable(player_code) is None:
                 print_warning(
                     f"Skipping [bold cyan]{player_code}[/bold cyan]: not installed."
                 )

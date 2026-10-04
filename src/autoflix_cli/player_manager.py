@@ -52,13 +52,13 @@ DEFAULT_IFRAME_SEC_HEADERS = {
 
 # Applied in direct mode so mpv recovers from dead segments / flaky CDNs
 # instead of dying on the first error (ffmpeg protocol options).
-# reconnect_at_eof is deliberately left off: it makes ffmpeg retry every clean
-# end of stream and log "Will reconnect at N in X second(s), error=End of
-# file", which adds a delay before playback without fixing anything.
+# "reconnect" and "reconnect_at_eof" are deliberately left off: they make
+# ffmpeg retry every clean end of stream and stall playback while logging
+# "Will reconnect at N in X second(s), error=End of file".
 DEFAULT_DIRECT_MPV_OPTIONS = (
     "--cache=yes",
-    "--stream-lavf-o=reconnect=1,reconnect_streamed=1,"
-    "reconnect_on_network_error=1,reconnect_delay_max=4",
+    "--stream-lavf-o=reconnect_streamed=1,reconnect_on_network_error=1,"
+    "reconnect_delay_max=4",
 )
 
 
