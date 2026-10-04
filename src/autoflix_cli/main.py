@@ -26,7 +26,7 @@ from .handlers import (
 )
 from . import history_ui
 from . import proxy
-from .log import setup_logging
+from .log import apply_developer_logging, setup_logging
 import sys
 
 
@@ -51,6 +51,7 @@ def check_language_setup():
 
 def _run():
     setup_logging()
+    apply_developer_logging(tracker.get_developer_mode())
 
     # Register Providers
     registry.register(
@@ -205,6 +206,7 @@ def _run():
 
                 elif s_choice == 3:
                     tracker.set_developer_mode(not dev_mode)
+                    apply_developer_logging(not dev_mode)
                     state = "enabled" if not dev_mode else "disabled"
                     print_success(f"Developer mode {state}.")
                     pause()
