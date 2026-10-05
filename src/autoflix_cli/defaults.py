@@ -1,5 +1,25 @@
 # Default configurations acting as fallback
 # These values are used if remote configuration cannot be loaded
+#
+# This is a plain Python mirror of data/players_info.jsonc, kept in sync by hand.
+# See the comment block at the top of that file for what every key does.
+#
+# Launch mode keys (remembered here for quick reference):
+#   mode        Default mode for every player: "proxy" or "direct"
+#               (optional, defaults to "proxy").
+#   modes       Per-player mode, overrides "mode":
+#               "modes": {"mpv": "direct", "vlc": "proxy"}
+#               "proxy"  -> through the local proxy (curl_cffi, browser-like
+#                            TLS, retries, buffering); works everywhere.
+#               "direct" -> upstream URL + headers handed to the player
+#                            itself; faster, but the player must be able to
+#                            fake the headers, which Cloudflare hosts refuse.
+#               Only mpv and vlc accept "direct": a browser player always
+#               goes through the proxy, since a Referer cannot be set on a
+#               <video> tag. Use the "Test playback modes" dev tool to find
+#               what works on a given embed, then pin it here.
+#   mpv_options Extra mpv CLI options, only used in "direct" mode.
+#               e.g. "mpv_options": ["--tls-verify=no"]
 
 DEFAULT_PLAYERS = {
     "wishonly": {
@@ -16,10 +36,7 @@ DEFAULT_PLAYERS = {
     "vidmoly": {"type": "vidmoly"},
     # "oneupload": {"type": "default"},
     "tipfly": {"type": "default"},
-    "lulustream": {
-        "type": "default",
-        "url-replacements": {"cdn-tnmr": "tnmr"},
-    },
+    "lulustream": {"type": "default"},
     "luluvdo": {"type": "default"},
     "luluvdoo": {"type": "default"},
     "luluvid": {"type": "default"},

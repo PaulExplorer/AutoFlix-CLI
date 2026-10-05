@@ -25,6 +25,42 @@ DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0"
 )
 
+# Launch modes: "proxy" streams through the local Flask proxy (curl_cffi,
+# impersonated TLS, retry/buffering), "direct" hands the upstream URL and the
+# headers over to the external player.
+MODE_PROXY = "proxy"
+MODE_DIRECT = "direct"
+VALID_MODES = (MODE_PROXY, MODE_DIRECT)
+DEFAULT_MODE = MODE_PROXY
+
+# Modes each player code is able to use. A browser plays the URL inside a web
+# player page served by the proxy, so it can never play the upstream URL
+# directly: there would be no way to set the Referer header.
+PLAYER_MODES: Dict[str, tuple] = {
+    "mpv": (MODE_PROXY, MODE_DIRECT),
+    "vlc": (MODE_PROXY, MODE_DIRECT),
+    "browser": (MODE_PROXY,),
+}
+
+# Sec-Fetch-* values sent when an embed declares no explicit sec_headers:
+# they emulate the iframe context the real web player would use.
+DEFAULT_IFRAME_SEC_HEADERS = {
+    "Sec-Fetch-Dest": "iframe",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+}
+
+# Applied in direct mode so mpv recovers from dead segments / flaky CDNs
+# instead of dying on the first error (ffmpeg protocol options).
+# "reconnect" and "reconnect_at_eof" are deliberately left off: they make
+# ffmpeg retry every clean end of stream and stall playback while logging
+# "Will reconnect at N in X second(s), error=End of file".
+DEFAULT_DIRECT_MPV_OPTIONS = (
+    "--cache=yes",
+    "--stream-lavf-o=reconnect_streamed=1,reconnect_on_network_error=1,"
+    "reconnect_delay_max=4",
+)
+
 
 def _guess_subtitle_ext(url: str) -> str:
     """Guess a subtitle file extension from its URL (.ass/.vtt/.srt...)."""
@@ -90,6 +126,55 @@ def get_all_players():
     return [(code, f"{player['display']}") for code, player in PLAYERS.items()]
 
 
+def get_player_modes(player_code: str) -> tuple:
+    """Return the launch modes supported by a player code."""
+    return PLAYER_MODES.get(player_code, (MODE_PROXY,))
+
+
+def resolve_launch_mode(player_config: dict, player_code: str) -> str:
+    """
+    Resolve how a player must open the stream: through the proxy or directly.
+
+    Precedence: the per-player "modes" entry, then the legacy global "mode"
+    key, then the default. Unknown or unsupported values fall back to the
+    proxy, which is the mode known to work everywhere.
+
+    Args:
+        player_config: Configuration of the matched embed player
+        player_code: Player code ("mpv", "vlc", "browser")
+
+    Returns:
+        MODE_PROXY or MODE_DIRECT
+    """
+    player_config = player_config or {}
+    supported = get_player_modes(player_code)
+
+    mode = None
+    modes = player_config.get("modes")
+    if isinstance(modes, dict):
+        mode = modes.get(player_code)
+    elif isinstance(modes, str):
+        mode = modes
+    if mode is None:
+        mode = player_config.get("mode", DEFAULT_MODE)
+
+    if not isinstance(mode, str) or mode not in VALID_MODES:
+        if mode is not None:
+            print_warning(
+                f"Unknown launch mode '{mode}' for {player_code}, using '{DEFAULT_MODE}'."
+            )
+        return DEFAULT_MODE
+
+    if mode not in supported:
+        fallback = DEFAULT_MODE if DEFAULT_MODE in supported else supported[0]
+        print_warning(
+            f"{player_code} does not support '{mode}' mode, using '{fallback}'."
+        )
+        return fallback
+
+    return mode
+
+
 def get_vlc_path():
     """
     Find the VLC executable path.
@@ -134,6 +219,15 @@ def get_vlc_path():
     return None
 
 
+def _get_player_executable(player_code: str) -> str | None:
+    """Locate a player executable (the browser player needs none)."""
+    if player_code == "browser":
+        return None
+    if player_code == "vlc":
+        return get_vlc_path()
+    return shutil.which(player_code)
+
+
 def handle_player_error(context: str = "player") -> int:
     """
     Handle player errors and ask user what they want to do.
@@ -159,6 +253,34 @@ def _player_exit_hint(code: int) -> str:
 
 class _PlaybackAborted(Exception):
     """Playback failed in a way that must not offer a retry."""
+
+
+def _match_player_config(url: str) -> tuple:
+    """Find the embed configuration matching the player host of an URL."""
+    for embed_name, config in player.players.items():
+        if embed_name in url.lower():
+            return config, embed_name
+    return {}, ""
+
+
+def _compute_referer(
+    url: str, headers: dict, player_config: dict, domain: str, is_direct: bool
+) -> str:
+    """Compute the Referer to use for the upstream request."""
+    if is_direct:
+        return headers.get("Referer", "")
+
+    setting = (player_config or {}).get("referrer")
+    if setting == "full":
+        referer = url
+    elif setting == "path":
+        referer = f"https://{domain}/"
+    elif isinstance(setting, str):
+        referer = setting
+    else:
+        referer = f"https://{domain}/"
+
+    return referer if referer.endswith("/") else f"{referer}/"
 
 
 def _resolve_stream(url: str, headers: dict, is_direct: bool):
@@ -237,6 +359,147 @@ def _build_proxy_url(
     )
 
 
+def _origin_from_referer(referer: str) -> str:
+    """Build an Origin header value (scheme://host[:port]) from a referer."""
+    if not referer:
+        return ""
+
+    parsed = urllib.parse.urlparse(referer)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _build_direct_headers(
+    headers: dict, referer: str, player_config: dict, domain: str
+) -> str:
+    """
+    Build the mpv --http-header-fields value used for direct playback.
+
+    mpv expects a comma separated list of "Field: value" pairs. Referer and
+    User-Agent are left out because they have dedicated mpv options.
+    """
+    player_config = player_config or {}
+    if player_config.get("no-header") is True:
+        return ""
+
+    direct_headers = _build_upstream_headers(headers, referer, player_config, domain)
+    direct_headers.pop("Referer", None)
+    direct_headers.pop("User-Agent", None)
+
+    origin = _origin_from_referer(referer)
+    if origin:
+        direct_headers.setdefault("Origin", origin)
+
+    sec_headers = player_config.get("sec_headers")
+    if not isinstance(sec_headers, str) or not sec_headers.strip():
+        direct_headers.update(DEFAULT_IFRAME_SEC_HEADERS)
+
+    return ",".join(f"{key}: {value}" for key, value in direct_headers.items())
+
+
+def _extra_player_options(player_config: dict) -> list:
+    """Extra CLI options for direct playback ("mpv_options" in the config)."""
+    extra = (player_config or {}).get("mpv_options") or []
+    if isinstance(extra, str):
+        extra = extra.split()
+    return [str(option) for option in extra]
+
+
+def _build_proxy_command(
+    stream_url: str,
+    headers: dict,
+    player_config: dict,
+    referer: str,
+    domain: str,
+    is_mp4: bool,
+    player_code: str,
+    player_executable: str,
+    title: str,
+    subtitle_paths: list,
+) -> list | None:
+    """Build the external player command line pointing at the local proxy."""
+    proxy_headers = _build_upstream_headers(headers, referer, player_config, domain)
+    local_stream_url = _build_proxy_url(
+        stream_url, proxy_headers, player_config, is_mp4
+    )
+    if local_stream_url is None:
+        return None
+
+    cmd = [player_executable, local_stream_url]
+    if player_code == "vlc":
+        cmd.append(f"--meta-title={title}")
+    else:
+        cmd.append(f"--title={title}")
+
+    for path in subtitle_paths:
+        cmd.append(f"--sub-file={path}")
+
+    return cmd
+
+
+def _build_direct_command(
+    stream_url: str,
+    headers: dict,
+    player_config: dict,
+    referer: str,
+    domain: str,
+    player_code: str,
+    player_executable: str,
+    title: str,
+    subtitle_paths: list,
+) -> list:
+    """Build the external player command line pointing at the upstream URL."""
+    user_agent = headers.get("User-Agent", DEFAULT_USER_AGENT)
+
+    cmd = [player_executable]
+    if player_code == "vlc":
+        cmd += [f":http-referrer={referer}", f":http-user-agent={user_agent}"]
+        cmd.append(f"--meta-title={title}")
+    else:
+        cmd += [
+            f"--referrer={referer}",
+            f"--user-agent={user_agent}",
+            f"--http-header-fields={_build_direct_headers(headers, referer, player_config, domain)}",
+            f"--title={title}",
+        ]
+        cmd += list(DEFAULT_DIRECT_MPV_OPTIONS)
+        cmd += _extra_player_options(player_config)
+
+    for path in subtitle_paths:
+        cmd.append(f"--sub-file={path}")
+
+    cmd.append(stream_url)
+    return cmd
+
+
+def _build_browser_player_url(
+    stream_url: str,
+    headers: dict,
+    player_config: dict,
+    referer: str,
+    domain: str,
+    is_mp4: bool,
+    subtitle_path: str | None,
+) -> str | None:
+    """Build the web player URL opened in the system browser."""
+    proxy_headers = _build_upstream_headers(headers, referer, player_config, domain)
+    local_stream_url = _build_proxy_url(
+        stream_url, proxy_headers, player_config, is_mp4
+    )
+    if local_stream_url is None:
+        return None
+
+    browser_player_url = (
+        f"{proxy.PROXY_URL}/player?url={urllib.parse.quote(local_stream_url)}"
+    )
+    if subtitle_path:
+        browser_player_url += f"&sub_path={urllib.parse.quote(os.path.abspath(subtitle_path))}"
+
+    return browser_player_url
+
+
 def _play_in_browser(
     stream_url: str,
     headers: dict,
@@ -249,25 +512,12 @@ def _play_in_browser(
     """Open the stream in the system browser via the web player."""
     print_info("Launching [bold cyan]Browser[/bold cyan] Player...")
 
-    proxy_headers = _build_upstream_headers(
-        headers, referer, player_config, domain
+    browser_player_url = _build_browser_player_url(
+        stream_url, headers, player_config, referer, domain, is_mp4, subtitle_path
     )
-    local_stream_url = _build_proxy_url(
-        stream_url, proxy_headers, player_config, is_mp4
-    )
-    if local_stream_url is None:
+    if browser_player_url is None:
         print_error("Proxy server not initialized.")
         return False
-
-    encoded_local_stream_url = urllib.parse.quote(local_stream_url)
-    browser_player_url = (
-        f"{proxy.PROXY_URL}/player?url={encoded_local_stream_url}"
-    )
-
-    if subtitle_path:
-        abs_sub_path = os.path.abspath(subtitle_path)
-        encoded_sub = urllib.parse.quote(abs_sub_path)
-        browser_player_url += f"&sub_path={encoded_sub}"
 
     # Reset heartbeat and event
     proxy.player_finished_event.clear()
@@ -307,39 +557,36 @@ def _play_via_proxy(
     referer: str,
     domain: str,
     is_mp4: bool,
-    player_name: str,
+    player_code: str,
     player_executable: str,
     title: str,
     subtitle_paths: list,
 ) -> bool:
     """Play the stream in an external player through the local proxy."""
     print_info(
-        f"Launching [bold cyan]{player_name}[/bold cyan] via Proxy ({player_executable})..."
+        f"Launching [bold cyan]{player_code}[/bold cyan] via Proxy ({player_executable})..."
     )
 
-    proxy_headers = _build_upstream_headers(
-        headers, referer, player_config, domain
+    cmd = _build_proxy_command(
+        stream_url,
+        headers,
+        player_config,
+        referer,
+        domain,
+        is_mp4,
+        player_code,
+        player_executable,
+        title,
+        subtitle_paths,
     )
-    local_stream_url = _build_proxy_url(
-        stream_url, proxy_headers, player_config, is_mp4
-    )
-    if local_stream_url is None:
+    if cmd is None:
         print_error("Proxy server not initialized.")
         return False
 
-    cmd = [player_executable, local_stream_url]
-    if player_name == "vlc":
-        if subtitle_paths:
-            print_warning(
-                "Note: VLC natively struggles to sync external subtitles on HLS/M3U8 streams (subtitles may flash). Strongly recommend using MPV instead."
-            )
-        cmd.append(f"--meta-title={title}")
-        for path in subtitle_paths:
-            cmd.append(f"--sub-file={path}")
-    elif player_name == "mpv":
-        cmd.append(f"--title={title}")
-        for path in subtitle_paths:
-            cmd.append(f"--sub-file={path}")
+    if player_code == "vlc" and subtitle_paths:
+        print_warning(
+            "Note: VLC natively struggles to sync external subtitles on HLS/M3U8 streams (subtitles may flash). Strongly recommend using MPV instead."
+        )
 
     try:
         subprocess.run(cmd, check=True)
@@ -358,73 +605,41 @@ def _play_via_proxy(
 
 def _play_direct(
     stream_url: str,
+    headers: dict,
     player_config: dict,
     referer: str,
     domain: str,
-    user_agent: str,
-    player_name: str,
+    player_code: str,
     player_executable: str,
     title: str,
     subtitle_paths: list,
 ) -> bool:
     """Play the stream directly in an external player (no proxy)."""
     print_info(
-        f"Launching [bold cyan]{player_name}[/bold cyan] directly ({player_executable})..."
+        f"Launching [bold cyan]{player_code}[/bold cyan] directly ({player_executable})..."
     )
+
+    cmd = _build_direct_command(
+        stream_url,
+        headers,
+        player_config,
+        referer,
+        domain,
+        player_code,
+        player_executable,
+        title,
+        subtitle_paths,
+    )
+    if player_code == "mpv":
+        print_info(f"Headers: {_build_direct_headers(headers, referer, player_config, domain)}")
+
+    if player_code == "vlc" and subtitle_paths:
+        print_warning(
+            "Note: VLC natively struggles to sync external subtitles on HLS/M3U8 streams (subtitles may flash). Strongly recommend using MPV instead."
+        )
+
     try:
-        if player_name == "vlc":
-            # VLC Command construction
-            cmd = [
-                player_executable,
-                stream_url,
-                f":http-referrer={referer}",
-                f":http-user-agent={user_agent}",
-                f"--meta-title={title}",
-            ]
-            if subtitle_paths:
-                print_warning(
-                    "Note: VLC natively struggles to sync external subtitles on HLS/M3U8 streams (subtitles may flash). Strongly recommend using MPV instead."
-                )
-                for path in subtitle_paths:
-                    cmd.append(f"--sub-file={path}")
-            subprocess.run(cmd, check=True)
-        else:
-            # MPV Command construction
-            headers_mpv = f"Origin: {referer.split('/')[2]}"
-            add_default_sec_headers = False
-
-            if player_config.get("alt-used") is True:
-                headers_mpv = f"Alt-Used: {domain};" + headers_mpv
-
-            sec_headers = player_config.get("sec_headers")
-            if sec_headers:
-                if isinstance(sec_headers, str):
-                    headers_mpv += ";" + sec_headers
-                elif isinstance(sec_headers, bool) and sec_headers is True:
-                    add_default_sec_headers = True
-            else:
-                add_default_sec_headers = True
-
-            if add_default_sec_headers:
-                headers_mpv += ";Sec-Fetch-Dest: iframe;Sec-Fetch-Mode: navigate;Sec-Fetch-Site: same-origin"
-
-            if player_config.get("no-header") is True:
-                headers_mpv = ""
-
-            print_info(f"Headers: {headers_mpv}")
-
-            cmd = [
-                player_executable,
-                f'--referrer="{referer}"',
-                f'--user-agent="{user_agent}"',
-                f'--http-header-fields="{headers_mpv}"',
-                f'--title="{title}"',
-            ]
-            for path in subtitle_paths:
-                cmd.append(f"--sub-file={path}")
-            cmd.append(stream_url)
-            subprocess.run(cmd, check=True)
-
+        subprocess.run(cmd, check=True)
         print_success("Playback completed successfully!")
         return True
     except subprocess.CalledProcessError as e:
@@ -435,6 +650,65 @@ def _play_direct(
         print_error(f"Error running player: {e}")
     except Exception as e:
         print_error(f"An unexpected error occurred: {e}")
+    return False
+
+
+def _launch_player(
+    stream_url: str,
+    headers: dict,
+    player_config: dict,
+    player_code: str,
+    mode: str,
+    is_mp4: bool,
+    referer: str,
+    domain: str,
+    title: str,
+    subtitle_paths: list,
+    subtitle_path: str | None = None,
+) -> bool:
+    """Launch a player on a stream using the requested mode."""
+    if player_code == "browser":
+        return _play_in_browser(
+            stream_url,
+            headers,
+            player_config,
+            referer,
+            domain,
+            is_mp4,
+            subtitle_path,
+        )
+
+    if mode == MODE_DIRECT:
+        return _play_direct(
+            stream_url,
+            headers,
+            player_config,
+            referer,
+            domain,
+            player_code,
+            _get_player_executable(player_code),
+            title,
+            subtitle_paths,
+        )
+
+    if mode == MODE_PROXY:
+        if not proxy.PROXY_URL:
+            print_error("Proxy server not initialized.")
+            return False
+        return _play_via_proxy(
+            stream_url,
+            headers,
+            player_config,
+            referer,
+            domain,
+            is_mp4,
+            player_code,
+            _get_player_executable(player_code),
+            title,
+            subtitle_paths,
+        )
+
+    print_error(f"Unknown launch mode: {mode}")
     return False
 
 
@@ -510,14 +784,7 @@ def play_video(
 
     subtitle_paths = []
     try:
-        # Determine player configuration
-        player_config = {}
-        matched_player = ""
-        for player_name, config in player.players.items():
-            if player_name in url.lower():
-                player_config = config
-                matched_player = player_name
-                break
+        player_config, matched_player = _match_player_config(url)
 
         stream_url, extracted_sub = _resolve_stream(url, headers, is_direct)
         if tracker.get_developer_mode():
@@ -567,14 +834,7 @@ def play_video(
                 player_name = player_pref
 
             # Locate the player executable (the browser needs none).
-            if player_name == "browser":
-                player_executable = None
-            elif player_name == "vlc":
-                player_executable = get_vlc_path()
-            else:
-                player_executable = shutil.which(player_name)
-
-            if player_executable is None and player_name != "browser":
+            if player_name != "browser" and _get_player_executable(player_name) is None:
                 if player_name == "vlc":
                     print_error("VLC not found. Please install it or add it to your PATH.")
                 else:
@@ -586,77 +846,29 @@ def play_video(
                 continue
 
             # Calculate Referer
-            if is_direct:
-                referer = headers.get("Referer", "")
-            else:
-                try:
-                    referer = f"https://{domain}"
-                    if player_config.get("referrer") == "full":
-                        referer = url
-                    elif player_config.get("referrer") == "path":
-                        referer = f"https://{domain}/"
-                    elif isinstance(player_config.get("referrer"), str):
-                        referer = player_config.get("referrer")
-
-                    referer = f"{referer}/"
-                except IndexError:
-                    referer = ""
-
-            user_agent = headers.get("User-Agent", DEFAULT_USER_AGENT)
+            referer = _compute_referer(
+                url, headers, player_config, domain, is_direct
+            )
 
             # Determine Launch Mode from config
-            mode = player_config.get("mode", "proxy")  # Default to proxy
+            mode = resolve_launch_mode(player_config, player_name)
 
-            if player_name == "browser":
-                if not proxy.PROXY_URL:
-                    print_error("Proxy server not initialized.")
-                    return False
-                result = _play_in_browser(
-                    stream_url,
-                    headers,
-                    player_config,
-                    referer,
-                    domain,
-                    is_mp4,
-                    local_subtitle_path,
+            try:
+                result = _launch_player(
+                    stream_url=stream_url,
+                    headers=headers,
+                    player_config=player_config,
+                    player_code=player_name,
+                    mode=mode,
+                    is_mp4=is_mp4,
+                    referer=referer,
+                    domain=domain,
+                    title=title,
+                    subtitle_paths=subtitle_paths,
+                    subtitle_path=local_subtitle_path,
                 )
-            elif mode == "proxy":
-                if not proxy.PROXY_URL:
-                    print_error("Proxy server not initialized.")
-                    return False
-                try:
-                    result = _play_via_proxy(
-                        stream_url,
-                        headers,
-                        player_config,
-                        referer,
-                        domain,
-                        is_mp4,
-                        player_name,
-                        player_executable,
-                        title,
-                        subtitle_paths,
-                    )
-                except _PlaybackAborted:
-                    return False
-            elif mode == "direct":
-                try:
-                    result = _play_direct(
-                        stream_url,
-                        player_config,
-                        referer,
-                        domain,
-                        user_agent,
-                        player_name,
-                        player_executable,
-                        title,
-                        subtitle_paths,
-                    )
-                except _PlaybackAborted:
-                    return False
-            else:
-                print_error(f"Unknown player mode: {mode}")
-                result = False
+            except _PlaybackAborted:
+                return False
 
             if result:
                 return True
@@ -682,45 +894,3 @@ def play_video(
                 os.remove(path)
             except OSError:
                 pass
-
-def select_and_play_player(
-    supported_players: list, referer: str, title: str, subtitle_url: str = None
-) -> bool:
-    """
-    Let user select a player and attempt playback with retry logic.
-
-    Args:
-        supported_players: List of supported player objects
-        referer: HTTP Referer header value
-        title: Title of the video
-
-    Returns:
-        True if playback succeeded, False otherwise
-    """
-    while True:
-        player_idx = select_from_list(
-            [p.name for p in supported_players] + ["← Back"], "🎮 Select Player:"
-        )
-
-        if player_idx == len(supported_players):  # Back
-            return False
-
-        success = play_video(
-            supported_players[player_idx].url,
-            headers={"Referer": referer},
-            title=title,
-            subtitle_url=subtitle_url,
-        )
-
-        if success:
-            return True
-        else:
-            # Playback failed, ask if they want to retry
-            retry = select_from_list(
-                ["Try another server/player", "← Back to main menu"],
-                "What would you like to do?",
-            )
-            if retry == 1:  # Back
-                return False
-
-            # Otherwise continue the loop to choose another player
