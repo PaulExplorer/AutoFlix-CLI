@@ -1,3 +1,4 @@
+import json
 import os
 import time
 from urllib.parse import urlparse
@@ -179,10 +180,22 @@ def handle_dev_playback_mode_test() -> None:
             except OSError:
                 pass
 
-    _report_mode_results(results)
+    _report_mode_results(
+        results,
+        embed_url=url,
+        stream_url=stream_url,
+        headers=headers,
+        player_config=player_config,
+    )
 
 
-def _report_mode_results(results: list) -> None:
+def _report_mode_results(
+    results: list,
+    embed_url: str = "",
+    stream_url: str = "",
+    headers: dict = None,
+    player_config: dict = None,
+) -> None:
     """Summarise the test run and suggest the config to pin the winner."""
     print_divider()
     print_header("Results")
@@ -203,9 +216,40 @@ def _report_mode_results(results: list) -> None:
     else:
         print_info("No combination played in direct mode, keep the proxy.")
 
-    saved = pm._write_dev_debug_report(
-        [f"[dev] {p} / {m}: {s}" for p, m, s in results]
+    saved = _write_mode_report(
+        results,
+        embed_url=embed_url,
+        stream_url=stream_url,
+        headers=headers,
+        player_config=player_config,
     )
     if saved:
         print_info(f"Report saved to: {saved}")
     pause()
+
+
+def _write_mode_report(
+    results: list,
+    embed_url: str,
+    stream_url: str,
+    headers: dict,
+    player_config: dict,
+) -> str | None:
+    """Persist the test run together with the URL that was tested.
+
+    The verdict lines alone (``mpv / proxy: failed``) cannot be acted on: the
+    next session has no way to know which embed produced them, so the failure
+    is unreproducible. Everything needed to replay it goes in the same file.
+    """
+    matched = pm._match_player_config(embed_url)[1]
+    return pm._write_dev_debug_report(
+        [
+            "[dev] embed URL: " + embed_url,
+            "[dev] headers: " + json.dumps(headers or {}),
+            "[dev] matched player: " + (matched or "none"),
+            "[dev] player config: " + json.dumps(player_config or {}),
+            "[dev] stream URL: " + str(stream_url),
+            "[dev] ---- verdicts ----",
+        ]
+        + [f"[dev] {p} / {m}: {s}" for p, m, s in results]
+    )
