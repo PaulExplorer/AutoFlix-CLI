@@ -36,10 +36,7 @@ DEFAULT_PLAYERS = {
     "vidmoly": {"type": "vidmoly"},
     # "oneupload": {"type": "default"},
     "tipfly": {"type": "default"},
-    "lulustream": {
-        "type": "default",
-        "url-replacements": {"cdn-tnmr": "tnmr"},
-    },
+    "lulustream": {"type": "default"},
     "luluvdo": {"type": "default"},
     "luluvdoo": {"type": "default"},
     "luluvid": {"type": "default"},
