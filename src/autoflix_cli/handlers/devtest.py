@@ -120,7 +120,6 @@ def handle_dev_playback_mode_test() -> None:
         # lives on the provider, so its origin is the relevant one.
         domain = urlparse(arkanime.website_origin).hostname or ""
 
-    referer = pm._compute_referer(url, headers, player_config, domain, False)
     title = "AutoFlix Mode Test"
     subtitle_paths = (
         pm._download_subtitles([subtitle_url]) if subtitle_url else []
@@ -147,6 +146,14 @@ def handle_dev_playback_mode_test() -> None:
                 print_info("Skipped.")
                 results.append((player_code, mode, "skipped"))
                 continue
+
+            # The Referer depends on the mode: direct playback forwards the
+            # embed page's own Referer, while the proxy mode derives one from
+            # the config. Computing it per candidate keeps the tester faithful
+            # to what play_video() actually sends.
+            referer = pm._compute_referer(
+                url, headers, player_config, domain, mode == pm.MODE_DIRECT
+            )
 
             started = time.time()
             try:
