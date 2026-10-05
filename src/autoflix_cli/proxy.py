@@ -56,6 +56,57 @@ def make_proxy_url(endpoint, original_uri, base_uri, headers):
     )
 
 
+# Extensions ffmpeg's HLS demuxer accepts for a media segment. Its
+# ``allowed_segment_extensions`` check looks at the *URL path*, not the
+# content, so a proxied URL that ends in ``/ts?url=...`` is rejected with
+# "not in allowed_segment_extensions" and the whole playlist fails to load.
+# mpv tolerates it; ffprobe/ffmpeg and stricter players do not. Rewriting
+# the path to ``/ts/segment.<ext>`` keeps the extension visible, the same
+# trick mediaflow-proxy uses with its ``/hls/segment.{ext}`` route.
+SEGMENT_EXTENSIONS = frozenset(
+    {"ts", "m4s", "mp4", "m4a", "m4v", "aac", "webm", "key", "bin", "cmfv", "cmfa"}
+)
+
+# Content-Type per segment extension. Serving a fMP4 fragment as video/mp2t
+# is wrong and some demuxers act on it; MPEG-TS stays the default because
+# several CDNs (e.g. xtremestream) serve real TS under an .html extension.
+SEGMENT_CONTENT_TYPES = {
+    "ts": "video/mp2t",
+    "m4s": "video/iso.segment",
+    "mp4": "video/mp4",
+    "m4a": "audio/mp4",
+    "m4v": "video/mp4",
+    "aac": "audio/aac",
+    "webm": "video/webm",
+    "key": "application/octet-stream",
+    "bin": "application/octet-stream",
+    "cmfv": "video/mp4",
+    "cmfa": "audio/mp4",
+}
+
+
+def _segment_extension(url):
+    """Best-effort media extension of an upstream segment URL.
+
+    Query strings and fragments are stripped first: signed CDN URLs often
+    put everything after ``?``. Returns ``"ts"`` when the extension is
+    unknown or absent, which is the safe default for MPEG-TS payloads.
+    """
+    path = urllib.parse.urlparse(url).path
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path.rsplit("/", 1)[-1] else ""
+    return ext if ext in SEGMENT_EXTENSIONS else "ts"
+
+
+def make_segment_proxy_url(original_uri, base_uri, headers):
+    """Proxied segment URL that keeps the upstream file extension in its path."""
+    absolute_url = urllib.parse.urljoin(base_uri, original_uri)
+    ext = _segment_extension(absolute_url)
+    return (
+        f"http://{PROXY_HOST}:{PROXY_PORT}/ts/segment.{ext}"
+        f"?url={urllib.parse.quote(absolute_url)}&headers={urllib.parse.quote(json.dumps(headers))}"
+    )
+
+
 # Statuses worth retrying: rate limits, challenges and server
 # errors. 404/410 are permanent: retrying them only wastes
 # time (the URL will never come back to life).
@@ -360,6 +411,11 @@ def _rewrite_m3u8(content, target_url, headers, plain_endpoint):
     def proxify(endpoint, uri):
         if not uri or uri.startswith(proxied_prefix):
             return uri
+        # Binary segments keep their upstream extension in the proxied path so
+        # ffmpeg's allowed_segment_extensions check passes (see
+        # make_segment_proxy_url).
+        if endpoint == "ts":
+            return make_segment_proxy_url(uri, base_uri, headers)
         return make_proxy_url(endpoint, uri, base_uri, headers)
 
     def rewrite_body(body):
@@ -468,6 +524,23 @@ def catch_all(path):
 # ---------------------------------------------------------------------------
 @app.route("/ts")
 def proxy_ts():
+    return _serve_segment(default_content_type="video/mp2t")
+
+
+# Same handler, but the path carries the upstream extension so ffmpeg's
+# allowed_segment_extensions check passes (see make_segment_proxy_url).
+# The extension only drives the response Content-Type; the real bytes always
+# come from the ``url`` query parameter.
+@app.route("/ts/segment.<ext>")
+def proxy_ts_ext(ext=None):
+    return _serve_segment(
+        default_content_type=SEGMENT_CONTENT_TYPES.get(
+            (ext or "").lower(), "video/mp2t"
+        )
+    )
+
+
+def _serve_segment(default_content_type):
     target_url = request.args.get("url")
     headers_str = request.args.get("headers", "{}")
 
@@ -495,11 +568,13 @@ def proxy_ts():
     if data is None:
         return "Error fetching segment", 502
 
-    # Force Content-Type so VLC doesn't bug if the server sends .html
-    # video/mp2t is the standard for TS segments. An exact Content-Length
-    # gives players a clean segment boundary (no "corrupt packet" tails).
+    # Force Content-Type so VLC doesn't bug if the server sends .html.
+    # video/mp2t is the standard for TS segments and stays the default; fMP4
+    # segments now get their real type from the extension. An exact
+    # Content-Length gives players a clean segment boundary (no "corrupt
+    # packet" tails).
     response_headers = {
-        "Content-Type": "video/mp2t",
+        "Content-Type": default_content_type,
         "Access-Control-Allow-Origin": "*",
         "Content-Length": str(len(data)),
     }
