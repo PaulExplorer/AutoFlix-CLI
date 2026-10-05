@@ -459,7 +459,14 @@ def proxy_stream():
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def catch_all(path):
-    log.debug("Invalid path requested: %s", path)
+    """Last-resort 404 for any path no route claimed.
+
+    Every real endpoint is a static rule, which Werkzeug always prefers over
+    this converter, so nothing legitimate lands here. Reaching it means a URL
+    was rewritten to something this server does not serve - log it loudly
+    instead of silently 404ing.
+    """
+    log.warning("Unhandled proxy path (no route matched): /%s", path)
     return f"Not Found: {path}", 404
 
 
