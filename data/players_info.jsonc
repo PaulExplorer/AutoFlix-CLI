@@ -58,7 +58,7 @@
   "hailindihg": { "type": "default" },
   "gradehgplus": { "type": "default" },
   "taylorplayer": { "type": "default" },
-  "vidmoly": { "type": "vidmoly" },
+  "vidmoly": { "type": "vidmoly", "modes": { "mpv": "direct" } },
   // "oneupload": { "type": "default" },
   "tipfly": { "type": "default" },
   "lulustream": {
@@ -75,7 +75,7 @@
     "no-header": true,
   },
   "darkibox": { "type": "default" },
-  "minochinos": { "type": "default" },
+  "minochinos": { "type": "default", "modes": { "mpv": "direct" } },
   "movearnpre": {
     "type": "default",
     "referrer": "full",
@@ -99,7 +99,7 @@
   "dingtezuni": { "type": "default" },
   "bingezove": { "type": "default" },
   "ok.ru": { "type": "default" },
-  "ansembed": { "type": "vidmoly" },
+  "ansembed": { "type": "vidmoly", "modes": { "mpv": "direct" } },
   "morencius": { "type": "default" },
   "videzz": {
     "type": "vidoza",
@@ -125,6 +125,7 @@
     "type": "default",
     "sec_headers": "Sec-Fetch-Dest:video;Sec-Fetch-Mode:no-cors;Sec-Fetch-Site:same-site",
     "ext": "mp4",
+    "modes": { "mpv": "direct" }
   },
   "filemoon": {
     "type": "filemoon",
@@ -150,10 +151,10 @@
     "ext": "mp4",
   },
   "xtremestream": { "type": "xtremestream" },
-  "montmyoboky": {"type": "montmyoboky"},
+  "montmyoboky": {"type": "montmyoboky", "modes": { "mpv": "direct" } },
   "vidzy": { "type": "vidzy", "referrer": "https://vidzy.org/" },
-  "voe": { "type": "voe" },
-  "voe.sx": { "type": "voe" },
-  "jeremyparticipantanything": { "type": "voe" },
-  "teresapoliticallearn": { "type": "voe" }
+  "voe": { "type": "voe", "modes": { "mpv": "direct" } },
+  "voe.sx": { "type": "voe", "modes": { "mpv": "direct" }},
+  "jeremyparticipantanything": { "type": "voe", "modes": { "mpv": "direct" } },
+  "teresapoliticallearn": { "type": "voe", "modes": { "mpv": "direct" } }
 }
