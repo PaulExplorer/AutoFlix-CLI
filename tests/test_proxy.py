@@ -76,12 +76,14 @@ def test_rewrite_m3u8_proxies_uri_attributes(proxy_port):
         content, "https://cdn.example.com/master.m3u8", {}, "stream"
     )
 
-    # Keys and init segments are binary payloads: they go through /ts.
-    expected_key = proxy.make_proxy_url(
-        "ts", "https://cdn.example.com/key.bin", "https://cdn.example.com/", {}
+    # Keys and init segments are binary payloads: they go through /ts, keeping
+    # their upstream extension in the proxied path so ffmpeg's
+    # allowed_segment_extensions check passes.
+    expected_key = proxy.make_segment_proxy_url(
+        "https://cdn.example.com/key.bin", "https://cdn.example.com/", {}
     )
-    expected_map = proxy.make_proxy_url(
-        "ts", "https://cdn.example.com/init.mp4", "https://cdn.example.com/", {}
+    expected_map = proxy.make_segment_proxy_url(
+        "https://cdn.example.com/init.mp4", "https://cdn.example.com/", {}
     )
     assert f'URI="{expected_key}"' in rewritten
     assert f'URI="{expected_map}"' in rewritten
@@ -103,3 +105,50 @@ def test_rewrite_m3u8_keeps_original_bytes(proxy_port):
     )
     assert "\r\n" in rewritten
     assert rewritten.startswith("#EXTM3U\r\n")
+
+
+def test_segment_urls_keep_upstream_extension(proxy_port):
+    """ffmpeg's HLS demuxer validates the segment URL *extension*.
+
+    A proxied URL ending in `/ts?url=...` has none, and ffmpeg then fails the
+    whole playlist with "not in allowed_segment_extensions". The extension must
+    therefore survive into the proxied path.
+    """
+    content = (
+        "#EXTM3U\n"
+        "#EXTINF:10.0,\n"
+        "https://cdn.example.com/seg1.ts\n"
+        "#EXTINF:10.0,\n"
+        "https://cdn.example.com/seg2.m4s\n"
+        "#EXTINF:10.0,\n"
+        "https://cdn.example.com/seg3.mp4\n"
+    )
+    rewritten = proxy._rewrite_m3u8(
+        content, "https://cdn.example.com/media.m3u8", {}, "ts"
+    )
+    assert "/ts/segment.ts?url=" in rewritten
+    assert "/ts/segment.m4s?url=" in rewritten
+    assert "/ts/segment.mp4?url=" in rewritten
+    # No segment may point at the extensionless legacy route.
+    assert "/ts?url=" not in rewritten
+
+
+def test_segment_extension_ignores_query_string():
+    """Signed CDN URLs put everything after `?`; the path still ends in .ts."""
+    url = "https://cdn.example.com/hls/seg1.ts?sig=abc&e=12345"
+    assert proxy._segment_extension(url) == "ts"
+
+
+def test_segment_extension_defaults_to_ts():
+    # xtremestream serves real TS under an .html extension; MPEG-TS is the safe
+    # default because Content-Type is derived from this value.
+    assert proxy._segment_extension("https://x.com/a/seg.html") == "ts"
+    assert proxy._segment_extension("https://x.com/seg") == "ts"
+
+
+def test_segment_content_types_cover_known_extensions():
+    assert proxy.SEGMENT_CONTENT_TYPES["ts"] == "video/mp2t"
+    assert proxy.SEGMENT_CONTENT_TYPES["m4s"] == "video/iso.segment"
+    assert proxy.SEGMENT_CONTENT_TYPES["mp4"] == "video/mp4"
+    # Unknown extensions must never fall back to a wrong fMP4 type.
+    assert "html" not in proxy.SEGMENT_CONTENT_TYPES
