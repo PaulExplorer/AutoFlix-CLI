@@ -159,7 +159,7 @@ def test_back_from_ranked_menu_returns_to_source_list():
 
 def test_stale_source_is_resolved_again(monkeypatch):
     stale = make_source("uqload")
-    stale.probed_at = 0.0  # anything older than STALE_AFTER
+    stale.probed_at = time.monotonic() - sp.STALE_AFTER - 1
     refreshed = make_source("uqload", height=720)
 
     monkeypatch.setattr(
@@ -173,7 +173,7 @@ def test_source_that_stopped_resolving_still_gets_a_chance(monkeypatch):
     # The re-extract failed, but a transient extraction block must not cancel
     # a link the player may still be able to play.
     stale = make_source("uqload")
-    stale.probed_at = 0.0
+    stale.probed_at = time.monotonic() - sp.STALE_AFTER - 1
     dead = make_source("uqload", ok=False, height=0)
     monkeypatch.setattr(
         playback.stream_probe, "resolve_source", lambda *a, **kw: dead
