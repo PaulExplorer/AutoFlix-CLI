@@ -265,6 +265,18 @@ def probe_stream(
     return result
 
 
+def embed_host_label(url: str) -> str:
+    """Short host label of a source URL ("https://sibnet.ru/e" -> "sibnet").
+
+    Same label the source menu has always shown next to the provider name;
+    kept here so both menus format a source the same way.
+    """
+    parts = (url or "").split("/")
+    host = parts[2] if len(parts) > 2 else ""
+    labels = host.split(".")
+    return labels[-2] if len(labels) > 1 else host
+
+
 @dataclass
 class ResolvedSource:
     """One embed taken all the way to a playable link.
@@ -322,10 +334,20 @@ class ResolvedSource:
         return KIND_LABELS.get(self.kind, self.kind)
 
     def menu_label(self) -> str:
-        """One line for the source picker: quality first, then origin."""
+        """One line for the source picker: name, then quality and origin.
+
+        The name is formatted like the source list has always shown it
+        ("Lecteur 2 : ansembed"), so both menus read the same way.
+        """
+        label = self.embed_name
+        host = embed_host_label(self.embed_url)
+        # The host is only worth showing when it says something the name does
+        # not ("Lecteur 2 : ansembed", not "uqload : uqload").
+        if host and host != self.embed_name:
+            label = f"{label} : {host}"
         return (
-            f"{self.embed_name} · {self.quality_label} · {self.type_label}"
-            f" · {self.elapsed:.1f}s"
+            f"{label} · {self.quality_label}"
+            f" · {self.type_label} · {self.elapsed:.1f}s"
         )
 
 

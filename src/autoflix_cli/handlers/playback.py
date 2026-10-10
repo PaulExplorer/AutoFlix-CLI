@@ -41,12 +41,11 @@ def _run_auto_probe(players: list, headers: dict) -> list:
         return stream_probe.probe_sources(players, headers, on_done=on_done)
 
 
-def _select_auto_source(players: list, headers: dict):
-    """
-    Resolve every source at once and let the user pick a working one.
+def _probe_and_report(players: list, headers: dict) -> tuple:
+    """Probe every source and report the outcome. Returns (working, dead).
 
-    Returns the chosen ResolvedSource, or None when the user backs out or no
-    source survives the probe (the caller then falls back to the plain list).
+    ``working`` is ranked best first, so ``working[0]`` is the one auto mode
+    plays without asking.
     """
     sources = _run_auto_probe(players, headers)
     working = [s for s in sources if s.ok]
@@ -58,10 +57,36 @@ def _select_auto_source(players: list, headers: dict):
     else:
         print_success(
             f"{len(working)}/{len(sources)} source(s) ready, best is "
-            f"[cyan]{working[0].embed_name} ({working[0].quality_label})[/cyan]"
+            f"[cyan]{working[0].menu_label()}[/cyan]"
         )
     for source in dead:
         print_warning(f"{source.embed_name}: {source.error or 'unusable'}")
+
+    return working, dead
+
+
+def _pick_best_source(players: list, headers: dict, exclude: set = None):
+    """Play the best working source without asking (the auto-source setting).
+
+    ``exclude`` holds the sources already tried, so a retry after a failed
+    playback moves on to the next one instead of replaying the same dead link.
+    """
+    exclude = exclude or set()
+    working, _ = _probe_and_report(players, headers)
+    for source in working:
+        if source.embed_url not in exclude:
+            return source
+    return None
+
+
+def _select_auto_source(players: list, headers: dict):
+    """
+    Resolve every source at once and let the user pick a working one.
+
+    Returns the chosen ResolvedSource, or None when the user backs out or no
+    source survives the probe (the caller then falls back to the plain list).
+    """
+    working, dead = _probe_and_report(players, headers)
 
     # The best source sits at index 0, so Enter alone plays it while the
     # arrow keys still allow an explicit pick.
@@ -158,63 +183,94 @@ def play_episode_flow(
     if headers is None:
         headers = {}
 
+    # Sources already played, so a retry moves on to the next one instead of
+    # replaying the same dead link.
+    tried_urls: set = set()
+
     while True:
-        # Player Selection Menu
-        player_options = []
-        player_map = []  # maps option index -> Player object
+        resolved_source = None
+        selected_player = None
 
-        for p in supported_players:
-            try:
-                player_options.append(f"{p.name} : {p.url.split('/')[2].split('.')[-2]}")
-            except (IndexError, AttributeError):
-                player_options.append(p.name)
-            player_map.append(p)
+        # Auto-source setting: probe every source and play the best one
+        # without ever showing the source menu. Like the "⚡ Auto" entry it
+        # needs more than one source to have anything to compare.
+        auto_source = tracker.get_auto_source() and len(supported_players) > 1
+        if auto_source:
+            resolved_source = _pick_best_source(
+                supported_players, headers, exclude=tried_urls
+            )
+            if resolved_source is None:
+                print_warning("No working source left, select one manually.")
+                auto_source = False
+            else:
+                print_success(
+                    f"Auto-picked: [cyan]{resolved_source.menu_label()}[/cyan]"
+                )
+                tried_urls.add(resolved_source.embed_url)
+                resolved_source = _refresh_if_stale(resolved_source)
+                selected_player = Player(
+                    name=resolved_source.embed_name,
+                    url=resolved_source.embed_url,
+                )
 
-        # In dev mode, show unsupported players with a clear marker
-        if dev_mode and unsupported_players:
-            player_options.append("")
-            player_options.append("── Unsupported players (dev mode) ──")
-            player_map.append(None)  # separator
-            player_map.append(None)  # separator header
-            for p in unsupported_players:
+        if not auto_source:
+            # Player Selection Menu
+            player_options = []
+            player_map = []  # maps option index -> Player object
+
+            for p in supported_players:
                 try:
-                    domain = p.url.split('/')[2].split('.')[-2]
+                    player_options.append(
+                        f"{p.name} : {p.url.split('/')[2].split('.')[-2]}"
+                    )
                 except (IndexError, AttributeError):
-                    domain = p.url
-                player_options.append(f"⚠ {p.name} ({domain}) [NOT SUPPORTED]")
+                    player_options.append(p.name)
                 player_map.append(p)
 
-        player_options.append("← Back")
+            # In dev mode, show unsupported players with a clear marker
+            if dev_mode and unsupported_players:
+                player_options.append("")
+                player_options.append("── Unsupported players (dev mode) ──")
+                player_map.append(None)  # separator
+                player_map.append(None)  # separator header
+                for p in unsupported_players:
+                    try:
+                        domain = p.url.split('/')[2].split('.')[-2]
+                    except (IndexError, AttributeError):
+                        domain = p.url
+                    player_options.append(f"⚠ {p.name} ({domain}) [NOT SUPPORTED]")
+                    player_map.append(p)
 
-        # Auto only makes sense with something to compare against.
-        auto_index = None
-        if len(supported_players) > 1:
-            auto_index = 0
-            player_options.insert(0, AUTO_OPTION)
-            player_map.insert(0, AUTO_OPTION)
+            player_options.append("← Back")
 
-        player_idx = select_from_list(
-            player_options,
-            "🎮 Select Player:",
-        )
+            # Auto only makes sense with something to compare against.
+            auto_index = None
+            if len(supported_players) > 1:
+                auto_index = 0
+                player_options.insert(0, AUTO_OPTION)
+                player_map.insert(0, AUTO_OPTION)
 
-        if player_idx == len(player_options) - 1:  # Back selected
-            return False
-
-        selected_player = player_map[player_idx]
-
-        # --- Auto mode: test every source, then pick a working one ---
-        resolved_source = None
-        if auto_index is not None and player_idx == auto_index:
-            resolved_source = _select_auto_source(supported_players, headers)
-            if resolved_source is None:
-                continue  # back to the source list
-            resolved_source = _refresh_if_stale(resolved_source)
-            if not resolved_source.ok:
-                continue
-            selected_player = Player(
-                name=resolved_source.embed_name, url=resolved_source.embed_url
+            player_idx = select_from_list(
+                player_options,
+                "🎮 Select Player:",
             )
+
+            if player_idx == len(player_options) - 1:  # Back selected
+                return False
+
+            selected_player = player_map[player_idx]
+
+            # --- Auto mode: test every source, then pick a working one ---
+            if auto_index is not None and player_idx == auto_index:
+                resolved_source = _select_auto_source(supported_players, headers)
+                if resolved_source is None:
+                    continue  # back to the source list
+                resolved_source = _refresh_if_stale(resolved_source)
+                if not resolved_source.ok:
+                    continue
+                selected_player = Player(
+                    name=resolved_source.embed_name, url=resolved_source.embed_url
+                )
 
         # Skip separator lines (user shouldn't land here, but guard anyway)
         if selected_player is None:

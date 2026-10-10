@@ -200,6 +200,14 @@ class ProgressTracker:
         self.data["player"] = player_code
         self._save_data()
 
+    def get_auto_source(self) -> bool:
+        """Whether to pick the best source automatically."""
+        return self.data.get("auto_source", False)
+
+    def set_auto_source(self, enabled: bool):
+        self.data["auto_source"] = bool(enabled)
+        self._save_data()
+
     # --- Developer Mode ---
 
     def get_developer_mode(self) -> bool:

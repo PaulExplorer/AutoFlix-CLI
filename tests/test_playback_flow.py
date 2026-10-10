@@ -174,3 +174,94 @@ def test_source_that_stopped_resolving_still_gets_a_chance(monkeypatch):
     calls, _, _ = run_flow([UQLOAD, SIBNET], [0, 0], [stale])
     assert calls[0][0] == UQLOAD.url
     assert calls[0][1]["resolved"] is stale
+
+# --- auto-pick setting ------------------------------------------------------
+
+
+def run_with_auto_setting(monkeypatch, enabled, players, sources, choices):
+    """Drive play_episode_flow with the auto-source setting on or off."""
+    calls, menus = [], []
+    monkeypatch.setattr(playback.tracker, "get_developer_mode", lambda: False)
+    monkeypatch.setattr(playback.tracker, "save_progress", lambda **kw: None)
+    monkeypatch.setattr(playback.tracker, "get_auto_source", lambda: enabled)
+    monkeypatch.setattr(playback, "_run_auto_probe", lambda p, h: list(sources))
+    monkeypatch.setattr(
+        playback,
+        "select_from_list",
+        lambda options, prompt, **kw: menus.append((prompt, options))
+        or choices.pop(0),
+    )
+    monkeypatch.setattr(
+        playback, "play_video", lambda url, **kw: calls.append((url, kw)) or True
+    )
+    result = playback.play_episode_flow(
+        provider_name="Test",
+        series_title="S",
+        season_title="S1",
+        episode=Episode("E1", players),
+        series_url="",
+        season_url="",
+        headers={"Referer": "https://p/"},
+    )
+    return result, calls, menus
+
+
+def test_auto_pick_plays_the_best_source_without_a_menu(monkeypatch):
+    best = make_source("uqload", height=1080)
+    other = make_source("sibnet", height=720)
+    result, calls, menus = run_with_auto_setting(
+        monkeypatch, True, [UQLOAD, SIBNET], [best, other], []
+    )
+    assert result is True
+    assert menus == [], "the source menu must not appear"
+    assert calls[0][1]["resolved"] is best
+
+
+def test_auto_pick_off_shows_the_source_menu(monkeypatch):
+    result, calls, menus = run_with_auto_setting(
+        monkeypatch, False, [UQLOAD, SIBNET], [make_source("uqload")], [1]
+    )
+    assert menus[0][0] == "\U0001f3ae Select Player:"
+    assert calls[0][1]["resolved"] is None
+
+
+def test_auto_pick_falls_back_to_the_menu_when_nothing_works(monkeypatch):
+    dead = [make_source("uqload", ok=False), make_source("sibnet", ok=False)]
+    result, calls, menus = run_with_auto_setting(
+        monkeypatch, True, [UQLOAD, SIBNET], dead, [1]
+    )
+    assert menus[0][0] == "\U0001f3ae Select Player:"
+    assert calls[0][1]["resolved"] is None
+
+
+def test_auto_pick_is_skipped_with_a_single_source(monkeypatch):
+    # One source is nothing to rank, so the plain menu stays.
+    result, calls, menus = run_with_auto_setting(
+        monkeypatch, True, [UQLOAD], [make_source("uqload")], [0]
+    )
+    assert menus[0][0] == "\U0001f3ae Select Player:"
+    assert calls[0][1]["resolved"] is None
+
+
+def test_pick_best_source_skips_the_sources_already_tried(monkeypatch):
+    # A retry after a failed playback must move to the next source.
+    first = make_source("uqload", height=1080)
+    second = make_source("sibnet", height=720)
+    monkeypatch.setattr(
+        playback, "_probe_and_report", lambda players, headers: ([first, second], [])
+    )
+    assert playback._pick_best_source([UQLOAD, SIBNET], {}) is first
+    assert (
+        playback._pick_best_source([UQLOAD, SIBNET], {}, exclude={first.embed_url})
+        is second
+    )
+
+
+def test_pick_best_source_returns_none_when_all_were_tried(monkeypatch):
+    only = make_source("uqload")
+    monkeypatch.setattr(
+        playback, "_probe_and_report", lambda players, headers: ([only], [])
+    )
+    assert (
+        playback._pick_best_source([UQLOAD], {}, exclude={only.embed_url}) is None
+    )

@@ -281,6 +281,40 @@ def test_menu_label_shows_origin_and_quality():
     assert source.menu_label() == "VIDA · 1080p · HLS · 1.2s"
 
 
+def test_menu_label_uses_the_source_menu_format():
+    # Same shape as the long-standing source list: name, then host.
+    source = sp.ResolvedSource(
+        embed_name="Lecteur 2",
+        embed_url="https://ansembed.net/embed-def.html",
+        headers={},
+        player_config={},
+        ok=True,
+        kind=sp.KIND_HLS_MASTER,
+        heights=[1080],
+        elapsed=0.8,
+    )
+    assert source.menu_label() == "Lecteur 2 : ansembed · 1080p · HLS · 0.8s"
+
+
+def test_menu_label_skips_a_host_that_repeats_the_name():
+    source = sp.ResolvedSource(
+        embed_name="uqload",
+        embed_url="https://uqload.vc/embed-1.html",
+        headers={},
+        player_config={},
+        ok=True,
+        kind=sp.KIND_HLS_MASTER,
+        heights=[720],
+    )
+    assert source.menu_label() == "uqload · 720p · HLS · 0.0s"
+
+
+def test_embed_host_label():
+    assert sp.embed_host_label("https://sibnet.ru/embed-a.html") == "sibnet"
+    assert sp.embed_host_label("https://uqload.vc/e/1") == "uqload"
+    assert sp.embed_host_label("montmyoboky:535") == ""
+
+
 def test_fresh_source_is_not_stale():
     source = make_source("a")
     source.probed_at = time.monotonic()
