@@ -174,32 +174,3 @@ def test_source_that_stopped_resolving_still_gets_a_chance(monkeypatch):
     calls, _, _ = run_flow([UQLOAD, SIBNET], [0, 0], [stale])
     assert calls[0][0] == UQLOAD.url
     assert calls[0][1]["resolved"] is stale
-
-# --- source naming ----------------------------------------------------------
-
-
-def test_numbered_sources_are_labelled_by_their_embed():
-    generic = [
-        Player("Lecteur 1", "https://embed4me.net/embed-abc.html"),
-        Player("Lecteur 2", "https://ansembed.net/embed-def.html"),
-        Player("Lecteur 3", "https://minochinos.net/embed-ghi.html"),
-        Player("Lecteur 4", "https://sibnet.ru/embed-jkl.html"),
-    ]
-    assert playback._source_labels(generic) == [
-        "embed4me",
-        "ansembed",
-        "minochinos",
-        "sibnet",
-    ]
-
-
-def test_duplicate_embed_names_are_told_apart_by_url():
-    duplicated = [
-        Player("Lecteur 1", "https://embed4me.net/embed-a.html"),
-        Player("Lecteur 2", "https://embed4me.net/embed-b.html"),
-    ]
-    assert playback._source_labels(duplicated) == [
-        "embed4me (embed4me.net/embed-a)",
-        "embed4me (embed4me.net/embed-b)",
-    ]
-

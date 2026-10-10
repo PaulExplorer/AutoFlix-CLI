@@ -110,55 +110,21 @@ def _download_subtitles(subtitle_items) -> list:
 
 
 PLAYERS: Dict[str, Dict[str, str]] = {
-    "mpv": {"display": "mpv", "name": "mpv (Media Player)"},
-    "vlc": {"display": "vlc", "name": "VLC media player"},
-    "browser": {"display": "browser", "name": "Web browser"},
-    "manual": {"display": "manual", "name": "Ask me every time"},
+    "mpv": {"display": "mpv"},
+    "vlc": {"display": "vlc"},
+    "browser": {"display": "browser"},
+    "manual": {"display": "manual"},
 }
 
-# Codes proposed in the player menu, in preference order. "manual" is a
-# setting, not a launcher, so it never appears as a choice.
-LAUNCHABLE_PLAYERS = ("mpv", "vlc", "browser")
 
+def get_player_display(code: str, default: str = "manual") -> str:
 
-def get_player_display(code: str, default: str = "Ask me every time") -> str:
-
-    return PLAYERS.get(code, {}).get("name", default)
+    return PLAYERS.get(code, {}).get("display", default)
 
 
 def get_all_players():
 
-    return [(code, player["name"]) for code, player in PLAYERS.items()]
-
-
-def get_player_options() -> list:
-    """Player choices for the interactive menu, as ``(code, label)``.
-
-    The label carries the name and whether the executable is installed, so an
-    absent player is visible as such instead of only failing after being
-    picked.
-    """
-    options = []
-    for code in LAUNCHABLE_PLAYERS:
-        name = PLAYERS.get(code, {}).get("name", code)
-        installed = code == "browser" or _get_player_executable(code) is not None
-        options.append((code, name if installed else f"{name} [not installed]"))
-    return options
-
-
-def first_available_player(preferred: str = None) -> str | None:
-    """Return the player to launch without asking, or None if none can.
-
-    The configured default wins when it is installed; otherwise the first
-    installed player in preference order is used, so auto-launch still works
-    on a machine that only has VLC.
-    """
-    candidates = [preferred] if preferred in LAUNCHABLE_PLAYERS else []
-    candidates += [c for c in LAUNCHABLE_PLAYERS if c not in candidates]
-    for code in candidates:
-        if code == "browser" or _get_player_executable(code) is not None:
-            return code
-    return None
+    return [(code, f"{player['display']}") for code, player in PLAYERS.items()]
 
 
 def get_player_modes(player_code: str) -> tuple:
@@ -902,23 +868,15 @@ def play_video(
         force_manual_mode = False
         while True:  # Loop to allow retrying with another player
             player_pref = tracker.get_player()
+            if force_manual_mode or not player_pref or player_pref == "manual":
+                players = ["mpv", "vlc", "browser", "← Back"]
+                player_choice = select_from_list(players, "🎮 Select video player:")
 
-            player_name = None
-            if not force_manual_mode and tracker.get_auto_launch():
-                player_name = first_available_player(player_pref)
-
-            if player_name is None and (
-                force_manual_mode or not player_pref or player_pref == "manual"
-            ):
-                options = get_player_options()
-                labels = [label for _, label in options] + ["← Back"]
-                player_choice = select_from_list(labels, "🎮 Select video player:")
-
-                if player_choice == len(labels) - 1:
+                if players[player_choice] == "← Back":
                     return False
 
-                player_name = options[player_choice][0]
-            elif player_name is None:
+                player_name = players[player_choice]
+            else:
                 player_name = player_pref
 
             # Locate the player executable (the browser needs none).

@@ -1,5 +1,3 @@
-import urllib.parse
-
 from ..cli_utils import (
     select_from_list,
     print_info,
@@ -20,45 +18,6 @@ import json
 
 
 AUTO_OPTION = "⚡ Auto - test all sources"
-
-
-def _url_discriminator(url: str) -> str:
-    """Short, human-readable part of an URL used to tell two apart."""
-    parsed = urllib.parse.urlparse(url)
-    host = parsed.netloc
-    stem = parsed.path.rstrip("/").rsplit("/", 1)[-1]
-    if stem and stem not in ("", "e", "embed", "index.html"):
-        stem = stem.split(".")[0]
-        return f"{host}/{stem}" if host else stem
-    return host or url
-
-
-def _disambiguate(names: list, urls: list) -> list:
-    """Append something unique to the names that appear more than once.
-
-    Several sources can resolve to the same embed name (a provider listing
-    two entries on the same host), and identical rows in a menu are
-    indistinguishable.
-    """
-    counts = {}
-    for name in names:
-        counts[name] = counts.get(name, 0) + 1
-
-    labels = []
-    for name, url in zip(names, urls):
-        if counts[name] > 1:
-            labels.append(f"{name} ({_url_discriminator(url)})")
-        else:
-            labels.append(name)
-    return labels
-
-
-def _source_labels(sources: list) -> list:
-    """Display names of a list of ``Player`` objects."""
-    return _disambiguate(
-        [player.source_name(s.name, s.url) for s in sources],
-        [s.url for s in sources],
-    )
 
 
 def _run_auto_probe(players: list, headers: dict) -> list:
@@ -106,10 +65,7 @@ def _select_auto_source(players: list, headers: dict):
 
     # The best source sits at index 0, so Enter alone plays it while the
     # arrow keys still allow an explicit pick.
-    working_names = _disambiguate(
-        [s.embed_name for s in working], [s.embed_url for s in working]
-    )
-    options = [s.menu_label(name) for name, s in zip(working_names, working)]
+    options = [s.menu_label() for s in working]
     if dead:
         options.append("")
         options.append(f"── Unreachable ({len(dead)}) ──")
@@ -207,8 +163,11 @@ def play_episode_flow(
         player_options = []
         player_map = []  # maps option index -> Player object
 
-        for p, label in zip(supported_players, _source_labels(supported_players)):
-            player_options.append(label)
+        for p in supported_players:
+            try:
+                player_options.append(f"{p.name} : {p.url.split('/')[2].split('.')[-2]}")
+            except (IndexError, AttributeError):
+                player_options.append(p.name)
             player_map.append(p)
 
         # In dev mode, show unsupported players with a clear marker
@@ -218,9 +177,11 @@ def play_episode_flow(
             player_map.append(None)  # separator
             player_map.append(None)  # separator header
             for p in unsupported_players:
-                player_options.append(
-                    f"⚠ {player.source_name(p.name, p.url)} [NOT SUPPORTED]"
-                )
+                try:
+                    domain = p.url.split('/')[2].split('.')[-2]
+                except (IndexError, AttributeError):
+                    domain = p.url
+                player_options.append(f"⚠ {p.name} ({domain}) [NOT SUPPORTED]")
                 player_map.append(p)
 
         player_options.append("← Back")

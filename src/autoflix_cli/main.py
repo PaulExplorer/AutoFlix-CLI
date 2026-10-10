@@ -14,11 +14,7 @@ from .update_checker import check_update
 from .tracker import tracker
 from .providers_registry import registry
 from .languages import LANGUAGES, get_language_display, get_all_languages
-from .player_manager import (
-    get_player_display,
-    get_all_players,
-    first_available_player,
-)
+from .player_manager import PLAYERS, get_player_display, get_all_players
 from .handlers import (
     anime_sama,
     coflix,
@@ -172,18 +168,15 @@ def _run():
                 lang = tracker.get_language()
                 player = tracker.get_player()
                 dev_mode = tracker.get_developer_mode()
-                auto_launch = tracker.get_auto_launch()
 
                 lang_display = get_language_display(lang)
                 player_display = get_player_display(player)
                 dev_display = "ON" if dev_mode else "OFF"
-                auto_display = "ON" if auto_launch else "OFF"
 
                 opts = [
                     f"Update AniList Token ({'Set' if token else 'Not Set'})",
                     f"Update Language ({lang_display})",
                     f"Choose default Player ({player_display})",
-                    f"Auto-launch a player ({auto_display})",
                     f"Developer Mode ({dev_display})",
                 ]
                 if dev_mode:
@@ -209,6 +202,7 @@ def _run():
                     pause()
 
                 elif s_choice == 2:
+
                     players = get_all_players()
                     p_choice = select_from_list(
                         [p[1] for p in players], "Select default player:"
@@ -218,31 +212,15 @@ def _run():
                     pause()
 
                 elif s_choice == 3:
-                    tracker.set_auto_launch(not auto_launch)
-                    if auto_launch:
-                        print_success("Auto-launch disabled.")
-                    else:
-                        chosen = first_available_player(player)
-                        print_success(
-                            "Auto-launch enabled, "
-                            + (
-                                f"using [bold]{get_player_display(chosen)}[/bold]."
-                                if chosen
-                                else "but no player was found."
-                            )
-                        )
-                    pause()
-
-                elif s_choice == 4:
                     tracker.set_developer_mode(not dev_mode)
                     apply_developer_logging(not dev_mode)
                     state = "enabled" if not dev_mode else "disabled"
                     print_success(f"Developer mode {state}.")
                     pause()
 
-                elif dev_mode and s_choice == 5:
+                elif dev_mode and s_choice == 4:
                     handle_dev_scraper_test()
-                elif dev_mode and s_choice == 6:
+                elif dev_mode and s_choice == 5:
                     handle_dev_playback_mode_test()
 
                 else:
