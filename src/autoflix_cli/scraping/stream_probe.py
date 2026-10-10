@@ -43,6 +43,10 @@ DEFAULT_TIMEOUT = 8.0
 # queue requests behind the same CDN rate limiter.
 DEFAULT_MAX_WORKERS = 6
 
+# A link older than this is re-extracted before being handed to the player,
+# because the tokens behind most CDN URLs do not outlive the wait.
+STALE_AFTER = 120.0
+
 # EXT-X-STREAM-INF carries the variant attributes; RESOLUTION and BANDWIDTH
 # are what "quality" means for an HLS source.
 _VARIANT_RE = re.compile(r"#EXT-X-STREAM-INF:([^\r\n]*)")
@@ -121,7 +125,11 @@ def _mp4_height(head: bytes) -> int | None:
     when the box is absent or the values are not plausible for a video track.
     """
     for match in re.finditer(b"tkhd", head):
-        offset = match.end() + 4 + 8 + 4 + 4 + 4 + 4 + 4 + 2 + 2 + 2 + 2 + 36
+        # Layout after the 4-byte box type: version+flags (4), creation and
+        # modification times (8), track id (4), reserved (4), duration (4),
+        # reserved (8), layer / alternate group / volume / reserved (8),
+        # matrix (36). Width and height are 16.16 fixed point.
+        offset = match.end() + 4 + 8 + 4 + 4 + 4 + 8 + 8 + 36
         if offset + 8 > len(head):
             continue
         width, height = struct.unpack(">II", head[offset : offset + 8])
@@ -272,6 +280,16 @@ class ResolvedSource:
     ok: bool = False
     error: str = None
     elapsed: float = 0.0
+    probed_at: float = 0.0
+
+    @property
+    def is_stale(self) -> bool:
+        """True when the link sat long enough in the menu to have expired.
+
+        Tokenized CDN links are often only valid for a few minutes, so a
+        source the user deliberated over may no longer resolve at launch.
+        """
+        return (time.monotonic() - self.probed_at) > STALE_AFTER
 
     @property
     def best_height(self) -> int:
@@ -348,7 +366,13 @@ def _resolve_one(embed_name: str, embed_url: str, headers: dict, timeout: float,
     source.size = probe["size"]
     source.error = probe.get("error")
     source.elapsed = time.monotonic() - started
+    source.probed_at = time.monotonic()
     return source
+
+
+def resolve_source(embed_name: str, embed_url: str, headers: dict = None) -> ResolvedSource:
+    """Resolve and probe a single embed (used to refresh a stale source)."""
+    return _resolve_one(embed_name, embed_url, headers or {}, DEFAULT_TIMEOUT, None)
 
 
 def rank_sources(sources: list[ResolvedSource]) -> list[ResolvedSource]:
