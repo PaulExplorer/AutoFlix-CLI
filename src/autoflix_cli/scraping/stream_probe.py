@@ -321,11 +321,15 @@ class ResolvedSource:
     def type_label(self) -> str:
         return KIND_LABELS.get(self.kind, self.kind)
 
-    def menu_label(self) -> str:
-        """One line for the source picker: quality first, then origin."""
+    def menu_label(self, name: str = None) -> str:
+        """One line for the source picker: quality first, then origin.
+
+        ``name`` overrides the embed name, which the picker uses to tell two
+        sources on the same embed apart.
+        """
         return (
-            f"{self.embed_name} · {self.quality_label} · {self.type_label}"
-            f" · {self.elapsed:.1f}s"
+            f"{name or self.embed_name} · {self.quality_label}"
+            f" · {self.type_label} · {self.elapsed:.1f}s"
         )
 
 
@@ -334,7 +338,9 @@ def _resolve_one(embed_name: str, embed_url: str, headers: dict, timeout: float,
     """Resolve then probe a single embed, never raising."""
     config, _ = player.match_player_config(embed_url)
     source = ResolvedSource(
-        embed_name=embed_name,
+        # A provider that only numbers its sources would otherwise show as
+        # "Lecteur 2" all the way through the ranking.
+        embed_name=player.source_name(embed_name, embed_url),
         embed_url=embed_url,
         headers=dict(headers or {}),
         player_config=config,

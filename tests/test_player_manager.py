@@ -554,3 +554,36 @@ def test_auto_launch_falls_back_to_the_menu_when_nothing_runs(monkeypatch):
 
     assert pm.play_video("https://x.tld/e/1", {}, is_direct=True) is False
     assert menus, "auto-launch must fall back to the menu"
+
+
+# --- source naming ----------------------------------------------------------
+
+
+def test_describe_embed_prefers_the_configured_name():
+    # The rotating mirror domains all resolve to the configured embed name.
+    assert player.describe_embed("https://vidoza.stream/e/abc") == "vidoza"
+    assert player.describe_embed("https://uqload.cx/embed-1.html") == "uqload"
+
+
+def test_describe_embed_falls_back_to_the_host():
+    assert player.describe_embed("https://streamtape.com/e/abc") == "streamtape"
+
+
+def test_describe_embed_handles_shorthand():
+    assert player.describe_embed("montmyoboky:535") == "montmyoboky"
+
+
+def test_source_name_keeps_a_meaningful_provider_label():
+    assert player.source_name("uqload vostfr", "https://uqload.vc/e/1") == "uqload vostfr"
+
+
+def test_source_name_replaces_generic_numbering():
+    # Anime-sama numbers its sources; the embed host is what identifies them.
+    assert (
+        player.source_name("Lecteur 2", "https://ansembed.net/embed-1.html")
+        == "ansembed"
+    )
+    assert (
+        player.source_name("Player 3", "https://sibnet.ru/embed-abc.html")
+        == "sibnet"
+    )

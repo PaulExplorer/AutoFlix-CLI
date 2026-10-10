@@ -911,6 +911,45 @@ def match_player_config(url: str) -> tuple:
     return {}, ""
 
 
+# Providers that only number their sources ("Lecteur 1", "Player 2") hide
+# which embed is actually being played, which is the one thing that tells two
+# otherwise identical entries apart.
+_GENERIC_SOURCE_NAME = re.compile(
+    r"^(lecteur|player|serveur|server|source)\s*\d*$", re.IGNORECASE
+)
+
+
+def describe_embed(url: str) -> str:
+    """Readable name of the embed host serving an URL.
+
+    Prefers the configured embed name (which already handles the rotating
+    mirror domains), then falls back to the host's own label so an unknown
+    embed still reads as something other than a number.
+    """
+    _, matched = match_player_config(url)
+    if matched:
+        return matched
+
+    parts = (url or "").split("/")
+    host = parts[2] if len(parts) > 2 else ""
+    labels = host.split(".")
+    if len(labels) >= 2 and labels[-1]:
+        return labels[-2]
+    return host
+
+
+def source_name(name: str, url: str) -> str:
+    """Best display name for a source: the provider's, else the embed host.
+
+    A provider that names its sources meaningfully ("uqload vostfr") keeps its
+    label; a provider that only numbers them falls back to the embed host.
+    """
+    name = (name or "").strip()
+    if name and not _GENERIC_SOURCE_NAME.match(name):
+        return name
+    return describe_embed(url) or name or "?"
+
+
 def test_all_scrapers_verbose(url: str, headers: dict = {}) -> dict[str, dict]:
     """
     Test all scrapers with timing and error details.

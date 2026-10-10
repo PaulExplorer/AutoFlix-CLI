@@ -370,3 +370,52 @@ def test_probe_sources_reports_progress(fake_get_hls_link, monkeypatch):
 
 def test_probe_sources_on_empty_input():
     assert sp.probe_sources([]) == []
+
+# --- source naming ----------------------------------------------------------
+
+
+def test_numbered_source_is_renamed_after_its_embed(fake_get_hls_link, monkeypatch):
+    # Anime-sama numbers its sources; the embed host is what identifies them.
+    monkeypatch.setattr(
+        sp,
+        "probe_stream",
+        lambda url, headers, config, fetch=None, timeout=None: {
+            "ok": True,
+            "kind": sp.KIND_HLS_MASTER,
+            "heights": [1080],
+            "bandwidths": [],
+            "size": 0,
+        },
+    )
+    embed = Player("Lecteur 2", "https://ansembed.net/embed-def.html")
+    fake_get_hls_link[embed.url] = "https://cdn.tld/a.m3u8"
+
+    ranked = sp.probe_sources([embed], {})
+    assert ranked[0].embed_name == "ansembed"
+    assert ranked[0].menu_label().startswith("ansembed · 1080p")
+
+
+def test_named_source_keeps_its_provider_label(fake_get_hls_link, monkeypatch):
+    monkeypatch.setattr(
+        sp,
+        "probe_stream",
+        lambda url, headers, config, fetch=None, timeout=None: {
+            "ok": True,
+            "kind": sp.KIND_MP4,
+            "heights": [],
+            "bandwidths": [],
+            "size": 1024,
+        },
+    )
+    embed = Player("uqload vostfr", "https://uqload.vc/embed-1.html")
+    fake_get_hls_link[embed.url] = "https://cdn.tld/a.mp4"
+
+    ranked = sp.probe_sources([embed], {})
+    assert ranked[0].embed_name == "uqload vostfr"
+
+
+def test_menu_label_accepts_a_disambiguated_name():
+    source = make_source("embed4me", heights=[1080])
+    assert source.menu_label("embed4me (embed4me.net)").startswith(
+        "embed4me (embed4me.net)"
+    )
