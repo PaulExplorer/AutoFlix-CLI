@@ -200,6 +200,14 @@ class ProgressTracker:
         self.data["player"] = player_code
         self._save_data()
 
+    def get_auto_launch(self) -> bool:
+        """Whether to launch a player without asking which one."""
+        return self.data.get("auto_launch", False)
+
+    def set_auto_launch(self, enabled: bool):
+        self.data["auto_launch"] = bool(enabled)
+        self._save_data()
+
     # --- Developer Mode ---
 
     def get_developer_mode(self) -> bool:
