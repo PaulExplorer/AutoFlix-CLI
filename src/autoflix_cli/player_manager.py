@@ -257,10 +257,7 @@ class _PlaybackAborted(Exception):
 
 def _match_player_config(url: str) -> tuple:
     """Find the embed configuration matching the player host of an URL."""
-    for embed_name, config in player.players.items():
-        if embed_name in url.lower():
-            return config, embed_name
-    return {}, ""
+    return player.match_player_config(url)
 
 
 def _compute_referer(
