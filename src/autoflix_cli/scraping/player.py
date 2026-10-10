@@ -16,7 +16,25 @@ import time
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
-scraper = requests.Session(curl_options=DNS_OPTIONS, allow_redirects="safe")
+import threading
+
+# curl_cffi sessions are not thread-safe: sharing one across the concurrent
+# embed resolution of the auto source picker corrupts in-flight requests.
+# Each thread therefore gets its own session, while the main thread keeps
+# reusing a single pooled connection for the usual sequential flow.
+_thread_local = threading.local()
+
+
+def get_scraper() -> requests.Session:
+    """Return the HTTP session bound to the calling thread."""
+    session = getattr(_thread_local, "scraper", None)
+    if session is None:
+        session = requests.Session(curl_options=DNS_OPTIONS, allow_redirects="safe")
+        _thread_local.scraper = session
+    return session
+
+
+scraper = get_scraper()
 
 # Local data dir (dev override, not shipped in the package wheel):
 # src/autoflix_cli/scraping/player.py -> ../../../data
@@ -112,7 +130,7 @@ def get_hls_link_default(
     if config.get("no-header") or (config.get("m3u8-extractor") or {}).get("no-header"):
         headers = {}
 
-    response = scraper.get(url, headers=headers, impersonate="chrome")
+    response = get_scraper().get(url, headers=headers, impersonate="chrome")
     response.raise_for_status()
 
     code = deobfuscate(response.text)
@@ -192,7 +210,7 @@ def get_hls_link_embed4me(embed_url: str, headers: dict = None, config: dict = N
 
     headers = {"Referer": url_root}
 
-    r = scraper.get(api_url, headers=headers, impersonate="chrome", timeout=10)
+    r = get_scraper().get(api_url, headers=headers, impersonate="chrome", timeout=10)
     r.raise_for_status()
 
     hex_data = r.text.strip()
@@ -217,7 +235,7 @@ def get_hls_link_uqload(url: str, headers: dict, config: dict = None) -> str:
     Returns:
         HLS stream URL
     """
-    response = scraper.get(
+    response = get_scraper().get(
         url.replace("embed-", ""),
         headers={**headers, "Referer": "https://uqload.is/"},
         impersonate="chrome",
@@ -239,7 +257,7 @@ def get_hls_link_sendvid(url: str, headers: dict = None, config: dict = None) ->
     Returns:
         Video URL
     """
-    response = scraper.get(url, impersonate="chrome")
+    response = get_scraper().get(url, impersonate="chrome")
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
@@ -259,7 +277,7 @@ def get_hls_link_sibnet(url: str, headers: dict = None, config: dict = None) -> 
     Returns:
         Video URL
     """
-    response = scraper.get(url, impersonate="chrome")
+    response = get_scraper().get(url, impersonate="chrome")
     response.raise_for_status()
 
     relative_path = response.text.split('player.src([{src: "')[1].split('"')[0]
@@ -348,7 +366,7 @@ def get_hls_link_filemoon(url: str, headers: dict, config: dict = None) -> str:
         return None
 
     code = url.split("/")[-1]
-    response = scraper.get(
+    response = get_scraper().get(
         "https://9n8o.com/api/videos/" + code + "/embed/playback",
         impersonate="chrome",
         headers={
@@ -383,7 +401,7 @@ def get_hls_link_vidoza(url: str, headers: dict, config: dict = None) -> str:
         HLS stream URL
     """
 
-    response = scraper.get(
+    response = get_scraper().get(
         url,
         headers=headers,
         impersonate="chrome",
@@ -408,7 +426,7 @@ def get_hls_link_kakaflix(url: str, headers: dict, config: dict = None) -> str:
     Returns:
         HLS stream URL
     """
-    response = scraper.get(
+    response = get_scraper().get(
         url,
         headers=headers,
         impersonate="chrome",
@@ -436,7 +454,7 @@ def get_hls_link_myvidplay(url: str, headers: dict, config: dict = None) -> str:
     Returns:
         HLS stream URL
     """
-    response = scraper.get(
+    response = get_scraper().get(
         url,
         headers=headers,
         impersonate="chrome",
@@ -469,7 +487,7 @@ def get_hls_link_vidmoly(url: str, headers: dict, config: dict = None) -> str:
     if "Referer" in final_headers and not final_headers["Referer"]:
         del final_headers["Referer"]
 
-    response = scraper.get(
+    response = get_scraper().get(
         url,
         headers=final_headers,
         impersonate="chrome",
@@ -502,7 +520,7 @@ def get_hls_link_veev(url, headers: dict = None, config: dict = None):
 
     # 2. Fetch HTML
     try:
-        html = scraper.get(f"https://veev.to/e/{media_id}", impersonate="chrome").text
+        html = get_scraper().get(f"https://veev.to/e/{media_id}", impersonate="chrome").text
     except Exception as e:
         print(f"Connection error: {e}")
         return None
@@ -568,7 +586,7 @@ def get_hls_link_veev(url, headers: dict = None, config: dict = None):
         # API call to get JSON
         dl_url = f"https://veev.to/dl?op=player_api&cmd=gi&file_code={media_id}&r=https://veev.to&ch={ch}&ie=1"
         try:
-            resp = scraper.get(dl_url, impersonate="chrome").json()
+            resp = get_scraper().get(dl_url, impersonate="chrome").json()
         except:
             continue
 
@@ -607,19 +625,19 @@ def get_hls_link_xtremestream(url, headers, config: dict = None):
 
 def get_hls_link_montmyoboky(url, headers, config: dict = None):
     if "movie" in url:
-        response = scraper.post(url=arkanime.website_origin + "/api/watch/movie-token", data={
+        response = get_scraper().post(url=arkanime.website_origin + "/api/watch/movie-token", data={
             "movieId": url.split(":")[1]
         }, headers=headers)
         response.raise_for_status()
     else:
-        response = scraper.post(url=arkanime.website_origin + "/api/watch/token", data={
+        response = get_scraper().post(url=arkanime.website_origin + "/api/watch/token", data={
             "episodeId": url.split(":")[1]
         }, headers=headers)
         response.raise_for_status()
 
     content_data = response.json()
 
-    response_player = scraper.get(f'{arkanime.website_origin}/api/source/resolve?token={content_data["token"]}', headers=headers)
+    response_player = get_scraper().get(f'{arkanime.website_origin}/api/source/resolve?token={content_data["token"]}', headers=headers)
     response_player.raise_for_status()
 
     player_data = response_player.json()
@@ -630,7 +648,7 @@ def get_hls_link_montmyoboky(url, headers, config: dict = None):
 
 def get_hls_link_vidzy(embed_url: str, headers: dict, config: dict = None) -> str:
 
-    response = scraper.get(
+    response = get_scraper().get(
         embed_url,
         headers=headers,
         impersonate="chrome",
@@ -739,7 +757,7 @@ def get_hls_link_voe(url: str, headers: dict = None, config: dict = None) -> str
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
     )
 
-    response = scraper.get(url, headers=req_headers, impersonate="chrome")
+    response = get_scraper().get(url, headers=req_headers, impersonate="chrome")
     response.raise_for_status()
     html = response.text
     web_url = str(response.url or url)
@@ -753,7 +771,7 @@ def get_hls_link_voe(url: str, headers: dict = None, config: dict = None) -> str
         if not m:
             break
         web_url = m.group(1)
-        response = scraper.get(web_url, headers=req_headers, impersonate="chrome")
+        response = get_scraper().get(web_url, headers=req_headers, impersonate="chrome")
         response.raise_for_status()
         html = response.text
         web_url = str(response.url or web_url)
@@ -764,7 +782,7 @@ def get_hls_link_voe(url: str, headers: dict = None, config: dict = None) -> str
 
     ct, js_path = m.group(1), m.group(2)
     js_url = urllib.parse.urljoin(web_url, js_path)
-    js_resp = scraper.get(js_url, headers=req_headers, impersonate="chrome")
+    js_resp = get_scraper().get(js_url, headers=req_headers, impersonate="chrome")
     js_resp.raise_for_status()
     js_html = js_resp.text
 
@@ -880,6 +898,17 @@ def is_supported(url: str) -> bool:
         return any(kp in url_lower for kp in kakaflix_players.keys())
 
     return any(player in url_lower for player in players.keys())
+
+
+def match_player_config(url: str) -> tuple:
+    """Find the embed configuration matching the player host of an URL.
+
+    Returns ``(config, embed_name)``, both empty when nothing matches.
+    """
+    for embed_name, config in players.items():
+        if embed_name in url.lower():
+            return config, embed_name
+    return {}, ""
 
 
 def test_all_scrapers_verbose(url: str, headers: dict = {}) -> dict[str, dict]:

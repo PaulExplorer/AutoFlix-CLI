@@ -3,14 +3,123 @@ from ..cli_utils import (
     print_info,
     print_warning,
     print_error,
-    print_success
+    print_success,
+    print_divider,
+    console,
 )
 from ..player_manager import play_video
 from ..tracker import tracker
 from ..scraping import player
+from ..scraping import stream_probe
 from ..scraping.player import PLAYER_EXTRACTORS, test_all_scrapers_verbose
 from ..scraping.objects import Player
+from rich.progress import Progress, SpinnerColumn, TextColumn
 import json
+
+
+AUTO_OPTION = "⚡ Auto - test all sources"
+
+
+def _run_auto_probe(players: list, headers: dict) -> list:
+    """Probe every source in parallel, reporting progress as they land."""
+    done = 0
+    total = len(players)
+
+    def on_done(_source):
+        nonlocal done
+        done += 1
+        progress.update(
+            task, description=f"Testing sources... ({done}/{total})"
+        )
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task(description="Testing sources...", total=None)
+        return stream_probe.probe_sources(players, headers, on_done=on_done)
+
+
+def _probe_and_report(players: list, headers: dict) -> tuple:
+    """Probe every source and report the outcome. Returns (working, dead).
+
+    ``working`` is ranked best first, so ``working[0]`` is the one auto mode
+    plays without asking.
+    """
+    sources = _run_auto_probe(players, headers)
+    working = [s for s in sources if s.ok]
+    dead = [s for s in sources if not s.ok]
+
+    print_divider()
+    if not working:
+        print_warning("No source could be resolved.")
+    else:
+        print_success(
+            f"{len(working)}/{len(sources)} source(s) ready, best is "
+            f"[cyan]{working[0].menu_label()}[/cyan]"
+        )
+    for source in dead:
+        print_warning(f"{source.embed_name}: {source.error or 'unusable'}")
+
+    return working, dead
+
+
+def _pick_best_source(players: list, headers: dict, exclude: set = None):
+    """Play the best working source without asking (the auto-source setting).
+
+    ``exclude`` holds the sources already tried, so a retry after a failed
+    playback moves on to the next one instead of replaying the same dead link.
+    """
+    exclude = exclude or set()
+    working, _ = _probe_and_report(players, headers)
+    for source in working:
+        if source.embed_url not in exclude:
+            return source
+    return None
+
+
+def _select_auto_source(players: list, headers: dict):
+    """
+    Resolve every source at once and let the user pick a working one.
+
+    Returns the chosen ResolvedSource, or None when the user backs out or no
+    source survives the probe (the caller then falls back to the plain list).
+    """
+    working, dead = _probe_and_report(players, headers)
+
+    # The best source sits at index 0, so Enter alone plays it while the
+    # arrow keys still allow an explicit pick.
+    options = [s.menu_label() for s in working]
+    if dead:
+        options.append("")
+        options.append(f"── Unreachable ({len(dead)}) ──")
+        options.extend(f"── ✗ {s.embed_name} · {s.error or 'unusable'}" for s in dead)
+    options.append("← Back to source list")
+
+    choice = select_from_list(options, "⚡ Select source (best quality first):")
+    if choice >= len(working):
+        return None
+    return working[choice]
+
+
+def _refresh_if_stale(source):
+    """Re-extract a link that waited too long in the menu before launching.
+
+    A failed re-extract does not cancel the source: the extraction may have
+    hit a transient block while the original link is still alive, and the
+    player reports a dead link far better than we can predict one.
+    """
+    if not source.is_stale:
+        return source
+    print_info("Link may have expired, resolving it again...")
+    refreshed = stream_probe.resolve_source(
+        source.embed_name, source.embed_url, source.headers
+    )
+    if refreshed.ok:
+        return refreshed
+    print_warning(f"{source.embed_name} is no longer resolvable ({refreshed.error}).")
+    return source
 
 
 def _print_dev_episode_context(
@@ -74,50 +183,103 @@ def play_episode_flow(
     if headers is None:
         headers = {}
 
+    # Sources already played, so a retry moves on to the next one instead of
+    # replaying the same dead link.
+    tried_urls: set = set()
+
     while True:
-        # Player Selection Menu
-        player_options = []
-        player_map = []  # maps option index -> Player object
+        resolved_source = None
+        selected_player = None
 
-        for p in supported_players:
-            try:
-                player_options.append(f"{p.name} : {p.url.split('/')[2].split('.')[-2]}")
-            except (IndexError, AttributeError):
-                player_options.append(p.name)
-            player_map.append(p)
+        # Auto-source setting: probe every source and play the best one
+        # without ever showing the source menu. Like the "⚡ Auto" entry it
+        # needs more than one source to have anything to compare.
+        auto_source = tracker.get_auto_source() and len(supported_players) > 1
+        if auto_source:
+            resolved_source = _pick_best_source(
+                supported_players, headers, exclude=tried_urls
+            )
+            if resolved_source is None:
+                print_warning("No working source left, select one manually.")
+                auto_source = False
+            else:
+                print_success(
+                    f"Auto-picked: [cyan]{resolved_source.menu_label()}[/cyan]"
+                )
+                tried_urls.add(resolved_source.embed_url)
+                resolved_source = _refresh_if_stale(resolved_source)
+                selected_player = Player(
+                    name=resolved_source.embed_name,
+                    url=resolved_source.embed_url,
+                )
 
-        # In dev mode, show unsupported players with a clear marker
-        if dev_mode and unsupported_players:
-            player_options.append("")
-            player_options.append("── Unsupported players (dev mode) ──")
-            player_map.append(None)  # separator
-            player_map.append(None)  # separator header
-            for p in unsupported_players:
+        if not auto_source:
+            # Player Selection Menu
+            player_options = []
+            player_map = []  # maps option index -> Player object
+
+            for p in supported_players:
                 try:
-                    domain = p.url.split('/')[2].split('.')[-2]
+                    player_options.append(
+                        f"{p.name} : {p.url.split('/')[2].split('.')[-2]}"
+                    )
                 except (IndexError, AttributeError):
-                    domain = p.url
-                player_options.append(f"⚠ {p.name} ({domain}) [NOT SUPPORTED]")
+                    player_options.append(p.name)
                 player_map.append(p)
 
-        player_options.append("← Back")
+            # In dev mode, show unsupported players with a clear marker
+            if dev_mode and unsupported_players:
+                player_options.append("")
+                player_options.append("── Unsupported players (dev mode) ──")
+                player_map.append(None)  # separator
+                player_map.append(None)  # separator header
+                for p in unsupported_players:
+                    try:
+                        domain = p.url.split('/')[2].split('.')[-2]
+                    except (IndexError, AttributeError):
+                        domain = p.url
+                    player_options.append(f"⚠ {p.name} ({domain}) [NOT SUPPORTED]")
+                    player_map.append(p)
 
-        player_idx = select_from_list(
-            player_options,
-            "🎮 Select Player:",
-        )
+            player_options.append("← Back")
 
-        if player_idx == len(player_options) - 1:  # Back selected
-            return False
+            # Auto only makes sense with something to compare against.
+            auto_index = None
+            if len(supported_players) > 1:
+                auto_index = 0
+                player_options.insert(0, AUTO_OPTION)
+                player_map.insert(0, AUTO_OPTION)
 
-        selected_player = player_map[player_idx]
+            player_idx = select_from_list(
+                player_options,
+                "🎮 Select Player:",
+            )
+
+            if player_idx == len(player_options) - 1:  # Back selected
+                return False
+
+            selected_player = player_map[player_idx]
+
+            # --- Auto mode: test every source, then pick a working one ---
+            if auto_index is not None and player_idx == auto_index:
+                resolved_source = _select_auto_source(supported_players, headers)
+                if resolved_source is None:
+                    continue  # back to the source list
+                resolved_source = _refresh_if_stale(resolved_source)
+                if not resolved_source.ok:
+                    continue
+                selected_player = Player(
+                    name=resolved_source.embed_name, url=resolved_source.embed_url
+                )
 
         # Skip separator lines (user shouldn't land here, but guard anyway)
         if selected_player is None:
             continue
 
         # --- Dev mode: test unsupported players with all scrapers ---
-        if not player.is_supported(selected_player.url):
+        # Auto mode only ever picks supported sources, so the scraper sweep
+        # (which exists to find a parser for an unknown embed) never applies.
+        if resolved_source is None and not player.is_supported(selected_player.url):
             print_info(f"Testing {selected_player.name} with all available scrapers...")
             verbose_results = test_all_scrapers_verbose(selected_player.url, headers)
             for name, res in verbose_results.items():
@@ -160,8 +322,11 @@ def play_episode_flow(
 
         success = play_video(
             selected_player.url,
-            headers=headers,
+            # A pre-resolved source carries the headers it was extracted with,
+            # which are not always the episode-wide ones.
+            headers=resolved_source.headers if resolved_source else headers,
             title=window_title,
+            resolved=resolved_source,
         )
 
         if success:

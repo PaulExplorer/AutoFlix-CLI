@@ -75,6 +75,51 @@ def test_resolve_stream_direct(monkeypatch):
     )
 
 
+def test_embed_domain_from_embed_url():
+    assert pm._embed_domain("https://Uqload.vc/embed-1.html") == "uqload.vc"
+
+
+def test_embed_domain_falls_back_to_stream_for_shorthand():
+    # Shorthand embeds (montmyoboky:535) carry no host; the stream does.
+    assert (
+        pm._embed_domain("montmyoboky:535", "https://cdn.montmyoboku.net/a/master.m3u8")
+        == "cdn.montmyoboku.net"
+    )
+
+
+def test_embed_domain_without_any_host():
+    assert pm._embed_domain("netu:abc123") == ""
+
+
+def test_embed_domain_ignores_bare_word_host():
+    # "https://x" has no dotted host, so the stream host is the reliable one.
+    assert pm._embed_domain("https://x", "https://cdn.tld/a.m3u8") == "cdn.tld"
+
+
+def test_config_for_resolved_keeps_mp4_declared_ext():
+    config, is_mp4 = pm._config_for_resolved({"ext": "mp4"}, "mp4")
+    assert (config["ext"], is_mp4) == ("mp4", True)
+
+
+def test_config_for_resolved_overrides_mp4_ext_on_playlist():
+    # uqload is declared ext:mp4 but answers with an HLS master.
+    config, is_mp4 = pm._config_for_resolved({"ext": "mp4"}, "hls_master")
+    assert (config["ext"], is_mp4) == ("hls", False)
+
+
+def test_config_for_resolved_keeps_other_keys():
+    config, _ = pm._config_for_resolved(
+        {"ext": "mp4", "sec_headers": "A: b"}, "hls_master"
+    )
+    assert config["sec_headers"] == "A: b"
+
+
+def test_config_for_resolved_does_not_mutate_input():
+    original = {"ext": "mp4"}
+    pm._config_for_resolved(original, "hls_master")
+    assert original == {"ext": "mp4"}
+
+
 def test_resolve_launch_mode_defaults_to_proxy():
     # Existing configs without any mode key must keep using the proxy.
     assert pm.resolve_launch_mode({}, "mpv") == "proxy"

@@ -16,6 +16,7 @@ from .cli_utils import (
     console,
 )
 from .scraping import player
+from .scraping import stream_probe
 from . import proxy
 from typing import Dict, Any
 from .tracker import tracker
@@ -257,10 +258,7 @@ class _PlaybackAborted(Exception):
 
 def _match_player_config(url: str) -> tuple:
     """Find the embed configuration matching the player host of an URL."""
-    for embed_name, config in player.players.items():
-        if embed_name in url.lower():
-            return config, embed_name
-    return {}, ""
+    return player.match_player_config(url)
 
 
 def _compute_referer(
@@ -750,6 +748,37 @@ def _print_dev_stream_details(
         print_info(f"[dev] details saved to: {saved}")
 
 
+def _embed_domain(url: str, stream_url: str = None) -> str:
+    """Host used for the Referer and the Alt-Used header.
+
+    Shorthand embeds (``montmyoboky:9646``) carry no host and resolve to a
+    stream that lives on the provider, so the stream host is used instead.
+    """
+    parts = url.split("/")
+    if len(parts) > 2 and "." in parts[2]:
+        return parts[2].lower()
+    if stream_url:
+        parts = stream_url.split("/")
+        if len(parts) > 2 and "." in parts[2]:
+            return parts[2].lower()
+    return ""
+
+
+def _config_for_resolved(player_config: dict, kind: str) -> tuple:
+    """Embed config reconciled with what the probe actually found.
+
+    Returns ``(config, is_mp4)``. An embed pinned to ``ext: "mp4"`` in the
+    config can still answer with a playlist (uqload is the usual suspect), and
+    serving a playlist through /video breaks playback, so the measured kind
+    wins over the declared one.
+    """
+    player_config = player_config or {}
+    is_mp4 = kind == stream_probe.KIND_MP4
+    if not is_mp4 and player_config.get("ext") == "mp4":
+        return {**player_config, "ext": "hls"}, False
+    return player_config, is_mp4
+
+
 def play_video(
     url: str,
     headers: dict,
@@ -758,6 +787,7 @@ def play_video(
     subtitles: list = None,
     is_direct: bool = False,
     is_mp4: bool = False,
+    resolved=None,
 ) -> bool:
     """
     Attempt to play a video with the chosen player.
@@ -771,6 +801,9 @@ def play_video(
             so the user can pick the language inside the player
         is_direct: Whether the URL is a direct media file
         is_mp4: Whether the stream is an MP4
+        resolved: Optional already-probed ResolvedSource (auto source picker).
+            When given, its stream URL, embed config and subtitle are used
+            as is instead of resolving the embed a second time.
 
     Returns:
         True if playback succeeded, False otherwise
@@ -780,13 +813,29 @@ def play_video(
         for old, new in player.new_url.items():
             url = url.replace(old, new)
 
-    print_info(f"Resolving stream for: [cyan]{url}[/cyan]")
+    if resolved:
+        print_info(
+            f"Using pre-resolved source: [cyan]{resolved.embed_name}[/cyan]"
+            f" ({resolved.quality_label})"
+        )
+    else:
+        print_info(f"Resolving stream for: [cyan]{url}[/cyan]")
 
     subtitle_paths = []
     try:
         player_config, matched_player = _match_player_config(url)
 
-        stream_url, extracted_sub = _resolve_stream(url, headers, is_direct)
+        if resolved is not None:
+            # The config must come from the embed the stream was taken from:
+            # re-matching it on ``url`` would attach the wrong headers.
+            player_config, is_mp4 = _config_for_resolved(
+                resolved.player_config or player_config, resolved.kind
+            )
+            stream_url = resolved.stream_url
+            extracted_sub = resolved.subtitle_url
+        else:
+            stream_url, extracted_sub = _resolve_stream(url, headers, is_direct)
+
         if tracker.get_developer_mode():
             _print_dev_stream_details(
                 url, headers, matched_player, player_config, stream_url, extracted_sub
@@ -814,10 +863,7 @@ def play_video(
                 local_subtitle_path = None
 
         # Domain of the source page (used for Referer / Alt-Used headers).
-        try:
-            domain = url.split("/")[2].lower()
-        except IndexError:
-            domain = ""
+        domain = _embed_domain(url, stream_url)
 
         force_manual_mode = False
         while True:  # Loop to allow retrying with another player
