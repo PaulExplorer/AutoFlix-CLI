@@ -5,6 +5,8 @@ player launch) is stubbed, so these tests assert the wiring: when the entry
 appears, what it probes, and what it hands to the player.
 """
 
+import time
+
 import pytest
 
 from autoflix_cli.handlers import playback
@@ -25,6 +27,9 @@ def make_source(name, ok=True, kind=sp.KIND_HLS_MASTER, height=1080, url=None):
         ok=ok,
         kind=kind,
         heights=[height] if height else [],
+        # Freshly probed, so the flow does not re-resolve it for real. Tests
+        # about staleness set this back to 0 explicitly.
+        probed_at=time.monotonic(),
     )
 
 
@@ -32,6 +37,8 @@ def make_source(name, ok=True, kind=sp.KIND_HLS_MASTER, height=1080, url=None):
 def no_dev_mode(monkeypatch):
     monkeypatch.setattr(playback.tracker, "get_developer_mode", lambda: False)
     monkeypatch.setattr(playback.tracker, "save_progress", lambda **kw: None)
+    # Default off; the auto-source tests opt in explicitly.
+    monkeypatch.setattr(playback.tracker, "get_auto_source", lambda: False)
 
 
 def run_flow(players, choices, sources=None, headers=None):
