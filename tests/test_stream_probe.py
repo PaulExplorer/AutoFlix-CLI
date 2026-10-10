@@ -35,7 +35,7 @@ def mp4_head(width=1920, height=1080):
 
 
 def fetch_returning(response, recorder=None):
-    def _fetch(url, headers, range_bytes=False):
+    def _fetch(url, headers, range_bytes=False, timeout=None):
         if recorder is not None:
             recorder.append((url, range_bytes))
         return response
@@ -44,7 +44,7 @@ def fetch_returning(response, recorder=None):
 
 
 def fetch_raising(exc):
-    def _fetch(url, headers, range_bytes=False):
+    def _fetch(url, headers, range_bytes=False, timeout=None):
         raise exc
 
     return _fetch
@@ -204,6 +204,17 @@ def test_probe_transport_error_is_captured():
     assert "TimeoutError" in result["error"]
 
 
+def test_probe_forwards_timeout_to_the_fetcher():
+    seen = {}
+
+    def _fetch(url, headers, range_bytes=False, timeout=None):
+        seen["timeout"] = timeout
+        return sp.ProbeResponse(200, {}, MEDIA.encode())
+
+    sp.probe_stream("https://cdn.tld/a.m3u8", {}, fetch=_fetch, timeout=3.5)
+    assert seen["timeout"] == 3.5
+
+
 # --- ranking ----------------------------------------------------------------
 
 
@@ -314,7 +325,7 @@ def test_probe_sources_ranks_and_keeps_dead_embeds(fake_get_hls_link, monkeypatc
     monkeypatch.setattr(
         sp,
         "probe_stream",
-        lambda url, headers, config, fetch=None: {
+        lambda url, headers, config, fetch=None, timeout=None: {
             "ok": True,
             "kind": sp.KIND_HLS_MASTER if url.endswith("1080.m3u8") else sp.KIND_HLS_MEDIA,
             "heights": [1080] if url.endswith("1080.m3u8") else [],
@@ -336,7 +347,7 @@ def test_probe_sources_reports_progress(fake_get_hls_link, monkeypatch):
     monkeypatch.setattr(
         sp,
         "probe_stream",
-        lambda url, headers, config, fetch=None: {
+        lambda url, headers, config, fetch=None, timeout=None: {
             "ok": True,
             "kind": sp.KIND_HLS_MEDIA,
             "heights": [],

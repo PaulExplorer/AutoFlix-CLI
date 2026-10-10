@@ -164,7 +164,9 @@ class ProbeResponse:
         return self.content.decode("utf-8", errors="replace")
 
 
-def _default_fetch(url: str, headers: dict, *, range_bytes: bool = False) -> ProbeResponse:
+def _default_fetch(
+    url: str, headers: dict, *, range_bytes: bool = False, timeout: float = DEFAULT_TIMEOUT
+) -> ProbeResponse:
     """Fetch a stream with the same impersonated stack the proxy uses."""
     from curl_cffi import requests
 
@@ -181,7 +183,9 @@ def _default_fetch(url: str, headers: dict, *, range_bytes: bool = False) -> Pro
 
     session = requests.Session(curl_options=DNS_OPTIONS, allow_redirects="safe")
     try:
-        response = session.get(url, headers=request_headers, impersonate="chrome")
+        response = session.get(
+            url, headers=request_headers, impersonate="chrome", timeout=timeout
+        )
     finally:
         session.close()
 
@@ -205,6 +209,7 @@ def probe_stream(
     headers: dict,
     player_config: dict = None,
     fetch=None,
+    timeout: float = DEFAULT_TIMEOUT,
 ) -> dict:
     """Check a resolved link and report its kind, size and available heights.
 
@@ -217,7 +222,9 @@ def probe_stream(
     result = {"ok": False, "kind": KIND_DEAD, "heights": [], "bandwidths": [], "size": 0}
 
     try:
-        response = fetch(stream_url, headers, range_bytes=(kind == KIND_MP4))
+        response = fetch(
+            stream_url, headers, range_bytes=(kind == KIND_MP4), timeout=timeout
+        )
     except Exception as e:
         result["error"] = f"{type(e).__name__}: {e}"
         return result
@@ -358,7 +365,9 @@ def _resolve_one(embed_name: str, embed_url: str, headers: dict, timeout: float,
     source.stream_url = stream_url
     source.subtitle_url = subtitle_url
 
-    probe = probe_stream(stream_url, source.headers, config, fetch=fetch)
+    probe = probe_stream(
+        stream_url, source.headers, config, fetch=fetch, timeout=timeout
+    )
     source.ok = probe["ok"]
     source.kind = probe["kind"]
     source.heights = probe["heights"]
@@ -402,7 +411,7 @@ def probe_sources(
     Args:
         embeds: Iterable of ``Player`` objects (name + embed URL).
         headers: Base headers of the episode, sent to every embed.
-        timeout: Kept for API symmetry; the fetch layer owns the real timeout.
+        timeout: Per-request timeout, in seconds, for each source.
         max_workers: Size of the resolution thread pool.
         fetch: Injected fetcher, for tests.
         on_start: Called with each embed name before it is resolved.

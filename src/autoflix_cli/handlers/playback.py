@@ -79,7 +79,12 @@ def _select_auto_source(players: list, headers: dict):
 
 
 def _refresh_if_stale(source):
-    """Re-extract a link that waited too long in the menu before launching."""
+    """Re-extract a link that waited too long in the menu before launching.
+
+    A failed re-extract does not cancel the source: the extraction may have
+    hit a transient block while the original link is still alive, and the
+    player reports a dead link far better than we can predict one.
+    """
     if not source.is_stale:
         return source
     print_info("Link may have expired, resolving it again...")
