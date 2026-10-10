@@ -764,6 +764,21 @@ def _embed_domain(url: str, stream_url: str = None) -> str:
     return ""
 
 
+def _config_for_resolved(player_config: dict, kind: str) -> tuple:
+    """Embed config reconciled with what the probe actually found.
+
+    Returns ``(config, is_mp4)``. An embed pinned to ``ext: "mp4"`` in the
+    config can still answer with a playlist (uqload is the usual suspect), and
+    serving a playlist through /video breaks playback, so the measured kind
+    wins over the declared one.
+    """
+    player_config = player_config or {}
+    is_mp4 = kind == stream_probe.KIND_MP4
+    if not is_mp4 and player_config.get("ext") == "mp4":
+        return {**player_config, "ext": "hls"}, False
+    return player_config, is_mp4
+
+
 def play_video(
     url: str,
     headers: dict,
@@ -813,10 +828,11 @@ def play_video(
         if resolved is not None:
             # The config must come from the embed the stream was taken from:
             # re-matching it on ``url`` would attach the wrong headers.
-            player_config = resolved.player_config or player_config
+            player_config, is_mp4 = _config_for_resolved(
+                resolved.player_config or player_config, resolved.kind
+            )
             stream_url = resolved.stream_url
             extracted_sub = resolved.subtitle_url
-            is_mp4 = resolved.kind == stream_probe.KIND_MP4
         else:
             stream_url, extracted_sub = _resolve_stream(url, headers, is_direct)
 
