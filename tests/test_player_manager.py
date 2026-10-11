@@ -4,6 +4,96 @@ import urllib.parse
 from autoflix_cli import player_manager as pm
 from autoflix_cli import proxy
 from autoflix_cli.scraping import player
+from autoflix_cli.scraping.stream_probe import KIND_HLS_MASTER, ResolvedSource
+
+
+def _make_source(stream_url, **overrides):
+    params = {
+        "embed_name": "morencius",
+        "embed_url": "https://morencius.com/embed/1",
+        "headers": {"Referer": "https://lecteurvideo.com/"},
+        "player_config": {"type": "default"},
+        "stream_url": stream_url,
+        "kind": KIND_HLS_MASTER,
+        "ok": True,
+    }
+    params.update(overrides)
+    return ResolvedSource(**params)
+
+
+def test_refresh_resolved_source_returns_fresh(monkeypatch):
+    fresh = _make_source("https://cdn/new.m3u8")
+    monkeypatch.setattr(
+        pm.stream_probe, "resolve_source", lambda *a, **k: fresh
+    )
+    old = _make_source("https://cdn/old.m3u8")
+    assert pm._refresh_resolved_source(old) is fresh
+
+
+def test_refresh_resolved_source_dead_returns_none(monkeypatch):
+    dead = _make_source(None, ok=False, error="no stream found")
+    monkeypatch.setattr(
+        pm.stream_probe, "resolve_source", lambda *a, **k: dead
+    )
+    assert pm._refresh_resolved_source(_make_source("https://cdn/old.m3u8")) is None
+
+
+def test_refresh_resolved_source_exception_returns_none(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("dns")
+
+    monkeypatch.setattr(pm.stream_probe, "resolve_source", boom)
+    assert pm._refresh_resolved_source(_make_source("https://cdn/old.m3u8")) is None
+
+
+def test_play_video_retry_reresolves_before_relaunch(monkeypatch):
+    old = _make_source("https://cdn/old.m3u8")
+    fresh = _make_source("https://cdn/new.m3u8")
+    monkeypatch.setattr(
+        pm.stream_probe, "resolve_source", lambda *a, **k: fresh
+    )
+    monkeypatch.setattr(
+        pm, "_match_player_config", lambda url: ({"type": "default"}, "morencius")
+    )
+    monkeypatch.setattr(pm.tracker, "get_player", lambda: "mpv")
+    monkeypatch.setattr(pm, "_get_player_executable", lambda code: "/usr/bin/mpv")
+
+    launches = []
+
+    def fake_launch(**kwargs):
+        launches.append(kwargs["stream_url"])
+        return len(launches) > 1
+
+    monkeypatch.setattr(pm, "_launch_player", fake_launch)
+    monkeypatch.setattr(pm, "select_from_list", lambda *a, **k: 1)
+
+    assert pm.play_video(old.embed_url, dict(old.headers), resolved=old) is True
+    assert launches == ["https://cdn/old.m3u8", "https://cdn/new.m3u8"]
+
+
+def test_play_video_retry_keeps_old_url_when_reresolve_fails(monkeypatch):
+    old = _make_source("https://cdn/old.m3u8")
+    dead = _make_source(None, ok=False, error="gone")
+    monkeypatch.setattr(
+        pm.stream_probe, "resolve_source", lambda *a, **k: dead
+    )
+    monkeypatch.setattr(
+        pm, "_match_player_config", lambda url: ({"type": "default"}, "morencius")
+    )
+    monkeypatch.setattr(pm.tracker, "get_player", lambda: "mpv")
+    monkeypatch.setattr(pm, "_get_player_executable", lambda code: "/usr/bin/mpv")
+
+    launches = []
+
+    def fake_launch(**kwargs):
+        launches.append(kwargs["stream_url"])
+        return len(launches) > 1
+
+    monkeypatch.setattr(pm, "_launch_player", fake_launch)
+    monkeypatch.setattr(pm, "select_from_list", lambda *a, **k: 1)
+
+    assert pm.play_video(old.embed_url, dict(old.headers), resolved=old) is True
+    assert launches == ["https://cdn/old.m3u8", "https://cdn/old.m3u8"]
 
 
 def test_guess_subtitle_ext():

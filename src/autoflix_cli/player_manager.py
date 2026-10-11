@@ -256,6 +256,30 @@ class _PlaybackAborted(Exception):
     """Playback failed in a way that must not offer a retry."""
 
 
+def _refresh_resolved_source(resolved):
+    """Re-resolve a failed pre-resolved source (fresh CDN token).
+
+    Signed-URL CDNs hand out short-lived, sometimes single-use tokens and
+    occasionally serve a degraded playlist; relaunching the same URL then
+    fails while a fresh resolve succeeds. Returns the fresh source, or None
+    when the re-resolve itself fails (the caller keeps the old URL).
+    """
+    try:
+        print_info("Link may have failed, resolving it again...")
+        fresh = stream_probe.resolve_source(
+            resolved.embed_name, resolved.embed_url, resolved.headers
+        )
+    except Exception as e:
+        print_warning(f"Could not re-resolve source: {e}")
+        return None
+    if not fresh.ok or not fresh.stream_url:
+        print_warning(
+            f"Re-resolved source is unusable ({fresh.error or 'no stream'})."
+        )
+        return None
+    return fresh
+
+
 def _match_player_config(url: str) -> tuple:
     """Find the embed configuration matching the player host of an URL."""
     return player.match_player_config(url)
@@ -931,6 +955,17 @@ def play_video(
             if retry == 2:  # Back
                 force_manual_mode = True
                 return False
+            # A failed launch often means a consumed/expired signed URL:
+            # retry with a freshly resolved stream instead of the same one.
+            if resolved is not None:
+                fresh = _refresh_resolved_source(resolved)
+                if fresh is not None:
+                    resolved = fresh
+                    player_config, is_mp4 = _config_for_resolved(
+                        resolved.player_config or player_config, resolved.kind
+                    )
+                    stream_url = resolved.stream_url
+                    domain = _embed_domain(url, stream_url)
             # Otherwise loop to try again.
 
     finally:
