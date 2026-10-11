@@ -307,6 +307,8 @@ def get_hls_link_default(
     The page is searched in two forms: raw (HTML attributes stay intact)
     and deobfuscated (unpacked JavaScript, where packed players hide the
     URL). Extractions, in order:
+        - EarnVids/StreamHide links blob (hls4 > hls3 > hls2)
+        - jwplayer sources:[{file:"..."}] blocks
         - HLS playlist URL (master.*, *.m3u8)          [primary]
         - classic video file URL (.mp4, .webm, .m4v, .mov)
         - iframe redirect (container players)
@@ -316,26 +318,50 @@ def get_hls_link_default(
     if config.get("no-header") or (config.get("m3u8-extractor") or {}).get("no-header"):
         headers = {}
 
-    response = get_scraper().get(url, headers=headers, impersonate="chrome")
+    response = _fetch_embed_page(url, headers)
     response.raise_for_status()
+    page_url = str(response.url or url)
 
     code = deobfuscate(response.text)
+    try:
+        unpacked = _unpack_all(response.text)
+    except Exception:
+        unpacked = code
     for old, new in (config.get("url-replacements") or {}).items():
         code = code.replace(old, new)
+        unpacked = unpacked.replace(old, new)
 
-    # 1. HLS playlist URL. Raw page first (JS beautification turns
+    # 1. EarnVids/StreamHide links blob (unpacked first, then raw).
+    for text in (unpacked, code, response.text):
+        stream_url = _extract_streamhide_links(text, page_url)
+        if stream_url:
+            return stream_url
+
+    # 2. jwplayer sources:[{file:"..."}] blocks (unpacked first, then raw).
+    for text in (unpacked, code, response.text):
+        stream_url = _extract_jwplayer_source(text, page_url)
+        if stream_url:
+            return stream_url
+
+    # 3. HLS playlist URL. Raw page first (JS beautification turns
     # "https://" into "https: //", so it cannot be trusted for plain HTML),
     # then deobfuscated JavaScript.
-    stream_url = extract_hls_url(response.text) or extract_hls_url(code)
+    stream_url = (
+        extract_hls_url(response.text) or extract_hls_url(code) or extract_hls_url(unpacked)
+    )
     if stream_url:
         return stream_url
 
-    # 2. Classic video file URL (direct MP4/WebM players)
-    stream_url = extract_video_url(response.text) or extract_video_url(code)
+    # 4. Classic video file URL (direct MP4/WebM players)
+    stream_url = (
+        extract_video_url(response.text)
+        or extract_video_url(code)
+        or extract_video_url(unpacked)
+    )
     if stream_url:
         return stream_url
 
-    # 3. iframe redirect (container players)
+    # 5. iframe redirect (container players)
     soup = BeautifulSoup(response.text, "html.parser")
     iframe = soup.find("iframe")
     if iframe and iframe.get("src"):
