@@ -81,11 +81,6 @@ kakaflix_players = load_config(
 RESTRICTED_MARKER = "Video embed restricted for this domain"
 FALLBACK_REFERERS = ("https://lecteurvideo.com/",)
 
-DEFAULT_SCRAPER_UA = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
-
 
 def _fetch_embed_page(url: str, headers: dict):
     """GET an embed page, retrying with alternate Referers when rejected.
@@ -97,7 +92,6 @@ def _fetch_embed_page(url: str, headers: dict):
     fallback. The first neither-403-nor-restricted page is returned.
     """
     req_headers = dict(headers or {})
-    req_headers.setdefault("User-Agent", DEFAULT_SCRAPER_UA)
     host = urllib.parse.urlparse(url).hostname or ""
     host_root = f"https://{host}/" if host else ""
 
@@ -542,7 +536,6 @@ def get_hls_link_filemoon(url: str, headers: dict, config: dict = None) -> str |
 
     api_url = f"{parsed.scheme}://{parsed.netloc}/api/videos/{code}"
     req_headers = dict(headers or {})
-    req_headers.setdefault("User-Agent", DEFAULT_SCRAPER_UA)
     req_headers.setdefault("Referer", url)
 
     response = get_scraper().get(api_url, headers=req_headers, impersonate="chrome")
@@ -899,10 +892,6 @@ def get_hls_link_voe(url: str, headers: dict = None, config: dict = None) -> str
         HLS stream URL (preferred) or MP4 fallback, None on failure.
     """
     req_headers = dict(headers or {})
-    req_headers.setdefault(
-        "User-Agent",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
-    )
 
     response = get_scraper().get(url, headers=req_headers, impersonate="chrome")
     response.raise_for_status()
