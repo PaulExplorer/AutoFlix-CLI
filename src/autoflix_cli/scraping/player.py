@@ -436,27 +436,15 @@ def get_hls_link_embed4me(embed_url: str, headers: dict = None, config: dict = N
     return source
 
 
-def get_hls_link_uqload(url: str, headers: dict, config: dict = None) -> str:
+def get_hls_link_uqload(url: str, headers: dict, config: dict = None) -> str | None:
+    """Extract HLS link from uqload players.
+
+    uqload serves the same XUpload/jwplayer templates as the rest of the
+    family now (packed ``sources:[{file:...}]`` or the legacy
+    ``sources: ["..."]`` form), so this delegates to the default extractor,
+    which also retries an allowlisted Referer when the embed is restricted.
     """
-    Extract HLS link from uqload players.
-
-    Args:
-        url: Player URL
-        headers: HTTP headers for the request
-
-    Returns:
-        HLS stream URL
-    """
-    response = get_scraper().get(
-        url.replace("embed-", ""),
-        headers={**headers, "Referer": "https://uqload.is/"},
-        impersonate="chrome",
-    )
-    response.raise_for_status()
-
-    link = response.text.split('sources: ["')[1].split('"')[0]
-
-    return link
+    return get_hls_link_default(url, headers, config)
 
 
 def get_hls_link_sendvid(url: str, headers: dict = None, config: dict = None) -> str:
