@@ -74,6 +74,192 @@ kakaflix_players = load_config(
 )
 
 
+# Hosts of the XUpload/EarnVids/StreamHide family refuse embeds whose
+# Referer domain is not allowlisted and answer 200 with this marker instead
+# of a player. lecteurvideo.com is allowlisted everywhere (it is the proxy
+# Coflix itself routes embeds through), so it is used as a fallback.
+RESTRICTED_MARKER = "Video embed restricted for this domain"
+FALLBACK_REFERERS = ("https://lecteurvideo.com/",)
+
+DEFAULT_SCRAPER_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+def _fetch_embed_page(url: str, headers: dict):
+    """GET an embed page, retrying with alternate Referers when rejected.
+
+    Some hosts answer 403 (fsvid) or 200 with a "Video embed restricted"
+    marker (EarnVids/StreamHide/uqload family) unless the Referer domain is
+    allowlisted. Candidates are tried in order: the caller Referer (or the
+    embed host root when missing), the embed host root, then the universal
+    fallback. The first neither-403-nor-restricted page is returned.
+    """
+    req_headers = dict(headers or {})
+    req_headers.setdefault("User-Agent", DEFAULT_SCRAPER_UA)
+    host = urllib.parse.urlparse(url).hostname or ""
+    host_root = f"https://{host}/" if host else ""
+
+    candidates: list = [req_headers.get("Referer") or host_root]
+    if host_root and host_root not in candidates:
+        candidates.append(host_root)
+    for fallback in FALLBACK_REFERERS:
+        if fallback not in candidates:
+            candidates.append(fallback)
+
+    last = None
+    for referer in candidates:
+        attempt_headers = dict(req_headers)
+        if referer:
+            attempt_headers["Referer"] = referer
+        try:
+            response = get_scraper().get(
+                url, headers=attempt_headers, impersonate="chrome"
+            )
+        except Exception:
+            continue
+        last = response
+        if response.status_code == 403:
+            continue
+        try:
+            response.raise_for_status()
+        except Exception:
+            continue
+        if RESTRICTED_MARKER not in response.text:
+            return response
+    if last is not None:
+        return last
+    return get_scraper().get(url, headers=req_headers, impersonate="chrome")
+
+
+def _unpack_all(html: str) -> str:
+    """Unpack every Dean Edwards eval block and append the results to the HTML.
+
+    The single-shot whole-page unpack misses pages with several eval blocks
+    (or HTML wrappers the unpacker chokes on); searching raw + unpacked text
+    together is what ResolveURL/mediaflow-proxy do.
+    """
+    from jsbeautifier.unpackers import packer as js_packer
+
+    parts = [html]
+    for match in re.finditer(
+        r"eval\(function\(p,a,c,k,e,d.*?</script>", html, re.DOTALL | re.IGNORECASE
+    ):
+        try:
+            if js_packer.detect(match.group(0)):
+                parts.append(js_packer.unpack(match.group(0)))
+        except Exception:
+            continue
+    if len(parts) == 1:
+        try:
+            if js_packer.detect(html):
+                parts.append(js_packer.unpack(html))
+        except Exception:
+            pass
+    return "\n".join(parts)
+
+
+def _extract_streamhide_links(text: str, base_url: str) -> str | None:
+    """Extract a stream from EarnVids/StreamHide-style ``links={...}`` blobs.
+
+    The player boots with ``sources:[{file:links.hls4||links.hls3||links.hls2}]``
+    where ``links`` maps renditions to URLs (``hls4`` is usually a relative
+    ``/stream/...`` path). Same priority as the web player.
+    """
+    match = re.search(r"links\s*=\s*(\{[^;]*\})", text)
+    if not match:
+        return None
+    try:
+        links = json.loads(match.group(1).replace("\\/", "/"))
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(links, dict):
+        return None
+    for key in ("hls4", "hls3", "hls2"):
+        candidate = links.get(key)
+        if candidate and isinstance(candidate, str):
+            return urllib.parse.urljoin(base_url, candidate.strip())
+    return None
+
+
+def _extract_jwplayer_source(text: str, base_url: str) -> str | None:
+    """Extract a ``sources:[{file:"..."}]`` URL (jwplayer setup blocks)."""
+    match = re.search(
+        r'sources\s*:\s*\[\s*\{\s*file\s*:\s*["\']([^"\']+)["\']',
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return urllib.parse.urljoin(base_url, match.group(1).strip())
+
+
+def get_hls_link_xupload(url: str, headers: dict, config: dict = None) -> str | None:
+    """Extract the stream from XUpload-based hosts (vidzy, fsvid, uqload...).
+
+    The player setup hides the source in a base64 blob decoded in-browser as::
+
+        b64decode -> reverse -> XOR((0x3D + i*89 + H + BC) & 255)
+
+    where ``H`` is the embed hostname checksum and ``BC`` a measurement the
+    page takes in a real browser (``offsetWidth`` of a 50% child inside a
+    ``calc(1in + Npx)`` box, i.e. ``BC = (96 + N) / 2`` at standard DPI).
+    ``N`` is read from the page itself; when absent, ``BC`` is brute-forced
+    (256 tries on ~200 bytes, negligible) and the first ``https?://`` result
+    wins. A wrong key yields garbage, never a link.
+    """
+    response = _fetch_embed_page(url, headers)
+    html = response.text
+    page_url = str(response.url or url)
+    hostname = urllib.parse.urlparse(page_url).hostname or ""
+
+    try:
+        unpacked = _unpack_all(html)
+    except Exception:
+        unpacked = html
+
+    blobs: list[str] = []
+    for text in (html, unpacked):
+        for found in re.findall(
+            r"\}\)\(\s*[\"']([^\"']{50,})[\"']\s*\)", text
+        ):
+            if found not in blobs:
+                blobs.append(found)
+    if not blobs:
+        return None
+
+    seed = sum(hostname.encode("utf-8", "ignore")) & 255
+    width = re.search(r"1in \+ (\d+)px", unpacked)
+    bc_values: list[int] = []
+    if width:
+        bc_values.append((96 + int(width.group(1))) // 2)
+    bc_values.extend(bc for bc in range(256) if bc not in bc_values)
+
+    has_browser_check = "offsetWidth" in unpacked or "+BC" in unpacked
+    for blob in blobs:
+        try:
+            raw = base64.b64decode(blob)
+        except (binascii.Error, ValueError):
+            continue
+        raw = raw[::-1]
+        for bc in bc_values:
+            out = bytes(
+                value ^ ((0x3D + i * 89 + seed + bc) & 255)
+                for i, value in enumerate(raw)
+            )
+            try:
+                candidate = out.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            if re.match(r"^https?://[^\s\"'\\]+$", candidate):
+                return candidate
+            # Old template without the browser check: only the seed matters.
+            if not has_browser_check:
+                break
+    return None
+
+
 def extract_hls_url(unpacked_code):
     pattern = r'(https?://[^"\'\\\s]*master\.txt[^"\'\\\s]*)'
     match = re.search(pattern, unpacked_code)
@@ -646,67 +832,9 @@ def get_hls_link_montmyoboky(url, headers, config: dict = None):
 
     return player_data["videoUrl"], subtitle_url
 
-def get_hls_link_vidzy(embed_url: str, headers: dict, config: dict = None) -> str:
-
-    response = get_scraper().get(
-        embed_url,
-        headers=headers,
-        impersonate="chrome",
-    )
-
-    response.raise_for_status()
-
-    page_html = response.text
-
-    source_block = re.search(
-        r'sources\s*:\s*\[\s*\{\s*src\s*:\s*'
-        r'\(function\(s\).*?\}\)\(\s*["\']([^"\']+)["\']\s*\)',
-        page_html,
-        re.I | re.S,
-    )
-    if not source_block:
-        raise RuntimeError(
-            "Vidzy: unable to find the obfuscated Video.js source"
-        )
-
-    encoded_source = source_block.group(1)
-
-    hostname = urllib.parse.urlparse(embed_url).hostname or ""
-
-    H = 0
-    for char in hostname:
-        H = (H + ord(char)) & 255
-
-    try:
-        decoded = base64.b64decode(encoded_source)
-    except Exception as e:
-        raise RuntimeError(
-            f"Vidzy: invalid base64 source: {e}"
-        ) from e
-
-    decoded = decoded[::-1]
-
-    result = bytearray()
-
-    for i, value in enumerate(decoded):
-        key = (0x3D + i * 89 + H) & 255
-        result.append(value ^ key)
-
-    try:
-        real_url = result.decode("utf-8")
-    except UnicodeDecodeError as e:
-        raise RuntimeError(
-            f"Vidzy: decoded source is not UTF-8: {e}"
-        ) from e
-
-    real_url = real_url.strip()
-
-    if not re.match(r"^https?://", real_url, re.I):
-        raise RuntimeError(
-            f"Vidzy: decoded source is not a valid HTTP URL: {real_url}"
-        )
-
-    return real_url
+def get_hls_link_vidzy(embed_url: str, headers: dict, config: dict = None) -> str | None:
+    """Legacy alias: Vidzy now uses the shared XUpload extractor."""
+    return get_hls_link_xupload(embed_url, headers, config)
 
 
 def _voe_b64decode(data: str) -> str:
@@ -832,6 +960,7 @@ PLAYER_EXTRACTORS = {
     "xtremestream": get_hls_link_xtremestream,
     "montmyoboky": get_hls_link_montmyoboky,
     "vidzy": get_hls_link_vidzy,
+    "xupload": get_hls_link_xupload,
     "voe": get_hls_link_voe,
 }
 

@@ -4,9 +4,9 @@
 // ============================================================================
 //
 // type        Which extractor in scraping/player.py resolves the m3u8.
-//             Values: default, sendvid, sibnet, uqload, vidoza, filemoon,
-//             kakaflix, myvidplay, vidmoly, embed4me, veev, xtremestream,
-//             montmyoboky, vidzy, voe.
+//             Values: default, xupload, sendvid, sibnet, uqload, vidoza,
+//             filemoon, kakaflix, myvidplay, vidmoly, embed4me, veev,
+//             xtremestream, montmyoboky, vidzy (alias of xupload), voe.
 //
 // mode        DEFAULT MODE FOR EVERY PLAYER. "proxy" or "direct".
 //             Optional (defaults to "proxy"). Kept for backward
@@ -68,9 +68,9 @@
   "ups2up": { "type": "default" },
   "ico3c": { "type": "default" },
   "fsvid": {
-    "type": "default",
-    "no-header": true,
+    "type": "xupload",
   },
+  "waaw": { "type": "default" },
   "darkibox": { "type": "default" },
   "minochinos": { "type": "default", "modes": { "mpv": "direct" } },
   "movearnpre": {
@@ -149,7 +149,7 @@
   },
   "xtremestream": { "type": "xtremestream" },
   "montmyoboky": {"type": "montmyoboky", "modes": { "mpv": "direct" } },
-  "vidzy": { "type": "vidzy", "referrer": "https://vidzy.org/" },
+  "vidzy": { "type": "xupload", "referrer": "https://vidzy.org/" },
   "voe": { "type": "voe", "modes": { "mpv": "direct" } },
   "voe.sx": { "type": "voe", "modes": { "mpv": "direct" }},
   "jeremyparticipantanything": { "type": "voe", "modes": { "mpv": "direct" } },
