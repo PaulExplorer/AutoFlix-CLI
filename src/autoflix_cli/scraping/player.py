@@ -498,107 +498,112 @@ def get_hls_link_sibnet(url: str, headers: dict = None, config: dict = None) -> 
     return link
 
 
-def get_hls_link_filemoon(url: str, headers: dict, config: dict = None) -> str:
+def _filemoon_b64url(data: str) -> bytes:
+    """Decode base64url, tolerating missing padding."""
+    padded = data.replace("-", "+").replace("_", "/")
+    padding = 4 - len(padded) % 4
+    if padding != 4:
+        padded += "=" * padding
+    return base64.b64decode(padded)
+
+
+def _filemoon_select_parts(playback: dict, key_parts: list) -> list:
+    """Select the key parts used by this payload version.
+
+    The player bundle maps ``version "n"`` (``1``..``20``) to the 1-based
+    indices ``[n, 31 - n]`` and concatenates only those two parts. Unknown
+    versions fall back to every part (pre-v7 payloads).
     """
-    Extract HLS link from filemoon players.
-    Follows iframe redirect and deobfuscates JavaScript.
+    try:
+        version = str(playback.get("version", "")).strip()
+        index = int(version)
+    except (TypeError, ValueError):
+        return key_parts
+    if not 1 <= index <= 20:
+        return key_parts
+    wanted = (index, 31 - index)
+    if any(i < 1 or i > len(key_parts) for i in wanted):
+        return key_parts
+    selected = [key_parts[i - 1] for i in wanted]
+    if any(not isinstance(part, str) or not part for part in selected):
+        return key_parts
+    return selected
+
+
+def get_hls_link_filemoon(url: str, headers: dict, config: dict = None) -> str | None:
+    """
+    Extract HLS link from Filemoon players (filemoon.sx and mirrors).
+
+    Calls ``https://<host>/api/videos/<code>`` and decrypts the AES-256-GCM
+    ``playback`` payload. The key is the concatenation of the two version
+    selected ``key_parts`` entries; the GCM tag is the last 16 payload bytes. The HLS source
+    (``mime_type == application/vnd.apple.mpegurl``) wins, any other source
+    with a URL is the fallback.
 
     Args:
-        url: Player URL
+        url: Player URL (https://<host>/e/<code> or /d/<code>)
+        headers: HTTP headers for the request
 
     Returns:
-        HLS stream URL
+        HLS stream URL, or None when the video is gone.
     """
+    parsed = urllib.parse.urlparse(url)
+    code = parsed.path.rstrip("/").split("/")[-1] or ""
+    if not code or code in ("e", "d", "embed"):
+        return get_hls_link_default(url, headers, config)
 
-    def decode_base64(text):
-        """Decodes URL-safe Base64 with proper padding."""
-        if not text:
-            return b""
-        # Add padding if necessary and decode
-        return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    api_url = f"{parsed.scheme}://{parsed.netloc}/api/videos/{code}"
+    req_headers = dict(headers or {})
+    req_headers.setdefault("User-Agent", DEFAULT_SCRAPER_UA)
+    req_headers.setdefault("Referer", url)
 
-    def try_decrypt(key, iv, full_payload):
-        """Tries to decrypt the payload using two common GCM tag positions."""
-
-        # Combination 1: Authentication Tag at the end (Standard AES-GCM)
-        try:
-            ciphertext = full_payload[:-16]
-            tag = full_payload[-16:]
-            cipher = AES.new(key, AES.MODE_GCM, nonce=iv)
-            return cipher.decrypt_and_verify(ciphertext, tag).decode("utf-8")
-        except Exception:
-            pass
-
-        # Combination 2: Authentication Tag at the beginning
-        try:
-            tag = full_payload[:16]
-            ciphertext = full_payload[16:]
-            cipher = AES.new(key, AES.MODE_GCM, nonce=iv)
-            return cipher.decrypt_and_verify(ciphertext, tag).decode("utf-8")
-        except Exception:
-            pass
-
+    response = get_scraper().get(api_url, headers=req_headers, impersonate="chrome")
+    if response.status_code in (404, 410):
         return None
-
-    def solve_decryption(json_str):
-        """Parses the JSON and attempts multiple key combinations for decryption."""
-        data = json.loads(json_str)
-        playback = data.get("playback", {})
-
-        # 1. Prepare potential keys
-        key_parts = playback.get("key_parts", [])
-        decrypt_keys = playback.get("decrypt_keys", {})
-
-        potential_keys = []
-
-        # Hypothesis A: Concatenate key_parts[0] + key_parts[1]
-        if len(key_parts) >= 2:
-            part0 = decode_base64(key_parts[0])
-            part1 = decode_base64(key_parts[1])
-            potential_keys.append(part0 + part1)
-            potential_keys.append(part1 + part0)
-
-        # Hypothesis B: Concatenate edge_1 + edge_2 (16 + 16 = 32 bytes for AES-256)
-        if "edge_1" in decrypt_keys and "edge_2" in decrypt_keys:
-            edge1 = decode_base64(decrypt_keys["edge_1"])
-            edge2 = decode_base64(decrypt_keys["edge_2"])
-            potential_keys.append(edge1 + edge2)
-
-        # 2. Prepare data
-        iv = decode_base64(playback.get("iv"))
-        payload = decode_base64(playback.get("payload"))
-
-        # 3. Test all key combinations
-        for i, key in enumerate(potential_keys):
-            result = try_decrypt(key, iv, payload)
-            if result:
-                return result
-
-        print("Error: No valid decryption found.")
-        return None
-
-    code = url.split("/")[-1]
-    response = get_scraper().get(
-        "https://9n8o.com/api/videos/" + code + "/embed/playback",
-        impersonate="chrome",
-        headers={
-            "Referer": "https://9n8o.com/g1x/" + code + "/",
-            "X-Embed-Origin": headers["Referer"]
-            .removeprefix("https://")
-            .removesuffix("/"),
-            "X-Embed-Parent": "https://filemoon.sx/e/" + code,
-            "X-Embed-Referer": headers["Referer"],
-        },
-    )
     response.raise_for_status()
 
-    decrypted_json_str = solve_decryption(response.text)
-    if decrypted_json_str:
-        video_data = json.loads(decrypted_json_str)
-        video_url = video_data["sources"][0]["url"]
-        return video_url
-    else:
-        return get_hls_link(url, headers)
+    try:
+        data = response.json()
+    except ValueError:
+        return get_hls_link_default(url, headers, config)
+
+    if isinstance(data, dict) and data.get("error"):
+        return None
+
+    playback = (data.get("playback") or {}) if isinstance(data, dict) else {}
+    key_parts = playback.get("key_parts") or []
+    payload_b64 = playback.get("payload")
+    iv_b64 = playback.get("iv")
+    if not key_parts or not payload_b64 or not iv_b64:
+        return get_hls_link_default(url, headers, config)
+
+    try:
+        parts = [
+            part
+            for part in _filemoon_select_parts(playback, key_parts)
+            if isinstance(part, str) and part
+        ]
+        key = b"".join(_filemoon_b64url(part) for part in parts)
+        iv = _filemoon_b64url(iv_b64)
+        payload = _filemoon_b64url(payload_b64)
+        cipher = AES.new(key, AES.MODE_GCM, nonce=iv)
+        decrypted = cipher.decrypt_and_verify(payload[:-16], payload[-16:])
+        video_data = json.loads(decrypted.decode("utf-8"))
+    except Exception:
+        return None
+
+    sources = video_data.get("sources") or []
+    for source in sources:
+        if (
+            isinstance(source, dict)
+            and source.get("mime_type") == "application/vnd.apple.mpegurl"
+            and source.get("url")
+        ):
+            return source["url"]
+    for source in sources:
+        if isinstance(source, dict) and source.get("url"):
+            return source["url"]
+    return None
 
 
 def get_hls_link_vidoza(url: str, headers: dict, config: dict = None) -> str:
