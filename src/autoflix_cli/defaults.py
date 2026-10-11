@@ -42,7 +42,8 @@ DEFAULT_PLAYERS = {
     "luluvid": {"type": "default"},
     "ups2up": {"type": "default"},
     "ico3c": {"type": "default"},
-    "fsvid": {"type": "default", "no-header": True},
+    "fsvid": {"type": "xupload"},
+  "waaw": {"type": "default"},
     "darkibox": {"type": "default"},
     "minochinos": {"type": "default"},
     "movearnpre": {
@@ -118,7 +119,7 @@ DEFAULT_PLAYERS = {
     "veev": {"type": "veev", "ext": "mp4"},
     "xtremestream": {"type": "xtremestream"},
     "montmyoboky": {"type": "montmyoboky"},
-    "vidzy": { "type": "vidzy", "referrer": "https://vidzy.org/", },
+    "vidzy": { "type": "xupload", "referrer": "https://vidzy.org/", },
     "voe": { "type": "voe" },
     "voe.sx": { "type": "voe" },
     "jeremyparticipantanything": { "type": "voe" },
