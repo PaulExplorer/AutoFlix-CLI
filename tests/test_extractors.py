@@ -3,6 +3,7 @@
 import base64
 
 from autoflix_cli.scraping import player
+from autoflix_cli.scraping.extractors import common, filemoon, uqload, xupload
 
 
 def _xupload_blob(url: str, hostname: str, width_n: int | None) -> str:
@@ -28,8 +29,17 @@ class _StubResponse:
 
 def _stub_fetch(monkeypatch, html, url="https://vidzy.cc/embed-abc123.html"):
     monkeypatch.setattr(
-        player, "_fetch_embed_page", lambda u, h: _StubResponse(html, url)
+        xupload, "_fetch_embed_page", lambda u, h: _StubResponse(html, url)
     )
+
+
+def test_player_reexports_extractors():
+    """The dispatcher keeps exposing extractor functions (backward compat)."""
+    assert player.get_hls_link_xupload is xupload.get_hls_link_xupload
+    assert player.get_hls_link_default is not None
+    assert set(player.PLAYER_EXTRACTORS) >= {
+        "default", "xupload", "vidzy", "filemoon", "uqload", "voe",
+    }
 
 
 def test_xupload_decode_with_width_constant(monkeypatch):
@@ -47,7 +57,7 @@ def test_xupload_decode_with_width_constant(monkeypatch):
         "return r})(\"" + blob + "\"), type: \"application/x-mpegURL\"}]});"
     )
     _stub_fetch(monkeypatch, html)
-    assert player.get_hls_link_xupload("https://vidzy.cc/embed-abc123.html", {}) == stream
+    assert xupload.get_hls_link_xupload("https://vidzy.cc/embed-abc123.html", {}) == stream
 
 
 def test_xupload_decode_brute_force_without_width(monkeypatch):
@@ -59,12 +69,12 @@ def test_xupload_decode_brute_force_without_width(monkeypatch):
         'try{BC=_ch.offsetWidth|0;}catch(e){}return atob(s)})("' + blob + '")}]'
     )
     _stub_fetch(monkeypatch, html, "https://fsvid.lol/embed-xyz.html")
-    assert player.get_hls_link_xupload("https://fsvid.lol/embed-xyz.html", {}) == stream
+    assert xupload.get_hls_link_xupload("https://fsvid.lol/embed-xyz.html", {}) == stream
 
 
 def test_xupload_returns_none_without_blob(monkeypatch):
     _stub_fetch(monkeypatch, "<html><body>no player here</body></html>")
-    assert player.get_hls_link_xupload("https://vidzy.cc/embed-abc.html", {}) is None
+    assert xupload.get_hls_link_xupload("https://vidzy.cc/embed-abc.html", {}) is None
 
 
 def test_streamhide_links_priority_and_relative():
@@ -75,7 +85,7 @@ def test_streamhide_links_priority_and_relative():
         '"hls2":"https://cdn.example.com/h2/master.m3u8"}'
     )
     assert (
-        player._extract_streamhide_links(html, "https://wishonly.site/e/xyz")
+        common._extract_streamhide_links(html, "https://wishonly.site/e/xyz")
         == "https://wishonly.site/stream/abc/def/123/master.m3u8"
     )
 
@@ -83,26 +93,26 @@ def test_streamhide_links_priority_and_relative():
 def test_streamhide_links_falls_back_to_hls2():
     html = 'links={"hls2":"https://cdn.example.com/h2/master.m3u8"}'
     assert (
-        player._extract_streamhide_links(html, "https://x.test/e/1")
+        common._extract_streamhide_links(html, "https://x.test/e/1")
         == "https://cdn.example.com/h2/master.m3u8"
     )
 
 
 def test_streamhide_links_invalid_json():
-    assert player._extract_streamhide_links("links={not json", "https://x/") is None
-    assert player._extract_streamhide_links("no links here", "https://x/") is None
+    assert common._extract_streamhide_links("links={not json", "https://x/") is None
+    assert common._extract_streamhide_links("no links here", "https://x/") is None
 
 
 def test_jwplayer_source_absolute_and_relative():
     assert (
-        player._extract_jwplayer_source(
+        common._extract_jwplayer_source(
             'setup({sources:[{file:"https://cdn.example.com/v/master.m3u8"}]})',
             "https://x.test/e/1",
         )
         == "https://cdn.example.com/v/master.m3u8"
     )
     assert (
-        player._extract_jwplayer_source(
+        common._extract_jwplayer_source(
             "sources:[{file:'/s/abc/master.m3u8'}]", "https://uqload.cx/embed-1.html"
         )
         == "https://uqload.cx/s/abc/master.m3u8"
@@ -112,17 +122,17 @@ def test_jwplayer_source_absolute_and_relative():
 def test_filemoon_select_parts_versioned():
     parts = [f"part-{i}" for i in range(30)]
     playback = {"version": "7"}
-    assert player._filemoon_select_parts(playback, parts) == ["part-6", "part-23"]
+    assert filemoon._filemoon_select_parts(playback, parts) == ["part-6", "part-23"]
     playback = {"version": "1"}
-    assert player._filemoon_select_parts(playback, parts) == ["part-0", "part-29"]
+    assert filemoon._filemoon_select_parts(playback, parts) == ["part-0", "part-29"]
 
 
 def test_filemoon_select_parts_unknown_version_keeps_all():
     parts = ["a", "b"]
-    assert player._filemoon_select_parts({"version": "99"}, parts) == parts
-    assert player._filemoon_select_parts({}, parts) == parts
+    assert filemoon._filemoon_select_parts({"version": "99"}, parts) == parts
+    assert filemoon._filemoon_select_parts({}, parts) == parts
     short = ["only-one"]
-    assert player._filemoon_select_parts({"version": "7"}, short) == short
+    assert filemoon._filemoon_select_parts({"version": "7"}, short) == short
 
 
 def test_uqload_delegates_to_default(monkeypatch):
@@ -132,9 +142,9 @@ def test_uqload_delegates_to_default(monkeypatch):
         seen["url"] = url
         return "https://cdn.example.com/master.m3u8"
 
-    monkeypatch.setattr(player, "get_hls_link_default", fake_default)
+    monkeypatch.setattr(uqload, "get_hls_link_default", fake_default)
     assert (
-        player.get_hls_link_uqload("https://uqload.cx/embed-abc.html", {})
+        uqload.get_hls_link_uqload("https://uqload.cx/embed-abc.html", {})
         == "https://cdn.example.com/master.m3u8"
     )
     assert seen["url"] == "https://uqload.cx/embed-abc.html"

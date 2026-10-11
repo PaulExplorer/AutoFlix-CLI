@@ -3,7 +3,7 @@
 // Key = a fragment of the embed host, matched against the embed URL.
 // ============================================================================
 //
-// type        Which extractor in scraping/player.py resolves the m3u8.
+// type        Which extractor in scraping/extractors/ resolves the m3u8.
 //             Values: default, xupload, sendvid, sibnet, uqload, vidoza,
 //             filemoon, kakaflix, myvidplay, vidmoly, embed4me, veev,
 //             xtremestream, montmyoboky, vidzy (alias of xupload), voe.
