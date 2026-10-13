@@ -14,7 +14,13 @@ from .update_checker import check_update
 from .tracker import tracker
 from .providers_registry import registry
 from .languages import LANGUAGES, get_language_display, get_all_languages
-from .player_manager import PLAYERS, get_player_display, get_all_players
+from .player_manager import (
+    PLAYERS,
+    get_player_display,
+    get_all_players,
+    is_custom_player,
+    slugify_custom_name,
+)
 from .handlers import (
     anime_sama,
     coflix,
@@ -32,6 +38,54 @@ from .handlers.devtest import (
 )
 from .log import apply_developer_logging, setup_logging
 import sys
+
+
+def _handle_add_custom_player():
+    name = get_user_input("Custom player name (e.g. Celluloid)")
+    if not name:
+        return
+    command = get_user_input(
+        "Command (use {url} for stream URL, e.g. celluloid {url})",
+        default=name,
+    )
+    if not command:
+        return
+    code = slugify_custom_name(name)
+    existing = tracker.get_custom_players()
+    if code in existing:
+        print_warning(f"A custom player '{name}' already exists.")
+        pause()
+        return
+    tracker.add_custom_player(code, name.strip(), command.strip())
+    print_success(f"Custom player '{name}' added (always via proxy).")
+    pause()
+
+
+def _handle_custom_players_menu():
+    while True:
+        clear_screen()
+        print_header("Custom players", "Always played via proxy")
+        customs = tracker.get_custom_players()
+        opts = [f"{cfg.get('display', code)} ({cfg.get('command', '')})" for code, cfg in customs.items()]
+        opts += ["+ Add a custom player"]
+        if customs:
+            opts += ["- Remove a custom player"]
+        opts += ["← Back"]
+        choice = select_from_list(opts, "Custom players:")
+        if choice == len(opts) - 1:
+            return
+        if opts[choice] == "+ Add a custom player":
+            _handle_add_custom_player()
+        elif opts[choice] == "- Remove a custom player":
+            codes = list(customs.keys())
+            labels = [customs[c].get("display", c) for c in codes] + ["← Back"]
+            idx = select_from_list(labels, "Remove which player?")
+            if idx < len(codes):
+                tracker.remove_custom_player(codes[idx])
+                print_success("Custom player removed.")
+                pause()
+        else:
+            pause()
 
 
 def check_language_setup():
@@ -179,6 +233,7 @@ def _run():
                     f"Update AniList Token ({'Set' if token else 'Not Set'})",
                     f"Update Language ({lang_display})",
                     f"Choose default Player ({player_display})",
+                    "Manage custom players",
                     f"Auto-pick the best source ({auto_display})",
                     f"Developer Mode ({dev_display})",
                 ]
@@ -215,6 +270,9 @@ def _run():
                     pause()
 
                 elif s_choice == 3:
+                    _handle_custom_players_menu()
+
+                elif s_choice == 4:
                     tracker.set_auto_source(not auto_source)
                     print_success(
                         "Auto-pick enabled, the best working source will be "
@@ -224,16 +282,16 @@ def _run():
                     )
                     pause()
 
-                elif s_choice == 4:
+                elif s_choice == 5:
                     tracker.set_developer_mode(not dev_mode)
                     apply_developer_logging(not dev_mode)
                     state = "enabled" if not dev_mode else "disabled"
                     print_success(f"Developer mode {state}.")
                     pause()
 
-                elif dev_mode and s_choice == 5:
-                    handle_dev_scraper_test()
                 elif dev_mode and s_choice == 6:
+                    handle_dev_scraper_test()
+                elif dev_mode and s_choice == 7:
                     handle_dev_playback_mode_test()
 
                 else:
