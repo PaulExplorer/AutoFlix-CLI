@@ -1,6 +1,7 @@
 import shutil
 import platform
 import os
+import shlex
 import subprocess
 import json
 import urllib.parse
@@ -116,19 +117,52 @@ PLAYERS: Dict[str, Dict[str, str]] = {
     "manual": {"display": "manual"},
 }
 
+CUSTOM_PREFIX = "custom:"
+
+
+def slugify_custom_name(display: str) -> str:
+    """Build a tracker code for a custom player from its display name."""
+    import re
+
+    slug = re.sub(r"[^a-z0-9_-]+", "_", display.strip().lower()).strip("_")
+    return f"{CUSTOM_PREFIX}{slug or 'player'}"
+
+
+def is_custom_player(code: str) -> bool:
+    return isinstance(code, str) and code.startswith(CUSTOM_PREFIX)
+
+
+def get_custom_player_config(code: str) -> dict | None:
+    if not is_custom_player(code):
+        return None
+    return tracker.get_custom_player(code)
+
 
 def get_player_display(code: str, default: str = "manual") -> str:
-
-    return PLAYERS.get(code, {}).get("display", default)
+    if code in PLAYERS:
+        return PLAYERS[code].get("display", default)
+    custom = get_custom_player_config(code)
+    if custom:
+        return custom.get("display", code)
+    return default
 
 
 def get_all_players():
+    items = [(code, f"{player['display']}") for code, player in PLAYERS.items()]
+    for code, cfg in tracker.get_custom_players().items():
+        items.append((code, f"{cfg.get('display', code)} (custom)"))
+    return items
 
-    return [(code, f"{player['display']}") for code, player in PLAYERS.items()]
+
+def list_playback_players() -> list:
+    """Player codes offered at playback time (builtins + customs)."""
+    return ["mpv", "vlc", "browser", *tracker.get_custom_players().keys()]
 
 
 def get_player_modes(player_code: str) -> tuple:
     """Return the launch modes supported by a player code."""
+    if is_custom_player(player_code):
+        return (MODE_PROXY,)
     return PLAYER_MODES.get(player_code, (MODE_PROXY,))
 
 
@@ -148,6 +182,8 @@ def resolve_launch_mode(player_config: dict, player_code: str) -> str:
         MODE_PROXY or MODE_DIRECT
     """
     player_config = player_config or {}
+    if is_custom_player(player_code):
+        return MODE_PROXY
     supported = get_player_modes(player_code)
 
     mode = None
@@ -224,6 +260,20 @@ def _get_player_executable(player_code: str) -> str | None:
     """Locate a player executable (the browser player needs none)."""
     if player_code == "browser":
         return None
+    if is_custom_player(player_code):
+        custom = get_custom_player_config(player_code)
+        if not custom or not custom.get("command"):
+            return None
+        try:
+            argv = shlex.split(custom["command"])
+        except ValueError:
+            return None
+        if not argv:
+            return None
+        binary = argv[0]
+        if os.path.exists(binary):
+            return binary
+        return shutil.which(binary)
     if player_code == "vlc":
         return get_vlc_path()
     return shutil.which(player_code)
@@ -675,6 +725,81 @@ def _play_direct(
     return False
 
 
+def _build_custom_command(
+    player_code: str,
+    local_stream_url: str,
+    title: str,
+    subtitle_paths: list,
+) -> list | None:
+    """Build argv for a custom player (proxy URL only).
+
+    Placeholders in the stored command: {url}, {title}, {sub} (first sub).
+    Without {url}, the proxy URL is appended as the last argument.
+    """
+    custom = get_custom_player_config(player_code)
+    if not custom or not custom.get("command"):
+        return None
+    try:
+        argv = shlex.split(custom["command"])
+    except ValueError:
+        return None
+    if not argv:
+        return None
+    first_sub = subtitle_paths[0] if subtitle_paths else ""
+    expanded = [
+        arg.replace("{url}", local_stream_url)
+        .replace("{title}", title)
+        .replace("{sub}", first_sub)
+        for arg in argv
+    ]
+    if "{url}" not in custom["command"]:
+        expanded.append(local_stream_url)
+    return expanded
+
+
+def _play_custom_via_proxy(
+    stream_url: str,
+    headers: dict,
+    player_config: dict,
+    referer: str,
+    domain: str,
+    is_mp4: bool,
+    player_code: str,
+    player_executable: str,
+    title: str,
+    subtitle_paths: list,
+) -> bool:
+    """Play the stream in a custom player through the local proxy."""
+    custom = get_custom_player_config(player_code)
+    display = (custom or {}).get("display", player_code)
+    print_info(
+        f"Launching [bold cyan]{display}[/bold cyan] via Proxy ({player_executable})..."
+    )
+
+    proxy_headers = _build_upstream_headers(headers, referer, player_config, domain)
+    local_stream_url = _build_proxy_url(
+        stream_url, proxy_headers, player_config, is_mp4
+    )
+    if local_stream_url is None:
+        print_error("Proxy server not initialized.")
+        return False
+
+    cmd = _build_custom_command(player_code, local_stream_url, title, subtitle_paths)
+    if cmd is None:
+        print_error(f"Invalid command for custom player '{display}'.")
+        return False
+
+    try:
+        subprocess.run(cmd, check=True)
+        print_success("Playback completed successfully!")
+        return True
+    except subprocess.CalledProcessError as e:
+        print_error(f"Error running player via proxy: {e}")
+    except Exception as e:
+        print_error(f"Error running player via proxy: {e}")
+    return False
+
+
 def _launch_player(
     stream_url: str,
     headers: dict,
@@ -698,6 +823,23 @@ def _launch_player(
             domain,
             is_mp4,
             subtitle_path,
+        )
+
+    if is_custom_player(player_code):
+        if not proxy.PROXY_URL:
+            print_error("Proxy server not initialized.")
+            return False
+        return _play_custom_via_proxy(
+            stream_url,
+            headers,
+            player_config,
+            referer,
+            domain,
+            is_mp4,
+            player_code,
+            _get_player_executable(player_code),
+            title,
+            subtitle_paths,
         )
 
     if mode == MODE_DIRECT:
@@ -893,8 +1035,9 @@ def play_video(
         while True:  # Loop to allow retrying with another player
             player_pref = tracker.get_player()
             if force_manual_mode or not player_pref or player_pref == "manual":
-                players = ["mpv", "vlc", "browser", "← Back"]
-                player_choice = select_from_list(players, "🎮 Select video player:")
+                players = [*list_playback_players(), "← Back"]
+                player_labels = [get_player_display(p, p) for p in players]
+                player_choice = select_from_list(player_labels, "🎮 Select video player:")
 
                 if players[player_choice] == "← Back":
                     return False
@@ -902,11 +1045,24 @@ def play_video(
                 player_name = players[player_choice]
             else:
                 player_name = player_pref
+                if (
+                    player_name not in PLAYERS
+                    and not is_custom_player(player_name)
+                ):
+                    print_warning(
+                        f"Unknown player '{player_name}', pick one manually."
+                    )
+                    force_manual_mode = True
+                    continue
 
             # Locate the player executable (the browser needs none).
             if player_name != "browser" and _get_player_executable(player_name) is None:
                 if player_name == "vlc":
                     print_error("VLC not found. Please install it or add it to your PATH.")
+                elif is_custom_player(player_name):
+                    print_error(
+                        f"Custom player '{get_player_display(player_name, player_name)}' not found. Check its command in Settings."
+                    )
                 else:
                     print_error(f"{player_name} is not installed or not in PATH.")
                 retry = handle_player_error(player_name)

@@ -200,6 +200,29 @@ class ProgressTracker:
         self.data["player"] = player_code
         self._save_data()
 
+    def get_custom_players(self) -> Dict[str, Dict[str, str]]:
+        """Custom players defined by the user: {code: {display, command}}."""
+        stored = self.data.get("custom_players", {})
+        return dict(stored) if isinstance(stored, dict) else {}
+
+    def get_custom_player(self, code: str) -> Optional[Dict[str, str]]:
+        return self.get_custom_players().get(code)
+
+    def add_custom_player(self, code: str, display: str, command: str):
+        players = self.get_custom_players()
+        players[code] = {"display": display, "command": command}
+        self.data["custom_players"] = players
+        self._save_data()
+
+    def remove_custom_player(self, code: str):
+        players = self.get_custom_players()
+        if code in players:
+            del players[code]
+            self.data["custom_players"] = players
+            if self.data.get("player") == code:
+                del self.data["player"]
+            self._save_data()
+
     def get_auto_source(self) -> bool:
         """Whether to pick the best source automatically."""
         return self.data.get("auto_source", False)
