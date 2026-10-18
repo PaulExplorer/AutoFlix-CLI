@@ -62,7 +62,7 @@ class _Response:
 
 
 def test_decline_returns_no_tracks(monkeypatch):
-    monkeypatch.setattr(subtitle_prompt, "select_from_list", lambda *a, **k: 1)
+    monkeypatch.setattr(subtitle_prompt, "select_from_list", lambda *a, **k: 0)
     searched = {"n": 0}
     monkeypatch.setattr(
         subtitle_prompt.subtitle_extractor,
@@ -75,7 +75,7 @@ def test_decline_returns_no_tracks(monkeypatch):
 
 def test_prompt_uses_the_configured_language(monkeypatch):
     monkeypatch.setattr(subtitle_prompt.tracker, "get_language", lambda: "en")
-    captured = _scripted(monkeypatch, [1])  # decline, we only check the wording
+    captured = _scripted(monkeypatch, [0])  # decline, we only check the wording
 
     subtitle_prompt.prompt_extra_subtitles(title="X", imdb_id="tt1")
 
@@ -84,11 +84,20 @@ def test_prompt_uses_the_configured_language(monkeypatch):
 
 def test_prompt_falls_back_to_the_default_language(monkeypatch):
     monkeypatch.setattr(subtitle_prompt.tracker, "get_language", lambda: None)
-    captured = _scripted(monkeypatch, [1])
+    captured = _scripted(monkeypatch, [0])
 
     subtitle_prompt.prompt_extra_subtitles(title="X", imdb_id="tt1")
 
     assert "French" in captured[0][0]
+
+
+def test_prompt_defaults_to_no(monkeypatch):
+    """First option (and thus a bare Enter) is "No"."""
+    captured = _scripted(monkeypatch, [0])
+
+    subtitle_prompt.prompt_extra_subtitles(title="X", imdb_id="tt1")
+
+    assert captured[0][1][0] == "No"
 
 
 def test_selects_the_chosen_track(monkeypatch):
@@ -102,7 +111,7 @@ def test_selects_the_chosen_track(monkeypatch):
         "search",
         lambda **kw: seen.update(kw) or tracks,
     )
-    _scripted(monkeypatch, [0, 1])  # Yes, then the second track
+    _scripted(monkeypatch, [1, 1])  # Yes, then the second track
 
     result = subtitle_prompt.prompt_extra_subtitles(
         title="X", imdb_id="tt1", season=1, episode=2
@@ -117,7 +126,7 @@ def test_selects_the_chosen_track(monkeypatch):
 
 def test_no_results_returns_empty(monkeypatch):
     monkeypatch.setattr(subtitle_prompt.subtitle_extractor, "search", lambda **k: [])
-    _scripted(monkeypatch, [0])
+    _scripted(monkeypatch, [1])  # Yes
     assert subtitle_prompt.prompt_extra_subtitles(title="X", imdb_id="tt1") == []
 
 
@@ -132,7 +141,7 @@ def test_resolves_imdb_from_title_when_missing(monkeypatch):
         lambda **kw: seen.update(kw)
         or [{"url": "u", "source": "A", "lang": "fr", "label": "French", "title": ""}],
     )
-    _scripted(monkeypatch, [0, 0])
+    _scripted(monkeypatch, [1, 0])  # Yes, then the first track
 
     result = subtitle_prompt.prompt_extra_subtitles(title="Some Show")
 
@@ -148,7 +157,7 @@ def test_movie_resolution_drops_season_and_episode(monkeypatch):
     monkeypatch.setattr(
         subtitle_prompt.subtitle_extractor, "search", lambda **kw: seen.update(kw) or []
     )
-    _scripted(monkeypatch, [0])
+    _scripted(monkeypatch, [1])  # Yes
 
     subtitle_prompt.prompt_extra_subtitles(title="Film", season=1, episode=3)
 
@@ -161,7 +170,7 @@ def test_anilist_mapping_provides_ids(monkeypatch):
     monkeypatch.setattr(
         subtitle_prompt.subtitle_extractor, "search", lambda **kw: seen.update(kw) or []
     )
-    _scripted(monkeypatch, [0])
+    _scripted(monkeypatch, [1])  # Yes
 
     subtitle_prompt.prompt_extra_subtitles(anilist_id=123)
 
@@ -169,7 +178,7 @@ def test_anilist_mapping_provides_ids(monkeypatch):
 
 
 def test_gives_up_without_any_identifier(monkeypatch):
-    _scripted(monkeypatch, [0])
+    _scripted(monkeypatch, [1])  # Yes
     searched = {"n": 0}
     monkeypatch.setattr(
         subtitle_prompt.subtitle_extractor,

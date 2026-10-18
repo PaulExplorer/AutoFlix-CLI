@@ -184,7 +184,9 @@ def prompt_extra_subtitles(
     user_lang = language or tracker.get_language() or "fr"
     lang_name = get_language_label(user_lang)
 
-    if select_from_list(["Yes", "No"], f"Add {lang_name} subtitles?") != 0:
+    # "No" comes first (and is preselected) so a stray Enter skips the
+    # optional subtitle search; subtitles are opt-in.
+    if select_from_list(["No", "Yes"], f"Add {lang_name} subtitles?") == 0:
         return []
 
     if anilist_id:
