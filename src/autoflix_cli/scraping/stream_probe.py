@@ -390,6 +390,36 @@ def _resolve_one(embed_name: str, embed_url: str, headers: dict, timeout: float,
     probe = probe_stream(
         stream_url, source.headers, config, fetch=fetch, timeout=timeout
     )
+
+    # Tokenized CDNs (lulustream, acek-cdn, veev...) issue a fresh token on
+    # every embed fetch and invalidate the previous one: a 403 right after a
+    # clean extraction usually means a stale token, and one re-extraction
+    # mints a new link. That is what a manual retry does today.
+    if probe.get("error") in ("HTTP 403", "blocked"):
+        retry_url, retry_sub = None, None
+        try:
+            retry_url, retry_sub = player.get_hls_link(
+                embed_url, dict(headers or {}), return_subs=True
+            )
+        except Exception:
+            retry_url = None
+        if retry_url and retry_url != stream_url:
+            if retry_url.startswith("/"):
+                retry_url = (
+                    "https://"
+                    + embed_url.removeprefix("https://")
+                    .removeprefix("http://")
+                    .split("/")[0]
+                    + retry_url
+                )
+            retry_probe = probe_stream(
+                retry_url, source.headers, config, fetch=fetch, timeout=timeout
+            )
+            if retry_probe["ok"]:
+                probe = retry_probe
+                source.stream_url = retry_url
+                source.subtitle_url = retry_sub
+
     source.ok = probe["ok"]
     source.kind = probe["kind"]
     source.heights = probe["heights"]
