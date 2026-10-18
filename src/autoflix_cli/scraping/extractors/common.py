@@ -73,6 +73,21 @@ def _fetch_embed_page(url: str, headers: dict):
         return last
     return get_scraper().get(url, headers=req_headers, impersonate="chrome")
 
+def _stream_alive(url: str, headers: dict = None) -> bool:
+    """Cheap liveness check of a candidate stream URL.
+
+    A signed CDN link can answer 403 while its sibling rendition host still
+    serves (the master playlist is a small document, so a GET is cheap).
+    """
+    try:
+        response = get_scraper().get(
+            url, headers=dict(headers or {}), impersonate="chrome", timeout=8
+        )
+        return response.status_code in (200, 206)
+    except Exception:
+        return False
+
+
 def _unpack_all(html: str) -> str:
     """Unpack every Dean Edwards eval block and append the results to the HTML.
 
@@ -99,27 +114,35 @@ def _unpack_all(html: str) -> str:
             pass
     return "\n".join(parts)
 
-def _extract_streamhide_links(text: str, base_url: str) -> str | None:
-    """Extract a stream from EarnVids/StreamHide-style ``links={...}`` blobs.
+def _extract_streamhide_candidates(text: str, base_url: str) -> list[str]:
+    """Every StreamHide-style ``links={...}`` candidate, best rendition first.
 
     The player boots with ``sources:[{file:links.hls4||links.hls3||links.hls2}]``
-    where ``links`` maps renditions to URLs (``hls4`` is usually a relative
-    ``/stream/...`` path). Same priority as the web player.
+    where ``links`` maps renditions to URLs hosted on *different* CDNs. One
+    host can be dead for everyone (a Cloudflare-suspended zone) while the
+    next still serves — the web player falls through the list, so must we.
     """
     match = re.search(r"links\s*=\s*(\{[^;]*\})", text)
     if not match:
-        return None
+        return []
     try:
         links = json.loads(match.group(1).replace("\\/", "/"))
     except (json.JSONDecodeError, ValueError):
-        return None
+        return []
     if not isinstance(links, dict):
-        return None
+        return []
+    candidates = []
     for key in ("hls4", "hls3", "hls2"):
         candidate = links.get(key)
         if candidate and isinstance(candidate, str):
-            return urllib.parse.urljoin(base_url, candidate.strip())
-    return None
+            candidates.append(urllib.parse.urljoin(base_url, candidate.strip()))
+    return candidates
+
+
+def _extract_streamhide_links(text: str, base_url: str) -> str | None:
+    """Best StreamHide-style candidate link (kept for compatibility)."""
+    candidates = _extract_streamhide_candidates(text, base_url)
+    return candidates[0] if candidates else None
 
 def _extract_jwplayer_source(text: str, base_url: str) -> str | None:
     """Extract a ``sources:[{file:"..."}]`` URL (jwplayer setup blocks)."""

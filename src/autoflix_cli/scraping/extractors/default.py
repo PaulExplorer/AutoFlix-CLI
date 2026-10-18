@@ -5,8 +5,9 @@ from bs4 import BeautifulSoup
 from ..deobfuscate import deobfuscate
 from .common import (
     _extract_jwplayer_source,
-    _extract_streamhide_links,
+    _extract_streamhide_candidates,
     _fetch_embed_page,
+    _stream_alive,
     _unpack_all,
     extract_hls_url,
     extract_video_url,
@@ -52,11 +53,22 @@ def get_hls_link_default(
         code = code.replace(old, new)
         unpacked = unpacked.replace(old, new)
 
-    # 1. EarnVids/StreamHide links blob (unpacked first, then raw).
+    # 1. EarnVids/StreamHide links blob (unpacked first, then raw). The
+    #    renditions sit on different CDNs; one can be dead for everyone
+    #    while the next still serves, so play the first live one — the
+    #    web player does the same with links.hls4||links.hls3||links.hls2.
+    seen_candidates: list[str] = []
     for text in (unpacked, code, response.text):
-        stream_url = _extract_streamhide_links(text, page_url)
-        if stream_url:
-            return stream_url
+        for candidate in _extract_streamhide_candidates(text, page_url):
+            if candidate not in seen_candidates:
+                seen_candidates.append(candidate)
+    if seen_candidates:
+        for candidate in seen_candidates:
+            if _stream_alive(candidate, headers):
+                return candidate
+        # All candidates rejected: hand back the best-priority one so the
+        # probe reports the real error instead of "no stream found".
+        return seen_candidates[0]
 
     # 2. jwplayer sources:[{file:"..."}] blocks (unpacked first, then raw).
     for text in (unpacked, code, response.text):
