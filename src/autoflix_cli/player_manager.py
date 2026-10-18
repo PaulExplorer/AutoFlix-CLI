@@ -1122,6 +1122,13 @@ def play_video(
                     )
                     stream_url = resolved.stream_url
                     domain = _embed_domain(url, stream_url)
+            else:
+                # Manual mode: the first resolve may have handed back a link
+                # whose token already died (403 in the player) — re-resolving
+                # mints a fresh one, like relaunching the episode would.
+                fresh_stream, fresh_sub = _resolve_stream(url, headers, is_direct)
+                if fresh_stream:
+                    stream_url, extracted_sub = fresh_stream, fresh_sub
             # Otherwise loop to try again.
 
     finally:
