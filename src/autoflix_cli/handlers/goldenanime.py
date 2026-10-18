@@ -15,58 +15,9 @@ from ..tracker import tracker
 from ..languages import get_language_label
 from ..anilist import anilist_client
 from ..scraping import player as player_scraper
+from .subtitle_prompt import resolve_imdb_id
 
-from curl_cffi import requests
 import re
-
-
-def search_imdb_id(title: str):
-    import urllib.parse
-
-    try:
-        url_series = f"https://v3-cinemeta.strem.io/catalog/series/top/search={urllib.parse.quote(title)}.json"
-        r_series = requests.get(url_series, timeout=5, impersonate="chrome").json()
-        metas = r_series.get("metas", [])
-
-        url_movie = f"https://v3-cinemeta.strem.io/catalog/movie/top/search={urllib.parse.quote(title)}.json"
-        r_movie = requests.get(url_movie, timeout=5, impersonate="chrome").json()
-        metas.extend(r_movie.get("metas", []))
-
-        if metas:
-            choices = []
-            valid_metas = []
-            for m in metas[:7]:  # Top 7 results
-                name = m.get("name")
-                year = m.get("year", "Unknown")
-                m_type = m.get("type", "series")
-                imdb = m.get("imdb_id")
-                if imdb:
-                    choices.append(f"{name} ({year}) - {m_type}")
-                    valid_metas.append(m)
-
-            if valid_metas:
-                choices.append("Enter manually")
-                choices.append("Skip subtitles")
-                choices.append("← Back")
-
-                idx = select_from_list(choices, f"Select IMDB match for '{title}':")
-                if idx < len(valid_metas):
-                    selected = valid_metas[idx]
-                    return selected["imdb_id"], selected["type"] == "movie"
-                elif idx == len(valid_metas):
-                    manual = get_user_input("Enter IMDB ID manually (e.g. tt0388629)")
-                    return manual, False
-                elif idx == len(valid_metas) + 1:
-                    return None, False
-                else:
-                    return None, False
-    except Exception as e:
-        print_warning(f"Auto IMDB search failed: {e}")
-
-    manual = get_user_input(
-        "Enter IMDB ID manually (e.g. tt0388629, leave blank to skip)"
-    )
-    return manual, False
 
 
 def handle_goldenanime():
@@ -232,7 +183,7 @@ def _flow_goldenanime_stream(
                 imdb_id = None
                 is_movie = False
                 if search_title:
-                    imdb_id, is_movie = search_imdb_id(search_title)
+                    imdb_id, is_movie = resolve_imdb_id(search_title)
                 else:
                     imdb_id = get_user_input(
                         "Enter IMDB ID manually (e.g. tt0388629, leave blank to skip)"

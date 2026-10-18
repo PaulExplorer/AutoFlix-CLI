@@ -78,6 +78,7 @@ def run_flow(players, choices, sources=None, headers=None):
             series_url="https://series",
             season_url="https://season",
             headers=headers or {"Referer": "https://provider.example/"},
+            ask_subtitles=False,
         )
     finally:
         monkeypatch.undo()
@@ -115,6 +116,7 @@ def test_back_from_source_list_returns_nothing(monkeypatch):
         series_url="",
         season_url="",
         headers={},
+        ask_subtitles=False,
     )
     assert result is False
 
@@ -209,6 +211,7 @@ def run_with_auto_setting(monkeypatch, enabled, players, sources, choices):
         series_url="",
         season_url="",
         headers={"Referer": "https://p/"},
+        ask_subtitles=False,
     )
     return result, calls, menus
 

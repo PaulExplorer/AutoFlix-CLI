@@ -13,11 +13,14 @@ from ..scraping import player
 from ..scraping import stream_probe
 from ..scraping.player import PLAYER_EXTRACTORS, test_all_scrapers_verbose
 from ..scraping.objects import Player
+from .subtitle_prompt import parse_number, parse_season, prompt_extra_subtitles
 from rich.progress import Progress, SpinnerColumn, TextColumn
 import json
 
 
 AUTO_OPTION = "⚡ Auto - test all sources"
+
+_MOVIE_SEASON_LABELS = {"movie", "film"}
 
 
 def _run_auto_probe(players: list, headers: dict) -> list:
@@ -144,6 +147,49 @@ def _print_dev_episode_context(
     print_info(f"[dev] extractor type: {config.get('type', 'unknown')}")
 
 
+def _collect_extra_subtitles(
+    *,
+    ask: bool,
+    title: str | None,
+    imdb_id: str | None,
+    anidb_id: int | None,
+    anilist_id: int | None,
+    season_title: str,
+    episode: object,
+    season_number: int | None,
+    episode_number: int | None,
+) -> list:
+    """Work out the season/episode numbers, then run the subtitle prompt."""
+    if not ask:
+        return []
+
+    is_movie = str(season_title or "").strip().lower() in _MOVIE_SEASON_LABELS
+    if is_movie:
+        season, episode_no = None, None
+    else:
+        season = (
+            season_number
+            if season_number is not None
+            else parse_season(season_title)
+        )
+        if season is None:
+            season = 1
+        episode_no = (
+            episode_number
+            if episode_number is not None
+            else parse_number(getattr(episode, "title", None))
+        )
+
+    return prompt_extra_subtitles(
+        title=title,
+        imdb_id=imdb_id,
+        anidb_id=anidb_id,
+        anilist_id=anilist_id,
+        season=season,
+        episode=episode_no,
+    )
+
+
 def play_episode_flow(
     provider_name: str,
     series_title: str,
@@ -154,14 +200,22 @@ def play_episode_flow(
     logo_url: str = None,
     headers: dict = None,
     anilist_callback: callable = None,
+    subtitle_title: str = None,
+    imdb_id: str = None,
+    anidb_id: int = None,
+    anilist_id: int = None,
+    season_number: int = None,
+    episode_number: int = None,
+    ask_subtitles: bool = True,
 ) -> bool:
     """
     Handle the playback flow for a single episode:
     1. Check for players.
-    2. Ask user to select a player.
-    3. Play the video.
-    4. Save progress if successful.
-    5. Call optional AniList callback if successful.
+    2. Ask whether to add external subtitles.
+    3. Ask user to select a player.
+    4. Play the video.
+    5. Save progress if successful.
+    6. Call optional AniList callback if successful.
 
     Returns:
         bool: True if playback was successful, False otherwise (back/cancel).
@@ -182,6 +236,21 @@ def play_episode_flow(
     # Default headers if not provided
     if headers is None:
         headers = {}
+
+    # Ask once per episode, before the player loops, so a retry does not ask
+    # again. ``subtitle_title`` lets a caller search a cleaner title than the
+    # one shown in the window.
+    extra_subtitles = _collect_extra_subtitles(
+        ask=ask_subtitles,
+        title=subtitle_title or series_title,
+        imdb_id=imdb_id,
+        anidb_id=anidb_id,
+        anilist_id=anilist_id,
+        season_title=season_title,
+        episode=episode,
+        season_number=season_number,
+        episode_number=episode_number,
+    )
 
     # Sources already played, so a retry moves on to the next one instead of
     # replaying the same dead link.
@@ -326,6 +395,7 @@ def play_episode_flow(
             # which are not always the episode-wide ones.
             headers=resolved_source.headers if resolved_source else headers,
             title=window_title,
+            subtitles=extra_subtitles,
             resolved=resolved_source,
         )
 
