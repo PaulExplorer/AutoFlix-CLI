@@ -103,6 +103,19 @@ def test_streamhide_links_invalid_json():
     assert common._extract_streamhide_links("no links here", "https://x/") is None
 
 
+def test_streamhide_candidates_priority_order():
+    html = (
+        'links={"hls2":"https://a.test/h2/master.m3u8",'
+        '"hls4":"/stream/x/y/z/master.txt",'
+        '"hls3":"https://b.test/h3/master.txt"}'
+    )
+    assert common._extract_streamhide_candidates(html, "https://wishonly.site/e/x") == [
+        "https://wishonly.site/stream/x/y/z/master.txt",
+        "https://b.test/h3/master.txt",
+        "https://a.test/h2/master.m3u8",
+    ]
+
+
 def test_jwplayer_source_absolute_and_relative():
     assert (
         common._extract_jwplayer_source(

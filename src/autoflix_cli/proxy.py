@@ -455,10 +455,33 @@ def _rewrite_m3u8(content, target_url, headers, plain_endpoint):
     """
     base_uri = get_base_url(target_url)
     proxied_prefix = f"http://{PROXY_HOST}:{PROXY_PORT}/"
+    playlist_parts = urllib.parse.urlsplit(target_url)
+    playlist_query = playlist_parts.query
+    playlist_host = playlist_parts.netloc
+
+    def propagate_token(uri):
+        """Carry the playlist token onto tokenless child URIs.
+
+        The nginx/StreamHide-family CDNs sign only the playlists and serve
+        *bare* segment paths whose authorization window closes within a
+        minute of the playlist fetch: after that a bare segment answers 403
+        while the very same URL with the playlist query still works (the web
+        player appends it to every request). Do the same here so playback
+        survives the menus between resolve and play.
+        """
+        if not playlist_query:
+            return uri
+        parts = urllib.parse.urlsplit(uri)
+        if parts.query or parts.fragment:
+            return uri
+        if parts.netloc not in ("", playlist_host):
+            return uri
+        return f"{uri}?{playlist_query}"
 
     def proxify(endpoint, uri):
         if not uri or uri.startswith(proxied_prefix):
             return uri
+        uri = propagate_token(uri)
         # Binary segments keep their upstream extension in the proxied path so
         # ffmpeg's allowed_segment_extensions check passes (see
         # make_segment_proxy_url).

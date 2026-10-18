@@ -404,3 +404,57 @@ def test_probe_sources_reports_progress(fake_get_hls_link, monkeypatch):
 
 def test_probe_sources_on_empty_input():
     assert sp.probe_sources([]) == []
+
+
+# --- stale-token retry -------------------------------------------------------
+
+
+def test_resolve_one_retries_after_403(monkeypatch):
+    """A 403 probe is worth one re-extraction: tokenized CDNs mint a fresh
+    link on every embed fetch and the manual retry relies on exactly that."""
+    monkeypatch.setattr(sp.player, "match_player_config", lambda url: ({}, ""))
+
+    calls = {"count": 0}
+
+    def _get_hls_link(url, headers=None, return_subs=False):
+        calls["count"] += 1
+        stream = "https://cdn.tld/fresh.m3u8" if calls["count"] > 1 else "https://cdn.tld/stale.m3u8"
+        return (stream, None) if return_subs else stream
+
+    monkeypatch.setattr(sp.player, "get_hls_link", _get_hls_link)
+
+    def _probe(url, headers, config, fetch=None, timeout=None):
+        if "stale" in url:
+            return {"ok": False, "kind": sp.KIND_DEAD, "heights": [], "bandwidths": [], "size": 0, "error": "HTTP 403"}
+        return {"ok": True, "kind": sp.KIND_HLS_MASTER, "heights": [720], "bandwidths": [], "size": 0}
+
+    monkeypatch.setattr(sp, "probe_stream", _probe)
+
+    source = sp._resolve_one("lulu", "https://lulu.tld/e/1", {}, 5.0, None)
+    assert source.ok is True
+    assert source.stream_url == "https://cdn.tld/fresh.m3u8"
+    assert calls["count"] == 2
+
+
+def test_resolve_one_keeps_error_when_retry_returns_same_link(monkeypatch):
+    """No second probe when the embed page still serves the same dead link."""
+    monkeypatch.setattr(sp.player, "match_player_config", lambda url: ({}, ""))
+
+    calls = {"probe": 0}
+
+    def _get_hls_link(url, headers=None, return_subs=False):
+        stream = "https://cdn.tld/stale.m3u8"
+        return (stream, None) if return_subs else stream
+
+    monkeypatch.setattr(sp.player, "get_hls_link", _get_hls_link)
+
+    def _probe(url, headers, config, fetch=None, timeout=None):
+        calls["probe"] += 1
+        return {"ok": False, "kind": sp.KIND_DEAD, "heights": [], "bandwidths": [], "size": 0, "error": "HTTP 403"}
+
+    monkeypatch.setattr(sp, "probe_stream", _probe)
+
+    source = sp._resolve_one("lulu", "https://lulu.tld/e/1", {}, 5.0, None)
+    assert source.ok is False
+    assert source.error == "HTTP 403"
+    assert calls["probe"] == 1

@@ -107,6 +107,45 @@ def test_rewrite_m3u8_keeps_original_bytes(proxy_port):
     assert rewritten.startswith("#EXTM3U\r\n")
 
 
+def test_rewrite_m3u8_propagates_playlist_token_to_tokenless_children(proxy_port):
+    """StreamHide-family CDNs sign only the playlists; their bare segment
+    paths start answering 403 once the authorization window closes. The web
+    player appends the playlist query to every child request, the proxy must
+    too (the tokenized segment keeps working while the bare one is dead)."""
+    playlist_url = "https://cdn.example.com/hls2/01/master.m3u8?t=TOK&s=1&e=2"
+    content = (
+        "#EXTM3U\n"
+        "#EXTINF:10.0,\n"
+        "https://cdn.example.com/hls2/01/seg-1.ts\n"
+        "#EXTINF:10.0,\n"
+        "https://cdn.example.com/hls2/01/seg-2.ts?own=1\n"
+        "#EXT-X-MAP:URI=\"https://cdn.example.com/hls2/01/init.mp4\"\n"
+        "https://other.test/hls2/01/seg-3.ts\n"
+    )
+    rewritten = proxy._rewrite_m3u8(content, playlist_url, {}, "ts")
+
+    tokenized = proxy.make_segment_proxy_url(
+        "https://cdn.example.com/hls2/01/seg-1.ts?t=TOK&s=1&e=2",
+        "https://cdn.example.com/hls2/01/",
+        {},
+    )
+    assert tokenized in rewritten
+    # A child with its own query is left untouched.
+    own_query = proxy.make_segment_proxy_url(
+        "https://cdn.example.com/hls2/01/seg-2.ts?own=1",
+        "https://cdn.example.com/hls2/01/",
+        {},
+    )
+    assert own_query in rewritten
+    # A child on another host does not receive the playlist token.
+    other_host = proxy.make_segment_proxy_url(
+        "https://other.test/hls2/01/seg-3.ts",
+        "https://cdn.example.com/hls2/01/",
+        {},
+    )
+    assert other_host in rewritten
+
+
 def test_segment_urls_keep_upstream_extension(proxy_port):
     """ffmpeg's HLS demuxer validates the segment URL *extension*.
 
