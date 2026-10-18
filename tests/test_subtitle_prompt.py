@@ -15,6 +15,10 @@ def test_parse_number():
     assert subtitle_prompt.parse_number(7) == 7
     assert subtitle_prompt.parse_number("Movie") is None
     assert subtitle_prompt.parse_number(None) is None
+    # Explicit markers beat a title that embeds digits (Coflix h1 format).
+    assert subtitle_prompt.parse_number("The 100 — S01E02 · The 100 1x2") == 2
+    assert subtitle_prompt.parse_number("Game of Thrones 1x05") == 5
+    assert subtitle_prompt.parse_number("Épisode 4") == 4
 
 
 def test_parse_season_requires_a_marker():
@@ -69,6 +73,24 @@ def test_decline_returns_no_tracks(monkeypatch):
     assert searched["n"] == 0
 
 
+def test_prompt_uses_the_configured_language(monkeypatch):
+    monkeypatch.setattr(subtitle_prompt.tracker, "get_language", lambda: "en")
+    captured = _scripted(monkeypatch, [1])  # decline, we only check the wording
+
+    subtitle_prompt.prompt_extra_subtitles(title="X", imdb_id="tt1")
+
+    assert "English" in captured[0][0]
+
+
+def test_prompt_falls_back_to_the_default_language(monkeypatch):
+    monkeypatch.setattr(subtitle_prompt.tracker, "get_language", lambda: None)
+    captured = _scripted(monkeypatch, [1])
+
+    subtitle_prompt.prompt_extra_subtitles(title="X", imdb_id="tt1")
+
+    assert "French" in captured[0][0]
+
+
 def test_selects_the_chosen_track(monkeypatch):
     tracks = [
         {"url": "u1", "source": "A", "lang": "fr", "label": "French", "title": "t1"},
@@ -100,7 +122,9 @@ def test_no_results_returns_empty(monkeypatch):
 
 
 def test_resolves_imdb_from_title_when_missing(monkeypatch):
-    monkeypatch.setattr(subtitle_prompt, "resolve_imdb_id", lambda title: ("tt99", False))
+    monkeypatch.setattr(
+        subtitle_prompt, "resolve_imdb_id", lambda title, is_movie=None: ("tt99", False)
+    )
     seen = {}
     monkeypatch.setattr(
         subtitle_prompt.subtitle_extractor,
@@ -117,7 +141,9 @@ def test_resolves_imdb_from_title_when_missing(monkeypatch):
 
 
 def test_movie_resolution_drops_season_and_episode(monkeypatch):
-    monkeypatch.setattr(subtitle_prompt, "resolve_imdb_id", lambda title: ("tt7", True))
+    monkeypatch.setattr(
+        subtitle_prompt, "resolve_imdb_id", lambda title, is_movie=None: ("tt7", True)
+    )
     seen = {}
     monkeypatch.setattr(
         subtitle_prompt.subtitle_extractor, "search", lambda **kw: seen.update(kw) or []
@@ -179,6 +205,38 @@ def test_resolve_imdb_id_falls_back_to_manual(monkeypatch):
     assert subtitle_prompt.resolve_imdb_id("Nothing") == ("tt999", False)
 
 
+def test_resolve_imdb_id_restricts_to_the_requested_catalog(monkeypatch):
+    seen = []
+
+    def fake_get(url, **kwargs):
+        seen.append(url)
+        return _Response(
+            {"metas": [{"name": "X", "type": "movie", "imdb_id": "tt1"}]}
+        )
+
+    monkeypatch.setattr(subtitle_prompt.requests, "get", fake_get)
+    _scripted(monkeypatch, [0])
+
+    subtitle_prompt.resolve_imdb_id("French title", is_movie=True)
+
+    assert len(seen) == 1 and "/movie/" in seen[0]
+
+
+def test_cinemeta_matches_for_series_only(monkeypatch):
+    seen = []
+
+    def fake_get(url, **kwargs):
+        seen.append(url)
+        return _Response({"metas": [{"name": "Show", "type": "series", "imdb_id": "tt1"}]})
+
+    monkeypatch.setattr(subtitle_prompt.requests, "get", fake_get)
+
+    matches = subtitle_prompt._cinemeta_matches("Show", is_movie=False)
+
+    assert len(seen) == 1 and "/series/" in seen[0]
+    assert matches[0]["imdb_id"] == "tt1"
+
+
 def test_anilist_ids_normalize_numeric_imdb(monkeypatch):
     import autoflix_cli.scraping.goldenanime as scraper
 
@@ -211,6 +269,7 @@ def test_collect_extra_subtitles_derives_series_numbers(monkeypatch):
         episode_number=None,
     )
     assert seen["season"] == 3 and seen["episode"] == 7
+    assert seen["is_movie"] is False
 
 
 def test_collect_extra_subtitles_defaults_unknown_season_to_one(monkeypatch):
@@ -249,6 +308,7 @@ def test_collect_extra_subtitles_movie(monkeypatch):
         episode_number=None,
     )
     assert seen["season"] is None and seen["episode"] is None
+    assert seen["is_movie"] is True
 
 
 def test_collect_extra_subtitles_disabled_skips_prompt(monkeypatch):

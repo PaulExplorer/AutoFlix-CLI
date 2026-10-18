@@ -30,6 +30,15 @@ CINEMETA_SERIES = "https://v3-cinemeta.strem.io/catalog/series/top/search={query
 CINEMETA_MOVIE = "https://v3-cinemeta.strem.io/catalog/movie/top/search={query}.json"
 
 _ANY_NUMBER = re.compile(r"\d+")
+# Explicit episode markers, tried before any loose number so a title that
+# contains digits ("The 100 — S01E02") cannot be mistaken for the episode.
+_EXPLICIT_EPISODE = re.compile(
+    r"\bS(\d{1,2})\s*E(\d{1,3})\b|(?<!\d)(\d{1,2})x(\d{1,3})(?!\d)",
+    re.IGNORECASE,
+)
+_EPISODE_WORD = re.compile(
+    r"\b(?:episode|épisode|ep|e)\s*\.?\s*(\d{1,3})\b", re.IGNORECASE
+)
 # "Saison 2", "Season 2" or "S2"; a bare number is intentionally NOT a season
 # so a series title reused as a season label cannot leak a wrong number.
 _SEASON_MARKER = re.compile(r"(?:saison|season)\s*(\d+)|\bs(\d{1,2})\b", re.IGNORECASE)
@@ -38,12 +47,27 @@ _MAX_RESULTS = 8
 
 
 def parse_number(value) -> int | None:
-    """First integer found in ``value`` (``"Episode 12"`` -> ``12``)."""
+    """Episode number found in ``value``.
+
+    Explicit markers (``"S01E02"``, ``"1x02"``, ``"Episode 2"``) win over the
+    first loose number, so a title embedding digits (``"The 100 — S01E02"``)
+    still resolves to ``2``.
+    """
     if value is None:
         return None
     if isinstance(value, int):
         return value
-    match = _ANY_NUMBER.search(str(value))
+    text = str(value)
+
+    explicit = _EXPLICIT_EPISODE.search(text)
+    if explicit:
+        return int(explicit.group(2) or explicit.group(4))
+
+    word = _EPISODE_WORD.search(text)
+    if word:
+        return int(word.group(1))
+
+    match = _ANY_NUMBER.search(text)
     return int(match.group()) if match else None
 
 
@@ -60,10 +84,22 @@ def parse_season(value) -> int | None:
     return int(match.group(1) or match.group(2))
 
 
-def _cinemeta_matches(title: str) -> list[dict]:
-    """Cinemeta (Stremio, keyless) catalogue entries matching ``title``."""
+def _cinemeta_matches(title: str, is_movie: bool | None = None) -> list[dict]:
+    """Cinemeta (Stremio, keyless) catalogue entries matching ``title``.
+
+    ``is_movie`` narrows the search to the right catalog. This matters for
+    French titles: searching both at once buries the movie results under the
+    (irrelevant) series ones, so a movie could never be picked.
+    """
+    if is_movie is True:
+        endpoints = (CINEMETA_MOVIE,)
+    elif is_movie is False:
+        endpoints = (CINEMETA_SERIES,)
+    else:
+        endpoints = (CINEMETA_SERIES, CINEMETA_MOVIE)
+
     metas: list[dict] = []
-    for endpoint in (CINEMETA_SERIES, CINEMETA_MOVIE):
+    for endpoint in endpoints:
         url = endpoint.format(query=urllib.parse.quote(title))
         try:
             payload = requests.get(
@@ -80,12 +116,15 @@ def _ask_manual_imdb_id() -> str | None:
     return value or None
 
 
-def resolve_imdb_id(title: str) -> tuple[str | None, bool]:
+def resolve_imdb_id(
+    title: str, is_movie: bool | None = None
+) -> tuple[str | None, bool]:
     """Let the user pick the IMDB entry matching ``title``.
 
-    Returns ``(imdb_id, is_movie)``; ``(None, False)`` when skipped.
+    ``is_movie`` restricts the catalog to search; when ``None`` both are
+    queried. Returns ``(imdb_id, is_movie)``; ``(None, False)`` when skipped.
     """
-    matches = _cinemeta_matches(title)
+    matches = _cinemeta_matches(title, is_movie)
     if not matches:
         return _ask_manual_imdb_id(), False
 
@@ -135,6 +174,7 @@ def prompt_extra_subtitles(
     season: int | None = None,
     episode: int | None = None,
     language: str | None = None,
+    is_movie: bool | None = None,
 ) -> list[dict]:
     """Ask whether to add external subtitles and return the chosen track(s).
 
@@ -153,7 +193,7 @@ def prompt_extra_subtitles(
         anidb_id = anidb_id or mapped_anidb
 
     if not imdb_id and not anidb_id and title:
-        imdb_id, is_movie = resolve_imdb_id(title)
+        imdb_id, is_movie = resolve_imdb_id(title, is_movie)
         if is_movie:
             season, episode = None, None
 

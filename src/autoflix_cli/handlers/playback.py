@@ -187,6 +187,7 @@ def _collect_extra_subtitles(
         anilist_id=anilist_id,
         season=season,
         episode=episode_no,
+        is_movie=is_movie,
     )
 
 
