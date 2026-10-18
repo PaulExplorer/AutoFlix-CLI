@@ -402,6 +402,7 @@ def _continue_watching_entry(user_id: int, entry: dict):
                 season_url=content.id,
                 logo_url=content.img,
                 headers={"Referer": arkanime_scraper.website_origin},
+                anilist_id=media_id,
             )
             return
 
@@ -440,6 +441,7 @@ def _continue_watching_entry(user_id: int, entry: dict):
                 season_url=str(season.id),
                 logo_url=series.img,
                 headers={"Referer": arkanime_scraper.website_origin},
+                anilist_id=media_id,
                 anilist_callback=lambda: arkanime_handler._update_anilist_progress(
                     "ArkAnime", series_dummy, season, selected_episode
                 ),
@@ -495,6 +497,7 @@ def _continue_watching_entry(user_id: int, entry: dict):
                 season_url=selected_season_access.url,
                 logo_url=series.img,
                 headers={"Referer": anime_sama_scraper.website_origin},
+                anilist_id=media_id,
                 anilist_callback=lambda: anime_sama_handler._update_anilist_progress(
                     "Anime-Sama", series_dummy, season, selected_episode
                 ),

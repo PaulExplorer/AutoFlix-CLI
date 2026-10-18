@@ -156,6 +156,7 @@ DEFAULT_SOURCE_PORTAL = {
     "aniwatch-fallback": "https://anivexa-api.vercel.app",
     "aniwatch-referer": "https://anizone.to",
     "animetosho": "https://feed.animetosho.xyz",
+    "opensubtitles-stremio": "https://opensubtitles-v3.strem.io",
     "videasy": "https://api.videasy.net",
     "videasy-referer": "https://cineby.gd",
     "vidlink": "https://vidlink.pro",
