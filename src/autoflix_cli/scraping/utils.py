@@ -4,6 +4,22 @@ from bs4 import BeautifulSoup
 from .objects import Player, Episode
 
 
+class NoEpisodesFoundError(Exception):
+    """Raised when an episode list contains no playable links.
+
+    On Anime-Sama, a catalogue entry can exist before its content is
+    released: the pages exist but ``episodes.js`` is empty (no player
+    links), which means the content has probably not aired / been
+    released yet.
+    """
+
+    def __init__(self, message: str | None = None):
+        super().__init__(
+            message
+            or "No playable links found for this content: it is probably not released yet."
+        )
+
+
 def parse_episode(code):
     """
     Parse an episode code into its components.
@@ -29,6 +45,12 @@ def parse_episodes_from_js(js_code: str) -> List[Episode]:
         lecteurs[int(lecteur_num)] = urls
 
     lecteurs = dict(sorted(lecteurs.items()))
+
+    if not lecteurs:
+        # No player URLs at all in the episode list: on Anime-Sama this
+        # usually means the content is listed in the catalogue but has
+        # not been released yet.
+        raise NoEpisodesFoundError()
 
     max_episodes = max(len(lst) for lst in lecteurs.values())
 

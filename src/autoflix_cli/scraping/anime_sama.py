@@ -1,7 +1,7 @@
 from curl_cffi import requests as cffi_requests
 from bs4 import BeautifulSoup
 from .objects import SearchResult, SamaSeason, SamaSeries, SeasonAccess, Episode
-from .utils import parse_episodes_from_js
+from .utils import parse_episodes_from_js, NoEpisodesFoundError
 from ..proxy import DNS_OPTIONS
 from random import randint
 
@@ -53,10 +53,10 @@ def search(query: str) -> list[SearchResult]:
     # Check if the container exists to avoid errors if no results
     if result_container:
         for result in result_container.find_all("div", recursive=False):
-            is_scan_only = False
-            for info in result.find_all("p", {"class": info_class}):
-                if info.text == "Scans":
-                    is_scan_only = True
+            is_scan_only = True
+            for type_badge in result.find_all("span", {"class": "type-badge"}):
+                if type_badge.text != "Scans":
+                    is_scan_only = False
                     break
             if is_scan_only:
                 continue
@@ -65,10 +65,10 @@ def search(query: str) -> list[SearchResult]:
             img: str = result.find("a").img.attrs["src"]
             info_block = result.find("div", {"class": "card-content"})
             title: str = info_block.h2.text
-            genres: list[str] = info_block.find("p", {"class": info_class}).text.split(
-                ", "
-            )
-            results.append(SearchResult(title, url, img, genres))
+            # genres: list[str] = info_block.find("p", {"class": info_class}).text.split(
+            #     ", "
+            # )
+            results.append(SearchResult(title, url, img, []))
 
     return results
 
@@ -92,6 +92,13 @@ def get_season(url: str) -> SamaSeason:
 
         episodes[lang_code] = parse_episodes_from_js(response.text)
         valid_lang.append(lang_code)
+
+    if valid_lang and not any(episodes.values()):
+        # Every available language parsed to an empty episode list: the
+        # catalogue entry exists but the content has no playable links,
+        # i.e. it is probably not released yet. Raise a clean error
+        # instead of crashing later in the flow.
+        raise NoEpisodesFoundError()
 
     # Clean up the title based on the URL
     parts = url.removesuffix("/").split("/")
@@ -122,7 +129,7 @@ def get_series(url: str) -> SamaSeries:
 
     genres: list[str] = []
 
-    genres_div = soup.find("div", {"class": "genres-wrap"})
+    genres_div = soup.find("div", {"class": "oe-genres"})
     for genre in genres_div.find_all("span"):
         genres.append(genre.text.strip())
 

@@ -1,4 +1,5 @@
 from ..scraping import anime_sama, player
+from ..scraping.utils import NoEpisodesFoundError
 from ..cli_utils import (
     select_from_list,
     print_header,
@@ -36,7 +37,8 @@ def handle_anime_sama():
             continue
 
         while True:
-            options = [f"{r.title} ({', '.join(r.genres)})" for r in results] + ["← Back"]
+            # options = [f"{r.title} ({', '.join(r.genres)})" for r in results] + ["← Back"] # Anime-Sama doesn't give genres anymore
+            options = [f"{r.title}" for r in results] + ["← Back"]
             choice_idx = select_from_list(options, "📺 Search Results:")
 
             if choice_idx == len(results):
@@ -75,7 +77,18 @@ def handle_anime_sama():
             selected_season_access = series.seasons[season_idx]
 
             print_info(f"Loading [cyan]{selected_season_access.title}[/cyan]...")
-            season = anime_sama.get_season(selected_season_access.url)
+            try:
+                season = anime_sama.get_season(selected_season_access.url)
+            except NoEpisodesFoundError:
+                print_error(
+                    "No links found for this content: it is probably not released yet."
+                )
+                pause()
+                continue
+            except Exception as e:
+                print_error(f"Could not load season: {e}")
+                pause()
+                continue
 
             langs = list(season.episodes.keys())
             if not langs:
@@ -142,6 +155,11 @@ def resume_anime_sama(data):
     print_info(f"Loading Season: {season_url}")
     try:
         season = anime_sama.get_season(season_url)
+    except NoEpisodesFoundError:
+        print_error(
+            "No links found for this content: it is probably not released yet."
+        )
+        return
     except Exception as e:
         print_error(f"Could not load season: {e}")
         return
