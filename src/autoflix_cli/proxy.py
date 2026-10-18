@@ -131,6 +131,54 @@ def _is_blocked_page(data, content_type=""):
     )
 
 
+# Size of the image container bound to the PNG magic. Real images are
+# megabytes here; a "segment" made of a tiny 1x1 PNG followed by media
+# data is the signature of a wrapped payload.
+_IMAGE_HEAD_SNIFF = 512
+
+
+def _strip_image_wrapper(data: bytes) -> bytes:
+    """Strip an image container prefix wrapping a real media payload.
+
+    Some CDNs (e.g. callistanise behind the minochinos player) disguise
+    their media segments as images: each segment is a tiny 1x1 PNG
+    (~70 bytes, ending with an "IEND" marker) immediately followed by
+    the real MPEG-TS payload and served as ``image/png`` with a signed
+    ``tiktokcdn.com`` URL. ffmpeg's HLS demuxer probes the segment, the
+    PNG signature wins (score higher than raw TS), playback then dies
+    with "Video --vid=1 (png)" and no decodable frames. Stripping the
+    prefix restores a plain TS segment every demuxer understands.
+
+    The change is only applied when the body really looks like a media
+    payload after the image terminator, so already-plain audio/video
+    segments and keys are never touched.
+    """
+    data = bytes(data)
+    if len(data) < 128 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return data
+
+    end = data.find(b"IEND", 8, _IMAGE_HEAD_SNIFF)
+    if end == -1:
+        return data
+    rest = data[end + 8:]  # IEND (4 bytes) + CRC (4 bytes)
+    if not rest:
+        return data
+
+    # MPEG-TS: sync byte every 188 bytes from the start.
+    looks_ts = rest[0] == 0x47 and (len(rest) <= 188 or rest[188] == 0x47)
+    # fMP4 init/fragment: "ftyp" or "styp" box right after the image.
+    looks_fmp4 = len(rest) > 8 and rest[4:8] in (b"ftyp", b"styp")
+    if looks_ts or looks_fmp4:
+        # Fires once per segment (hundreds per episode): debug level so it
+        # never floods INFO output; AUTOFIX_LOG=DEBUG still shows it.
+        log.debug(
+            "Stripped PNG image wrapper (%d bytes) from a media segment.",
+            end + 8,
+        )
+        return rest
+    return data
+
+
 def _client_gone_check(environ):
     """Return a predicate detecting that the client (mpv) closed this request.
 
@@ -547,6 +595,19 @@ def proxy_ts_ext(ext=None):
     )
 
 
+def _is_open_zero_range(client_range):
+    """True for a bare ``bytes=0-`` Range header.
+
+    ffmpeg's HLS demuxer sends it while probing a segment: it means "the
+    whole body from the start", which is exactly what the stripped reply
+    is (HTTP allows answering an open Range with a plain 200).
+    """
+    return bool(client_range) and (
+        re.fullmatch(r"\s*bytes\s*=\s*0\s*-\s*", client_range, re.IGNORECASE)
+        is not None
+    )
+
+
 def _serve_segment(default_content_type):
     target_url = request.args.get("url")
     headers_str = request.args.get("headers", "{}")
@@ -563,6 +624,11 @@ def _serve_segment(default_content_type):
     # fMP4 init segments). Forward them so the exact slice is fetched and
     # served, instead of returning the whole file (misaligned => corruption).
     client_range = request.headers.get("Range")
+    # Image-wrapped segments (see _strip_image_wrapper) can only be fixed in
+    # a full-body reply: any other Range keeps upstream byte offsets intact
+    # (BYTERANGE correctness). The open ``bytes=0-`` probe range is answered
+    # with the whole stripped body as 200, which is valid for that case.
+    strip_ok = not client_range or _is_open_zero_range(client_range)
 
     try:
         data, status, extra_headers = fetch_segment(
@@ -574,6 +640,15 @@ def _serve_segment(default_content_type):
 
     if data is None:
         return "Error fetching segment", 502
+
+    if strip_ok:
+        data = _strip_image_wrapper(data)
+        if client_range and status == 206:
+            # The full (stripped) body replaces the upstream 206: stale
+            # upstream offsets (Content-Range) would confuse the player.
+            status = 200
+            extra_headers.pop("Content-Range", None)
+            extra_headers.pop("Accept-Ranges", None)
 
     # Force Content-Type so VLC doesn't bug if the server sends .html.
     # video/mp2t is the standard for TS segments and stays the default; fMP4

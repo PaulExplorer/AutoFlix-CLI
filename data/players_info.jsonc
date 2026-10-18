@@ -72,7 +72,10 @@
   },
   "waaw": { "type": "default" },
   "darkibox": { "type": "default" },
-  "minochinos": { "type": "default", "modes": { "mpv": "direct" } },
+  // callistanise (its CDN) disguises TS segments as tiny PNG images:
+  // direct playback confuses ffmpeg's probe (stream detected as PNG),
+  // so segments must be repaired by the local proxy.
+  "minochinos": { "type": "default", "modes": { "mpv": "proxy" } },
   "movearnpre": {
     "type": "default",
     "referrer": "full",

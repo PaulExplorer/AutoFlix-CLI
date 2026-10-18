@@ -152,3 +152,67 @@ def test_segment_content_types_cover_known_extensions():
     assert proxy.SEGMENT_CONTENT_TYPES["mp4"] == "video/mp4"
     # Unknown extensions must never fall back to a wrong fMP4 type.
     assert "html" not in proxy.SEGMENT_CONTENT_TYPES
+
+
+# callistanise (minochinos CDN) hides its TS segments inside fake PNG images:
+# a tiny 1x1 header (~70 bytes, ending with IEND+CRC) followed by real media
+# bytes, served as image/png from signed tiktokcdn URLs. The fixtures below
+# reproduce that shape with synthetic data.
+_FAKE_PNG_HEAD = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\x0dIHDR"
+    b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+    b"\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+def test_strip_image_wrapper_png_ts():
+    """TS hidden after a tiny PNG header is unwrapped."""
+    ts_payload = b"\x47" + b"\x00" * 187 + b"\x47" + b"\x11" * 200
+    wrapped = _FAKE_PNG_HEAD + ts_payload
+    stripped = proxy._strip_image_wrapper(wrapped)
+    assert stripped == ts_payload
+    assert stripped.startswith(b"\x47")
+
+
+def test_strip_image_wrapper_png_fmp4():
+    """fMP4 fragments (ftyp box) wrapped in an image are also unwrapped."""
+    payload = b"\x00\x00\x00\x18ftypiso5" + b"\x00" * 128
+    assert proxy._strip_image_wrapper(_FAKE_PNG_HEAD + payload) == payload
+
+
+def test_strip_image_wrapper_leaves_plain_media_alone():
+    ts = b"\x47" + b"\x00" * 187 + b"\x47" + b"\x00" * 188
+    assert proxy._strip_image_wrapper(ts) == ts
+
+    mp4 = b"\x00\x00\x00\x18ftypiso5" + b"\x00" * 128
+    assert proxy._strip_image_wrapper(mp4) == mp4
+
+
+def test_strip_image_wrapper_leaves_real_images_alone():
+    """A genuine PNG payload (no media after IEND) stays untouched."""
+    import struct
+    import zlib
+
+    ihdr_body = b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00"
+    ihdr = struct.pack(">I", 13) + b"IHDR" + ihdr_body
+    ihdr += struct.pack(">I", zlib.crc32(b"IHDR" + ihdr_body))
+    body = b"\x78\x9c\x63\x60\x60\x60\x00\x00\x00\x04\x00\x01"
+    idat = struct.pack(">I", len(body)) + b"IDAT" + body
+    idat += struct.pack(">I", zlib.crc32(b"IDAT" + body))
+    iend = b"\x00\x00\x00\x00IEND\xaeB`\x82"
+    real_png = b"\x89PNG\r\n\x1a\n" + ihdr + idat + iend
+    tail = b"\x00" * 128  # trailing bytes: no TS sync, no ftyp -> untouched
+    assert proxy._strip_image_wrapper(real_png + tail) == real_png + tail
+
+
+def test_strip_image_wrapper_png_without_iend_kept():
+    """Truncated image (no IEND marker): nothing to strip."""
+    body = b"\x89PNG\r\n\x1a\n" + b"\x00" * 400
+    assert proxy._strip_image_wrapper(body) == body
+
+
+def test_strip_image_wrapper_png_garbage_tail_kept():
+    """IEND present but no TS/fMP4 payload after it: untouched (defensive)."""
+    wrapped = _FAKE_PNG_HEAD + b"garbage-after-iend" * 8
+    assert proxy._strip_image_wrapper(wrapped) == wrapped
