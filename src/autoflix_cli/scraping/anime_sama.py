@@ -54,7 +54,7 @@ def search(query: str) -> list[SearchResult]:
     if result_container:
         for result in result_container.find_all("div", recursive=False):
             is_scan_only = True
-            for type_badge in result.find_all("span", {"class": "type-badge"}):
+            for type_badge in result.find_all("span", {"class": "as-badge"}):
                 if type_badge.text != "Scans":
                     is_scan_only = False
                     break
@@ -63,8 +63,7 @@ def search(query: str) -> list[SearchResult]:
 
             url: str = result.find("a").attrs["href"]
             img: str = result.find("a").img.attrs["src"]
-            info_block = result.find("div", {"class": "card-content"})
-            title: str = info_block.h2.text
+            title: str = result.h3.text
             # genres: list[str] = info_block.find("p", {"class": info_class}).text.split(
             #     ", "
             # )
@@ -84,7 +83,9 @@ def get_season(url: str) -> SamaSeason:
             url.replace("vostfr", lang_code).removesuffix("/")
             + f"/episodes.js?filever={randint(1, 100000)}"
         )
-        response = scraper.get(nurl)
+        response = scraper.get(nurl, headers={
+            "Referer": url.replace("vostfr", lang_code)
+        })
 
         if response.status_code == 404:
             continue
