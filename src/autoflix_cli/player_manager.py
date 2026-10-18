@@ -57,12 +57,9 @@ DEFAULT_IFRAME_SEC_HEADERS = {
 # "reconnect" and "reconnect_at_eof" are deliberately left off: they make
 # ffmpeg retry every clean end of stream and stall playback while logging
 # "Will reconnect at N in X second(s), error=End of file".
-# reconnect_on_http_error bridges the short rate-limit windows these CDNs
-# answer with: a 403 segment usually passes again seconds later.
 DEFAULT_DIRECT_MPV_OPTIONS = (
     "--cache=yes",
     "--stream-lavf-o=reconnect_streamed=1,reconnect_on_network_error=1,"
-    "reconnect_on_http_error=403,429,500,502,503,"
     "reconnect_delay_max=4",
 )
 
