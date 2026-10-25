@@ -111,9 +111,14 @@ def print_success(message: str) -> None:
     console.print(f"[green]✓[/green] {message}")
 
 
-def print_error(message: str) -> None:
+def print_error(message: str, show_issue: bool = True) -> None:
     """Print an error message."""
     console.print(f"[red]✗[/red] {message}")
+    if show_issue:
+        console.print(
+            "[dim]Please open an issue at: [cyan underline]https://github.com/PaulExplorer/AutoFlix-CLI/issues[/cyan underline]\n"
+            "(Si vous parlez français, vous pouvez aussi l'ouvrir en français.)[/dim]"
+        )
 
 
 def print_info(message: str) -> None:

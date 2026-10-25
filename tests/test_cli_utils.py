@@ -1,5 +1,6 @@
 from autoflix_cli.cli_utils import (
     clean_title,
+    print_error,
     _truncate,
     _is_disabled,
     _visible_len,
@@ -35,3 +36,18 @@ def test_is_disabled_detects_separators():
 
 def test_visible_len_ignores_ansi_codes():
     assert _visible_len("\x1b[1mhello\x1b[0m") == 5
+
+
+def test_print_error_displays_message_and_issue_link(capsys):
+    print_error("Test failure message")
+    captured = capsys.readouterr().out
+    assert "Test failure message" in captured
+    assert "https://github.com/PaulExplorer/AutoFlix-CLI/issues" in captured
+    assert "français" in captured
+
+
+def test_print_error_without_issue_link(capsys):
+    print_error("Test failure message", show_issue=False)
+    captured = capsys.readouterr().out
+    assert "Test failure message" in captured
+    assert "https://github.com/PaulExplorer/AutoFlix-CLI/issues" not in captured

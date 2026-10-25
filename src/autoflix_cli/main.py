@@ -334,6 +334,15 @@ def main():
         except Exception:
             pass
         sys.exit(0)
+    except Exception as e:
+        if tracker.get_developer_mode():
+            console.print_exception()
+        print_error(f"An unexpected error occurred: {e}")
+        try:
+            proxy.stop_proxy_server()
+        except Exception:
+            pass
+        sys.exit(1)
 
 
 if __name__ == "__main__":
