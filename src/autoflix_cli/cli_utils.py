@@ -851,6 +851,7 @@ def clean_title(title: str) -> str:
 
     Example:
         "One Piece Season 4" -> "One Piece"
+        "From Old Country Bumpkin to Master Swordsman II" -> "From Old Country Bumpkin to Master Swordsman"
     """
     patterns = [
         r"\s+Season\s+\d+",
@@ -859,6 +860,8 @@ def clean_title(title: str) -> str:
         r"\s+Cour\s+\d+",
         r"\s+\d+(st|nd|rd|th)\s+Season",
         r"\s+-\s+\d+",
+        # Trailing Roman numerals I–IV (season suffixes like "Title II")
+        r"\s+(?:IV|III|II|I)$",
     ]
 
     cleaned = title

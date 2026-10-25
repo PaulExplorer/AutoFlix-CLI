@@ -559,6 +559,20 @@ def _search_and_select_series(scraper, media_title, romaji_title):
     return scraper.get_series(selection.url)
 
 
+# Roman numerals I–IV only (AniList only uses them up to part 4 in practice).
+_ROMAN_TO_INT = {"I": 1, "II": 2, "III": 3, "IV": 4}
+# Matches a trailing Roman numeral (I, II, III, IV) at the end of a title.
+_TRAILING_ROMAN = re.compile(r"\s+(IV|III|II|I)$", re.IGNORECASE)
+
+
+def _parse_roman(text: str) -> int | None:
+    """Return the season number encoded as a trailing Roman numeral (I–IV), or None."""
+    m = _TRAILING_ROMAN.search(text)
+    if m:
+        return _ROMAN_TO_INT[m.group(1).upper()]
+    return None
+
+
 def _auto_select_season(series_seasons, media_title, romaji_title):
     target_season_num = None
     for t in [media_title, romaji_title]:
@@ -575,6 +589,11 @@ def _auto_select_season(series_seasons, media_title, romaji_title):
         match = re.search(r"\b(\d+)(?:st|nd|rd|th)\s+Season\b", t, re.IGNORECASE)
         if match:
             target_season_num = int(match.group(1))
+            break
+        # Match trailing Roman numerals: "Title II" -> season 2
+        roman = _parse_roman(t)
+        if roman is not None:
+            target_season_num = roman
             break
 
     if target_season_num is None:
@@ -595,6 +614,11 @@ def _auto_select_season(series_seasons, media_title, romaji_title):
             # Match patterns like "2nd Season", "1st Season", "3rd Season", "4th Season" in provider season titles
             s_match = re.search(r"\b(\d+)(?:st|nd|rd|th)\s+Season\b", s.title, re.IGNORECASE)
             if s_match and int(s_match.group(1)) == target_season_num:
+                default_season_idx = i
+                break
+            # Match trailing Roman numerals in provider season titles
+            roman_season = _parse_roman(s.title)
+            if roman_season is not None and roman_season == target_season_num:
                 default_season_idx = i
                 break
             if target_season_num == 1 and "Saison" not in s.title and "Season" not in s.title:

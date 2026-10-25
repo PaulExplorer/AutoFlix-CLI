@@ -88,23 +88,88 @@ def _handle_custom_players_menu():
             pause()
 
 
+def _first_launch_setup():
+    """Guided first-launch setup shown only once (when no language is saved).
+
+    Steps:
+      1. Language
+      2. Default player
+      3. Auto-pick best source
+      4. Ask for subtitles before playback
+      5. Closing tip about AniList and other settings
+    """
+    clear_screen()
+    print_header("🚀 AutoFlix CLI — First Launch Setup",
+                 "You can change all of these later in ⚙ Settings")
+
+    # ── Step 1: Language ──────────────────────────────────────────────────
+    console.print("\n[bold cyan]Step 1 / 4[/bold cyan] — [bold]Preferred language[/bold]")
+    console.print(
+        "[dim]Filters available providers and sets the default subtitle language.[/dim]"
+    )
+    langs = get_all_languages()
+    lang_choice = select_from_list([l[1] for l in langs], "Choose your language:")
+    selected_lang = langs[lang_choice][0]
+    tracker.set_language(selected_lang)
+    print_success(f"Language set to: {langs[lang_choice][1]}")
+
+    # ── Step 2: Default player ────────────────────────────────────────────
+    console.print("\n[bold cyan]Step 2 / 4[/bold cyan] — [bold]Default video player[/bold]")
+    console.print(
+        "[dim]The player launched automatically for each stream. "
+        "You can also add custom players in Settings.[/dim]"
+    )
+    players = get_all_players()
+    player_choice = select_from_list(
+        [p[1] for p in players], "Choose your default player:"
+    )
+    tracker.set_player(players[player_choice][0])
+    print_success(f"Default player set to: {players[player_choice][1]}")
+
+    # ── Step 3: Auto-pick best source ─────────────────────────────────────
+    console.print("\n[bold cyan]Step 3 / 4[/bold cyan] — [bold]Auto-pick best source[/bold]")
+    console.print(
+        "[dim]When ON, AutoFlix probes all available sources and plays the best "
+        "one automatically without asking. When OFF, you choose the source each time.[/dim]"
+    )
+    auto_choice = select_from_list(
+        ["ON  — Pick best source automatically",
+         "OFF — Let me choose the source each time"],
+        "Auto-pick best source:",
+    )
+    tracker.set_auto_source(auto_choice == 0)
+    print_success("Auto-pick: " + ("enabled." if auto_choice == 0 else "disabled."))
+
+    # ── Step 4: Ask for subtitles ─────────────────────────────────────────
+    console.print("\n[bold cyan]Step 4 / 4[/bold cyan] — [bold]Subtitle prompt[/bold]")
+    console.print(
+        "[dim]When ON, AutoFlix asks before each episode whether to search for "
+        "external subtitles. GoldenMS and GoldenAnime always ask regardless of this setting.[/dim]"
+    )
+    sub_choice = select_from_list(
+        ["ON  — Ask for subtitles before each playback",
+         "OFF — Start playback without asking"],
+        "Subtitle prompt:",
+    )
+    tracker.set_ask_subtitles(sub_choice == 0)
+    print_success("Subtitle prompt: " + ("enabled." if sub_choice == 0 else "disabled."))
+
+    # ── Closing tip ───────────────────────────────────────────────────────
+    console.print()
+    console.print(
+        "[bold green]✓ Setup complete![/bold green] "
+        "More options are available in [bold]⚙ Settings[/bold], including:\n"
+        "  [cyan]•[/cyan] AniList sync (track your watch progress automatically)\n"
+        "  [cyan]•[/cyan] Custom video players\n"
+        "  [cyan]•[/cyan] Developer / debug mode"
+    )
+    pause()
+
+
 def check_language_setup():
-    """Verify if a language is set, if not, prompt for first setup."""
+    """Run first-launch setup when no language has been configured yet."""
     if not tracker.get_language():
-        clear_screen()
-        print_header("AutoFlix - First Launch Setup")
-        print_info("Please select your preferred language.")
-        print_info(
-            "This will filter available providers and set default subtitle languages."
-        )
-
-        langs = get_all_languages()
-
-        choice = select_from_list([l[1] for l in langs], "Choice:")
-        selected_lang = langs[choice][0]
-        tracker.set_language(selected_lang)
-        print_success(f"Language set to: {langs[choice][1]}")
-        pause()
+        _first_launch_setup()
 
 
 def _run():

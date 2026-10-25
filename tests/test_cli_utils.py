@@ -14,6 +14,16 @@ def test_clean_title_removes_season_markers():
     assert clean_title("Anime 2nd Season") == "Anime"
 
 
+def test_clean_title_strips_trailing_roman_numerals():
+    assert clean_title("From Old Country Bumpkin to Master Swordsman II") == "From Old Country Bumpkin to Master Swordsman"
+    assert clean_title("My Hero Academia III") == "My Hero Academia"
+    assert clean_title("Some Anime IV") == "Some Anime"
+    # Season I (= 1) should also be stripped
+    assert clean_title("Some Show I") == "Some Show"
+    # Plain title with a roman numeral embedded mid-word must NOT be stripped
+    assert clean_title("Title IIX") == "Title IIX"
+
+
 def test_clean_title_keeps_plain_titles():
     assert clean_title("Some Regular Title") == "Some Regular Title"
 
