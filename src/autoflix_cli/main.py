@@ -38,6 +38,41 @@ from .handlers.devtest import (
 )
 from .log import apply_developer_logging, setup_logging
 import sys
+import importlib.metadata
+
+
+_GITHUB_URL = "https://github.com/PaulExplorer/AutoFlix-CLI"
+_ISSUES_URL = "https://github.com/PaulExplorer/AutoFlix-CLI/issues"
+
+
+def _get_version() -> str:
+    try:
+        return importlib.metadata.version("autoflix-cli")
+    except importlib.metadata.PackageNotFoundError:
+        return "dev"
+
+
+def _handle_about() -> None:
+    """Display the About page."""
+    clear_screen()
+    version = _get_version()
+    print_header("ℹ About AutoFlix CLI")
+    console.print(f"\n  [bold cyan]AutoFlix CLI[/bold cyan]  [dim]v{version}[/dim]")
+    console.print(
+        f"\n  [dim]GitHub:[/dim]  [cyan underline]{_GITHUB_URL}[/cyan underline]"
+    )
+    console.print()
+    console.print(
+        "  [yellow]⚠[/yellow]  [bold]I don't catch every bug![/bold]\n"
+        "  If something breaks, don't hesitate to open an issue — reports are very welcome.\n"
+        f"  [dim]→[/dim] [cyan underline]{_ISSUES_URL}[/cyan underline]"
+    )
+    console.print(
+        "\n  [dim](You can also open it in French if you prefer / "
+        "Vous pouvez aussi l'ouvrir en français si vous préférez.)[/dim]"
+    )
+    console.print()
+    pause()
 
 
 def _handle_add_custom_player():
@@ -308,6 +343,7 @@ def _run():
                 if dev_mode:
                     opts.append("Test embed URL (dev)")
                     opts.append("Test playback modes (dev)")
+                opts.append("ℹ About")
                 opts.append("Back")
 
                 s_choice = select_from_list(opts, "Select Setting:")
@@ -372,6 +408,9 @@ def _run():
                     handle_dev_scraper_test()
                 elif dev_mode and s_choice == 8:
                     handle_dev_playback_mode_test()
+
+                elif s_choice == opts.index("ℹ About"):
+                    _handle_about()
 
                 else:
                     break
