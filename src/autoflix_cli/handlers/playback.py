@@ -212,7 +212,7 @@ def play_episode_flow(
     """
     Handle the playback flow for a single episode:
     1. Check for players.
-    2. Ask whether to add external subtitles.
+    2. Ask whether to add external subtitles (unless disabled in settings).
     3. Ask user to select a player.
     4. Play the video.
     5. Save progress if successful.
@@ -240,9 +240,10 @@ def play_episode_flow(
 
     # Ask once per episode, before the player loops, so a retry does not ask
     # again. ``subtitle_title`` lets a caller search a cleaner title than the
-    # one shown in the window.
+    # one shown in the window. The user setting disables the prompt entirely
+    # (the Golden sources bypass this flow and always ask).
     extra_subtitles = _collect_extra_subtitles(
-        ask=ask_subtitles,
+        ask=ask_subtitles and tracker.get_ask_subtitles(),
         title=subtitle_title or series_title,
         imdb_id=imdb_id,
         anidb_id=anidb_id,

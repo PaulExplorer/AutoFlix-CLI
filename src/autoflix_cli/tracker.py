@@ -231,6 +231,20 @@ class ProgressTracker:
         self.data["auto_source"] = bool(enabled)
         self._save_data()
 
+    # --- Subtitles Prompt ---
+
+    def get_ask_subtitles(self) -> bool:
+        """Whether to ask for external subtitles before a playback.
+
+        Only the shared playback flow honors this; the Golden sources manage
+        their own subtitles and always ask.
+        """
+        return self.data.get("ask_subtitles", True)
+
+    def set_ask_subtitles(self, enabled: bool):
+        self.data["ask_subtitles"] = bool(enabled)
+        self._save_data()
+
     # --- Developer Mode ---
 
     def get_developer_mode(self) -> bool:

@@ -223,11 +223,13 @@ def _run():
                 player = tracker.get_player()
                 dev_mode = tracker.get_developer_mode()
                 auto_source = tracker.get_auto_source()
+                ask_subs = tracker.get_ask_subtitles()
 
                 lang_display = get_language_display(lang)
                 player_display = get_player_display(player)
                 dev_display = "ON" if dev_mode else "OFF"
                 auto_display = "ON" if auto_source else "OFF"
+                ask_subs_display = "ON" if ask_subs else "OFF"
 
                 opts = [
                     f"Update AniList Token ({'Set' if token else 'Not Set'})",
@@ -235,6 +237,7 @@ def _run():
                     f"Choose default Player ({player_display})",
                     "Manage custom players",
                     f"Auto-pick the best source ({auto_display})",
+                    f"Ask for subtitles on playback ({ask_subs_display})",
                     f"Developer Mode ({dev_display})",
                 ]
                 if dev_mode:
@@ -283,15 +286,26 @@ def _run():
                     pause()
 
                 elif s_choice == 5:
+                    tracker.set_ask_subtitles(not ask_subs)
+                    print_success(
+                        "Subtitles prompt enabled, you will be asked before "
+                        "each playback (Golden sources always ask)."
+                        if not ask_subs
+                        else "Subtitles prompt disabled, playback starts "
+                        "without asking (Golden sources still ask)."
+                    )
+                    pause()
+
+                elif s_choice == 6:
                     tracker.set_developer_mode(not dev_mode)
                     apply_developer_logging(not dev_mode)
                     state = "enabled" if not dev_mode else "disabled"
                     print_success(f"Developer mode {state}.")
                     pause()
 
-                elif dev_mode and s_choice == 6:
-                    handle_dev_scraper_test()
                 elif dev_mode and s_choice == 7:
+                    handle_dev_scraper_test()
+                elif dev_mode and s_choice == 8:
                     handle_dev_playback_mode_test()
 
                 else:

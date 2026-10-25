@@ -365,3 +365,36 @@ def test_play_episode_flow_asks_and_passes_subtitles(monkeypatch):
 
     assert result is True
     assert calls[0]["subtitles"] == [track]
+
+
+def test_play_episode_flow_respects_the_subtitles_setting(monkeypatch):
+    """With the setting off, the shared flow starts without asking.
+
+    Only providers routed through ``play_episode_flow`` honor it; the Golden
+    sources run their own subtitle logic and always ask (see goldenms /
+    goldenanime handlers).
+    """
+    called = {"n": 0}
+    monkeypatch.setattr(playback.tracker, "get_developer_mode", lambda: False)
+    monkeypatch.setattr(playback.tracker, "get_auto_source", lambda: False)
+    monkeypatch.setattr(playback.tracker, "get_ask_subtitles", lambda: False)
+    monkeypatch.setattr(playback.tracker, "save_progress", lambda **kw: None)
+    monkeypatch.setattr(
+        playback, "prompt_extra_subtitles",
+        lambda **kw: called.__setitem__("n", 1) or [],
+    )
+    monkeypatch.setattr(playback, "select_from_list", lambda options, prompt, **kw: 0)
+    monkeypatch.setattr(playback, "play_video", lambda url, **kw: True)
+
+    result = playback.play_episode_flow(
+        provider_name="Test",
+        series_title="Series",
+        season_title="Saison 2",
+        episode=Episode("Episode 5", [PLAYER]),
+        series_url="",
+        season_url="",
+        headers={},
+    )
+
+    assert result is True
+    assert called["n"] == 0

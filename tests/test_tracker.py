@@ -81,3 +81,11 @@ def test_corrupt_data_file_is_backed_up(tracker, tmp_path):
 def test_entry_sort_key_fallback():
     assert _entry_sort_key({}) .year == 1
     assert _entry_sort_key({"last_watched": "2024-01-01T00:00:00"}) > _entry_sort_key({})
+
+
+def test_ask_subtitles_defaults_and_toggles(tracker):
+    assert tracker.get_ask_subtitles() is True
+    tracker.set_ask_subtitles(False)
+    assert tracker.get_ask_subtitles() is False
+    tracker.set_ask_subtitles(True)
+    assert tracker.get_ask_subtitles() is True
