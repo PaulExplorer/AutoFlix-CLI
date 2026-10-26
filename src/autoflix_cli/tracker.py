@@ -231,6 +231,24 @@ class ProgressTracker:
         self.data["auto_source"] = bool(enabled)
         self._save_data()
 
+    # --- Anime-Sama Language Preference ---
+
+    def get_sama_lang_pref(self) -> str:
+        """How to pick the audio version on Anime-Sama.
+
+        Returns one of:
+          "vo"     -> auto-select the original version (VO / VOSTFR).
+          "other"  -> when the only choice is VO vs one other version, take
+                      the other one; with more options, stay manual.
+          "manual" -> never auto-select, always ask (default).
+        """
+        pref = self.data.get("sama_lang_pref", "manual")
+        return pref if pref in ("vo", "other", "manual") else "manual"
+
+    def set_sama_lang_pref(self, pref: str):
+        self.data["sama_lang_pref"] = pref
+        self._save_data()
+
     # --- Subtitles Prompt ---
 
     def get_ask_subtitles(self) -> bool:
