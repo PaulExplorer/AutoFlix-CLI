@@ -18,6 +18,13 @@
 - 🚫 **No ads, no trackers.**
 - ⚡ **Lightweight and fast.**
 
+## 🎥 Demo
+
+https://github.com/user-attachments/assets/bf95885f-b7b2-4bfc-b607-eb9939cc64d9
+
+> [!NOTE]
+> The video above shows AutoFlix in action: language selection, provider choice, title search and stream launch.
+
 ## 🚀 Installation
 
 ### With **uv** (recommended)
