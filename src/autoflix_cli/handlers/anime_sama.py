@@ -17,6 +17,54 @@ from .playback import play_episode_flow
 from .anilist_update import _update_anilist_progress
 
 
+# On Anime-Sama, "vostfr" is the original version (VO), everything else
+# (vf, vf1, vf2, vcn, ...) is a translated/dubbed version.
+VO_CODE = "vostfr"
+
+
+def pick_language_auto(langs):
+    """Return a language code to auto-select, or None to ask the user.
+
+    Behavior driven by the Anime-Sama language setting:
+      - "vo"    -> auto-select the VO (VOSTFR) when it is available.
+      - "other" -> when the choice is exactly VO vs one other version, take
+                   the other one; with more options, do nothing and ask.
+      - "manual"-> never auto-select, always ask.
+    """
+    pref = tracker.get_sama_lang_pref()
+
+    if pref == "vo":
+        return VO_CODE if VO_CODE in langs else None
+
+    if pref == "other":
+        if len(langs) == 2 and VO_CODE in langs:
+            return next(code for code in langs if code != VO_CODE)
+        return None
+
+    return None
+
+
+def _select_language(langs, prompt="🌍 Select Language:"):
+    """Pick the language using the user's preference, else prompt for it.
+
+    Returns None when the user cancels the manual prompt.
+    """
+    # Without a real choice to make, there is nothing to prefer.
+    if len(langs) == 1:
+        return langs[0]
+
+    auto_lang = pick_language_auto(langs)
+    if auto_lang:
+        print_info(f"Language automatically set to [cyan]{auto_lang.upper()}[/cyan]")
+        return auto_lang
+
+    lang_options = langs + ["← Back"]
+    lang_idx = select_from_list(lang_options, prompt)
+    if lang_idx == len(langs):
+        return None
+    return langs[lang_idx]
+
+
 def handle_anime_sama():
     """Handle Anime-Sama provider flow."""
     anime_sama.get_website_url()
@@ -96,11 +144,9 @@ def handle_anime_sama():
                 pause()
                 continue
 
-            lang_options = langs + ["← Back"]
-            lang_idx = select_from_list(lang_options, "🌍 Select Language:")
-            if lang_idx == len(langs):
+            selected_lang = _select_language(langs)
+            if selected_lang is None:
                 continue
-            selected_lang = langs[lang_idx]
             episodes = season.episodes[selected_lang]
 
             ep_options = [e.title for e in episodes] + ["← Back"]
@@ -168,15 +214,9 @@ def resume_anime_sama(data):
     if not langs:
         return
 
-    # If only one language, pick it. If multiple, ask.
-    if len(langs) == 1:
-        selected_lang = langs[0]
-    else:
-        lang_idx = select_from_list(langs + ["← Back"], "🌍 Select Language:")
-        if lang_idx == len(langs):
-            return
-        selected_lang = langs[lang_idx]
-
+    selected_lang = _select_language(langs)
+    if selected_lang is None:
+        return
     episodes = season.episodes[selected_lang]
 
     # Find the episode index

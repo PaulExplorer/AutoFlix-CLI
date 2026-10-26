@@ -89,3 +89,15 @@ def test_ask_subtitles_defaults_and_toggles(tracker):
     assert tracker.get_ask_subtitles() is False
     tracker.set_ask_subtitles(True)
     assert tracker.get_ask_subtitles() is True
+
+
+def test_sama_lang_pref_default_and_roundtrip(tracker):
+    assert tracker.get_sama_lang_pref() == "manual"
+    for pref in ("vo", "other", "manual"):
+        tracker.set_sama_lang_pref(pref)
+        assert tracker.get_sama_lang_pref() == pref
+
+
+def test_sama_lang_pref_invalid_value_falls_back_to_manual(tracker):
+    tracker.data["sama_lang_pref"] = "bogus"
+    assert tracker.get_sama_lang_pref() == "manual"

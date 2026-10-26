@@ -44,6 +44,12 @@ import importlib.metadata
 _GITHUB_URL = "https://github.com/PaulExplorer/AutoFlix-CLI"
 _ISSUES_URL = "https://github.com/PaulExplorer/AutoFlix-CLI/issues"
 
+_SAMA_PREF_DISPLAY = {
+    "vo": "Auto: VO",
+    "other": "Auto: Other (VF)",
+    "manual": "Manual",
+}
+
 
 def _get_version() -> str:
     try:
@@ -330,6 +336,8 @@ def _run():
                 dev_display = "ON" if dev_mode else "OFF"
                 auto_display = "ON" if auto_source else "OFF"
                 ask_subs_display = "ON" if ask_subs else "OFF"
+                sama_pref = tracker.get_sama_lang_pref()
+                sama_pref_display = _SAMA_PREF_DISPLAY.get(sama_pref, sama_pref)
 
                 opts = [
                     f"Update AniList Token ({'Set' if token else 'Not Set'})",
@@ -338,6 +346,7 @@ def _run():
                     "Manage custom players",
                     f"Auto-pick the best source ({auto_display})",
                     f"Ask for subtitles on playback ({ask_subs_display})",
+                    f"Anime-Sama versions: VO/VF ({sama_pref_display})",
                     f"Developer Mode ({dev_display})",
                 ]
                 if dev_mode:
@@ -398,15 +407,35 @@ def _run():
                     pause()
 
                 elif s_choice == 6:
+                    v_choice = select_from_list(
+                        [
+                            "VO — Always take the original version (VOSTFR) "
+                            "when available",
+                            "Other — Take the dubbed version when the only "
+                            "choice is VO vs one other; ask if there are more",
+                            "Manual — Always ask which version to play",
+                        ],
+                        "Anime-Sama: preferred version:",
+                    )
+                    tracker.set_sama_lang_pref(
+                        ["vo", "other", "manual"][v_choice]
+                    )
+                    print_success(
+                        f"Anime-Sama version preference: "
+                        f"{_SAMA_PREF_DISPLAY[tracker.get_sama_lang_pref()]}"
+                    )
+                    pause()
+
+                elif s_choice == 7:
                     tracker.set_developer_mode(not dev_mode)
                     apply_developer_logging(not dev_mode)
                     state = "enabled" if not dev_mode else "disabled"
                     print_success(f"Developer mode {state}.")
                     pause()
 
-                elif dev_mode and s_choice == 7:
-                    handle_dev_scraper_test()
                 elif dev_mode and s_choice == 8:
+                    handle_dev_scraper_test()
+                elif dev_mode and s_choice == 9:
                     handle_dev_playback_mode_test()
 
                 elif s_choice == opts.index("ℹ About"):
