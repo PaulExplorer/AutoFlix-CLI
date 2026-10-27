@@ -7,6 +7,8 @@ from .objects import (
     Episode,
 )
 
+import json
+
 from curl_cffi import requests as cffi_requests
 from ..proxy import DNS_OPTIONS
 
@@ -50,18 +52,39 @@ def search(query: str) -> list[SearchResult]:
         except AttributeError:
             break  # no results
 
-        link: str = (
-            website_origin
-            + result.attrs["onclick"].split("location.href='")[1].split("'")[0]
-        )
-        try:
-            img: str = website_origin + result.find("img").attrs["src"]
-        except AttributeError:
-            img: str = ""  # no image
+        if "showSeasons(this)" in result.attrs["onclick"]:
+            if result.attrs["data-seasons"]:
+                dataSeasons = json.loads(result.attrs["data-seasons"])
 
-        genres: list[str] = []  # unknow
+                for season in dataSeasons:
+                    season_name = title + " Saison " + str(season["n"])
 
-        results.append(SearchResult(title, link, img, genres))
+                    link: str = website_origin + season["l"]
+
+                    try:
+                        img: str = season["p"]
+                    except AttributeError:
+                        img: str = ""  # no image
+
+                    genres: list[str] = []  # unknow
+
+                    results.append(SearchResult(season_name, link, img, genres))
+            else:
+                continue
+        else:
+            link: str = (
+                website_origin
+                + result.attrs["onclick"].split("location.href='")[1].split("'")[0]
+            )
+
+            try:
+                img: str = website_origin + result.find("img").attrs["src"]
+            except AttributeError:
+                img: str = ""  # no image
+
+            genres: list[str] = []  # unknow
+
+            results.append(SearchResult(title, link, img, genres))
 
     return results
 
