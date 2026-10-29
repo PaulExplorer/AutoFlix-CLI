@@ -38,7 +38,7 @@ import autoflix_cli.api as af
   - `Result` — a search hit (`.provider`, `.title`, `.url`, `.img`, `.genres`)
   - `Content` — a movie (`kind="movie"`, `.players` set) or a series
     (`kind="series"`, `.seasons` set), or a season page
-    (`kind="season"`, `.episodes` set)
+    (`kind="season"`, `.seasons` — one entry per language — episodes loaded)
   - `Season` — episodes; they may need a lazy fetch
   - `Episode` — players; they may need a lazy fetch (call `af.get()` again)
   - `Player` — an embed player; feed its `.url` to `af.extract()` to get the
@@ -69,7 +69,7 @@ print(content.title, content.seasons)
 
 # 3. Walk down to the players
 season = af.get(content.seasons[0])   # Content(kind="season"), episodes loaded
-episode = season.episodes[0]          # Episode with .players
+episode = season.seasons[0].episodes[0]   # one entry per language
 print(episode.players)
 
 # 4. Resolve a direct stream
@@ -98,9 +98,14 @@ The navigation primitive: resolves a provider URL into a normalized object,
 depending on what the URL actually points to.
 
 - `kind="movie"` content: `.players` is a list of `Player`.
-- `kind="series"` content: `.seasons`; anime-sama/coflix seasons may be
-  lazy (only a `.url`) — pass them back to `af.get()` to load them.
-- `kind="season"` content: `.episodes` are fully loaded with players.
+- `kind="series"` content: `.seasons`. Two lazy flavors, depending on the
+  provider: anime-sama seasons hold a `.url` to fetch (`af.get(season)`),
+  while coflix seasons are fetched already but their *episodes* are lazy
+  (`af.get(episode)`). Repeat `af.get()` on whichever lazy object you have
+  until you reach players.
+- `kind="season"` content: `.seasons` — one `Season` per *language*
+  (anime-sama VOSTFR/VF, french-stream VO/VOSTFR/VF), episodes fully loaded
+  with their players.
 - An episode page URL (e.g. a coflix `/episode/...` URL) returns an
   `Episode` with its players.
 
@@ -120,9 +125,9 @@ for player in content.players:
 
 ```python
 content = af.get("coflix", "https://coflix.example/serie/gothic/")
-season, episode = content.seasons[0], content.seasons[0].episodes[0]
+season = content.seasons[0]
 
-loaded = af.get("coflix", episode.url)        # Episode with .players
+loaded = af.get(season.episodes[0])    # Episode with .players loaded
 stream = af.extract(loaded.players[0])
 ```
 
@@ -224,7 +229,7 @@ import autoflix_cli.api as af
 
 content = af.get("anime-sama", af.search("bofuri", provider="anime-sama")[0].url)
 season = af.get(content.seasons[0])
-episode = season.episodes[0]
+episode = season.seasons[0].episodes[0]
 
 stream = af.extract(episode.players[0])
 af.start_proxy()

@@ -62,7 +62,7 @@ import autoflix_cli.api as af
 hit = af.search("bofuri", provider="anime-sama")[0]
 content = af.get(hit)
 season = af.get(content.seasons[0])
-stream = af.extract(season.episodes[0].players[0])
+stream = af.extract(season.seasons[0].episodes[0].players[0])
 ```
 
 ## 🛠️ Development
