@@ -133,8 +133,10 @@ class Content:
     ``kind`` is ``"movie"``, ``"series"`` or ``"season"``:
 
     * movie:   ``players`` is set (embed players, feed them to :func:`extract`)
-    * series:  ``seasons`` is set (each season may need a lazy fetch)
-    * season:  ``episodes`` is set (fully loaded, players included)
+    * series:  ``seasons`` is set (mostly lazy - one entry per real season)
+    * season:  ``seasons`` is set and fully loaded - one entry per *language*
+               (e.g. anime-sama vostfr/vf, french-stream vo/vostfr/vf). Use
+               ``content.seasons[0].episodes`` to reach the episodes.
     """
 
     def __init__(
@@ -260,9 +262,10 @@ def get(provider, url: str = None):
         url: Content URL on that provider.
 
     Returns:
-        * :class:`Content` for a movie/series/season page. ``kind`` says which:
+        * :class:`Content` for any other URL. ``kind`` says which shape:
           ``"movie"`` (``.players`` set), ``"series"`` (``.seasons``, mostly
-          lazy) or ``"season"`` (``.episodes`` fully loaded).
+          lazy) or ``"season"`` (``.seasons``, one per language, episodes
+          fully loaded with players).
         * :class:`Episode` when the URL is an episode page (players loaded).
 
     Raises:
@@ -277,6 +280,13 @@ def get(provider, url: str = None):
     # Accept any API object that carries its own navigation URL.
     if isinstance(provider, (Result, Episode, Season, Content)) and url is None:
         provider, url = provider.provider, provider.url
+
+    if url is None:
+        raise ValueError(
+            "Nothing to resolve: pass (provider, url), or any API object carrying "
+            "a navigation URL (Result, lazy Season/Episode). For lazy Season "
+            "entries without a URL (coflix), navigate with af.get(episode) instead."
+        )
 
     name = _norm_provider(provider)
     _ready(name)
