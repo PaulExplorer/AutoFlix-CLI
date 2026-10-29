@@ -52,6 +52,19 @@ autoflix
 3. Search for a title.
 4. Choose a stream and launch it with your preferred player.
 
+## 🐍 Python API
+
+Autoflix can also be used **as a library**: search providers, resolve content and extract direct streams programmatically. See [docs/API.md](docs/API.md) for the full guide.
+
+```python
+import autoflix_cli.api as af
+
+hit = af.search("bofuri", provider="anime-sama")[0]
+content = af.get(hit)
+season = af.get(content.seasons[0])
+stream = af.extract(season.episodes[0].players[0])
+```
+
 ## 🛠️ Development
 
 ```bash
