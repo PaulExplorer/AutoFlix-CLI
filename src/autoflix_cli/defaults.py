@@ -123,7 +123,8 @@ DEFAULT_PLAYERS = {
     "voe": { "type": "voe" },
     "voe.sx": { "type": "voe" },
     "jeremyparticipantanything": { "type": "voe" },
-    "teresapoliticallearn": { "type": "voe" }
+    "teresapoliticallearn": { "type": "voe" },
+    "derricknationtop": { "type": "voe" }
 }
 
 DEFAULT_NEW_URL = {

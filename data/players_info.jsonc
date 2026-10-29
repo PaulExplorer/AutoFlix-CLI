@@ -156,5 +156,6 @@
   "voe": { "type": "voe", "modes": { "mpv": "proxy" } },
   "voe.sx": { "type": "voe", "modes": { "mpv": "proxy" }},
   "jeremyparticipantanything": { "type": "voe", "modes": { "mpv": "proxy" } },
-  "teresapoliticallearn": { "type": "voe", "modes": { "mpv": "proxy" } }
+  "teresapoliticallearn": { "type": "voe", "modes": { "mpv": "proxy" } },
+  "derricknationtop": { "type": "voe", "modes": { "mpv": "proxy" } }
 }
