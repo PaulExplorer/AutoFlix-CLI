@@ -46,6 +46,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="resolve an embed player URL into a direct stream URL",
     )
     parser.add_argument(
+        "--force", action="store_true",
+        help="with --extract: when the matched extractor fails, brute-force "
+        "every extractor (dev mode) and print the full report"
+    )
+    parser.add_argument(
         "--providers", action="store_true",
         help="list the available providers",
     )
@@ -113,6 +118,38 @@ def _print_content(obj) -> None:
                 console.print(f"      [dim]-[/dim] {e.title}: {e.url}")
 
 
+def _force_extract(player_url: str, provider: str, as_json: bool) -> int:
+    """--force: run every extractor, show the report and any working stream."""
+    report = api.test_extractors(player_url, provider=provider)
+    working = [r["stream_url"] for r in report.values() if r["ok"]]
+    if as_json:
+        print(json.dumps(report, indent=2))
+        return 0 if working else 1
+
+    from rich.table import Table
+
+    table = Table(title="Extractor report (--force)")
+    table.add_column("Extractor", style="magenta")
+    table.add_column("OK", justify="center")
+    table.add_column("Time", justify="right", style="dim")
+    table.add_column("Stream / error", style="white", overflow="fold")
+    for name, r in report.items():
+        if r["ok"]:
+            table.add_row(name, "[green]yes[/green]",
+                          f"{r['elapsed']:.1f}s", r["stream_url"])
+        else:
+            table.add_row(name, "[red]no[/red]",
+                          f"{r['elapsed']:.1f}s", r["error"])
+    console.print(table)
+
+    if not working:
+        print_error("every extractor failed on this URL")
+        return 1
+    for url in working:
+        print(url)
+    return 0
+
+
 def run_cli(argv: list[str]) -> int:
     """Run one non-interactive command. Returns the process exit code."""
     args = _build_parser().parse_args(argv)
@@ -128,8 +165,11 @@ def run_cli(argv: list[str]) -> int:
 
         if args.extract:
             stream = api.extract(args.extract, provider=args.provider)
+            if stream is None and args.force:
+                return _force_extract(args.extract, args.provider, args.json)
             if stream is None:
-                print_error("could not extract a stream from this URL")
+                print_error("could not extract a stream from this URL "
+                            "(try --force to test every extractor)")
                 return 1
             print(stream if args.json is False else json.dumps({"stream": stream}))
             return 0

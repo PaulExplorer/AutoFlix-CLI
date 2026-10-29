@@ -15,6 +15,7 @@
 | `--url URL`             | Show content details for a provider URL            |
 | `--index N` (with search)| Show the details of result `N` instead of the list |
 | `--extract PLAYER_URL`  | Resolve an embed player URL into a direct stream   |
+| `--force`               | With `--extract`: brute-force every extractor and print a full report |
 | `--providers`           | List the available providers                       |
 
 > Player URLs: the `https://...` links listed in the **players** of a
@@ -83,6 +84,26 @@ The returned URL can be passed to your player:
 ```bash
 mpv "$(autoflix --extract 'https://sendvid.com/embed/xyz')"
 ```
+
+### When extraction fails: `--force`
+
+The matched extractor does not always manage to resolve a stream
+(domains rotate, config drifts). `--force` then runs **every** extractor
+against the URL (dev-style brute force) and prints a report with timings:
+
+```bash
+autoflix --extract "https://derricknationtop.com/e/c4gbyeojdqdo" --force
+# ┌ Extractor report ────────────────────────────────────────────────────┐
+# │ voe           yes  0.6s  https://.../master.m3u8?t=...               │
+# │ default       no   0.8s  no stream found                            │
+# │ ...                                                                  │
+# └──────────────────────────────────────────────────────────────────────┘
+# https://.../master.m3u8?t=...
+```
+
+Every working stream URL is printed below the table; add `--json` for the
+raw report. In Python the same report is available as
+`af.test_extractors(url)`.
 
 ### List the providers
 

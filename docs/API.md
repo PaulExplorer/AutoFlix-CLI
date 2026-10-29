@@ -164,6 +164,16 @@ stream, subs = af.extract(embed_url, provider="coflix", return_subs=True)
 
 Returns the stream URL (`str`), or `None` when nothing could be extracted.
 
+### `af.test_extractors(url, headers=None, provider=None) -> dict`
+
+Dev-style brute force: runs **every** extractor on an embed URL and returns
+a detailed report:
+
+```python
+for name, report in af.test_extractors(embed_url).items():
+    print(name, report["ok"], report["stream_url"] or report["error"])
+```
+
 ### `af.anime(anilist_id=None, title=None, episode=1, lang="sub") -> list[dict]`
 
 Stream entries for an anime episode, by **AniList ID** (or title — the ID is

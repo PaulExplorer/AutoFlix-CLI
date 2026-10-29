@@ -47,6 +47,7 @@ __all__ = [
     "search",
     "start_proxy",
     "stop_proxy",
+    "test_extractors",
     "to_dict",
 ]
 
@@ -416,6 +417,14 @@ def extract(url, headers: dict = None, provider: str = None, return_subs: bool =
     if isinstance(url, Player):
         provider, url = url.provider, url.url
 
+    return _get_hls_link(url, _default_headers(url, provider, headers), return_subs)
+
+
+def _default_headers(url, provider, headers: dict = None) -> dict:
+    """Best-effort HTTP headers for an embed URL (provider-inferred Referer)."""
+    if isinstance(url, Player):
+        provider, url = url.provider, url.url
+
     name = _norm_provider(provider) if provider else None
 
     # Shorthand embeds (e.g. "montmyoboky:9646") are Arkanime: the stream
@@ -434,13 +443,33 @@ def extract(url, headers: dict = None, provider: str = None, return_subs: bool =
     elif name == "arkanime":
         arkanime.get_website_url()
         headers.setdefault("Referer", arkanime.website_origin)
-
-    return _get_hls_link(url, headers, return_subs)
+    return headers
 
 
 def is_supported(url: str) -> bool:
     """Check whether an embed player URL is supported by the extractors."""
     return _is_supported(url)
+
+
+def test_extractors(url, headers: dict = None, provider: str = None) -> dict[str, dict]:
+    """Run *every* extractor on an embed URL (dev-mode style brute force).
+
+    Args:
+        url: Embed player URL. A :class:`Player` from the model above is
+            accepted too.
+        headers: Optional HTTP headers (defaults derived from ``provider``,
+            same as :func:`extract`).
+        provider: Provider name the URL came from (inferred when omitted).
+
+    Returns:
+        Dict mapping extractor name -> ``{"ok": bool, "stream_url": ...,
+        "error": ..., "elapsed": float}``.
+    """
+    from .scraping.player import test_all_scrapers_verbose
+
+    if isinstance(url, Player):
+        url = url.url
+    return test_all_scrapers_verbose(url, _default_headers(url, provider, headers))
 
 
 # ---------------------------------------------------------------------------
