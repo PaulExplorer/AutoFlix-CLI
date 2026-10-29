@@ -52,6 +52,9 @@ autoflix
 3. Search for a title.
 4. Choose a stream and launch it with your preferred player.
 
+> **Flags are also supported** for non-interactive use:
+> `autoflix --search "title"`, `--url`, `--extract`... See [docs/CLI.md](docs/CLI.md).
+
 ## 🐍 Python API
 
 Autoflix can also be used **as a library**: search providers, resolve content and extract direct streams programmatically. See [docs/API.md](docs/API.md) for the full guide.
