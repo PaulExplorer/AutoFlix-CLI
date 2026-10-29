@@ -48,6 +48,9 @@ autoflix
 3. Recherchez un titre.
 4. Sélectionnez un stream et lancez-le avec votre lecteur préféré.
 
+> **Des drapeaux existent aussi** pour un usage non-interactif :
+> `autoflix --search "titre"`, `--url`, `--extract`... Voir [docs/CLI.md](docs/CLI.md).
+
 ## 🐍 API Python
 
 AutoFlix est aussi utilisable **comme bibliothèque** : recherchez chez les fournisseurs, résolvez le contenu et extrayez les streams directement en Python. Voir [docs/API.md](docs/API.md) pour le guide complet (en anglais).
