@@ -48,6 +48,19 @@ autoflix
 3. Recherchez un titre.
 4. Sélectionnez un stream et lancez-le avec votre lecteur préféré.
 
+## 🐍 API Python
+
+AutoFlix est aussi utilisable **comme bibliothèque** : recherchez chez les fournisseurs, résolvez le contenu et extrayez les streams directement en Python. Voir [docs/API.md](docs/API.md) pour le guide complet (en anglais).
+
+```python
+import autoflix_cli.api as af
+
+hit = af.search("bofuri", provider="anime-sama")[0]
+content = af.get(hit)
+season = af.get(content.seasons[0])
+stream = af.extract(season.seasons[0].episodes[0].players[0])
+```
+
 ## 🛠️ Développement
 
 ```bash

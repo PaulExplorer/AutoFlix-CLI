@@ -1035,10 +1035,12 @@ def start_proxy_server(port=0):
 
 def stop_proxy_server():
     """Shuts down the proxy server gracefully."""
-    global _server_instance
+    global _server_instance, PROXY_PORT, PROXY_URL
     if _server_instance:
         _server_instance.shutdown()
         _server_instance = None
+    PROXY_PORT = 0
+    PROXY_URL = None
 
 
 # ---------------------------------------------------------------------------
