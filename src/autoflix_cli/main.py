@@ -37,6 +37,7 @@ from .handlers.devtest import (
     handle_dev_scraper_test,
 )
 from .log import apply_developer_logging, setup_logging
+from . import cli
 import sys
 import importlib.metadata
 
@@ -457,7 +458,18 @@ def main():
     The installed ``autoflix`` script calls this directly, bypassing the
     ``__main__`` guard below, so interruption must be handled here to
     avoid a traceback and to always stop the proxy server.
+
+    With command line flags it runs the non-interactive CLI instead of
+    the menus (see :mod:`autoflix_cli.cli`).
     """
+    if len(sys.argv) > 1:
+        try:
+            sys.exit(cli.run_cli(sys.argv[1:]))
+        finally:
+            try:
+                proxy.stop_proxy_server()
+            except Exception:
+                pass
     try:
         _run()
     except KeyboardInterrupt:
