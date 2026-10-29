@@ -53,7 +53,8 @@ def _build_parser() -> argparse.ArgumentParser:
     # Options
     parser.add_argument(
         "--provider", metavar="NAME", help="restrict to one provider "
-        "(coflix, anime-sama, french-stream, arkanime)"
+        "(coflix, anime-sama, french-stream, arkanime); auto-detected "
+        "from --url/--extract when the URL speaks for itself"
     )
     parser.add_argument(
         "--json", action="store_true",

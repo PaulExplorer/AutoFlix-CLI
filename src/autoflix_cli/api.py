@@ -195,6 +195,20 @@ def _norm_provider(provider) -> str:
     return name
 
 
+def _infer_provider(url: str):
+    """Guess the provider from a URL. None when it is not recognizable."""
+    u = str(url).lower()
+    if "coflix" in u:
+        return "coflix"
+    if "anime-sama" in u or "/catalogue/" in u:
+        return "anime-sama"
+    if "french-stream" in u:
+        return "french-stream"
+    if "arkanime" in u:
+        return "arkanime"
+    return None
+
+
 def _ready(provider: str):
     """Lazy per-provider initialization (base URL discovery where needed)."""
     if provider == "coflix":
@@ -249,7 +263,7 @@ def search(query: str, provider: str = None) -> list[Result]:
     return results
 
 
-def get(provider, url: str = None):
+def get(provider=None, url: str = None):
     """Resolve a provider URL into a normalized object.
 
     This is the generic navigation primitive: what comes back depends on the
@@ -257,8 +271,11 @@ def get(provider, url: str = None):
     walk down until you reach players you can feed to :func:`extract`.
 
     Args:
-        provider: Provider name, or a :class:`Result` (then ``url`` is ignored),
-            or an :class:`Episode`/``Season`` with a ``url`` but no players.
+        provider: Provider name, optionally omitted when ``url`` is a full
+            URL that speaks for itself (coflix, anime-sama, french-stream,
+            arkanime) — ``af.get(url_string)`` alone is accepted too. Or a
+            :class:`Result` (then ``url`` is ignored), or an
+            :class:`Episode`/``Season`` with a ``url`` but no players.
         url: Content URL on that provider.
 
     Returns:
@@ -277,6 +294,10 @@ def get(provider, url: str = None):
         obj.url = url
         return obj
 
+    # Single-argument style: the URL as the only positional parameter.
+    if url is None and isinstance(provider, str):
+        provider, url = None, provider
+
     # Accept any API object that carries its own navigation URL.
     if isinstance(provider, (Result, Episode, Season, Content)) and url is None:
         provider, url = provider.provider, provider.url
@@ -287,6 +308,15 @@ def get(provider, url: str = None):
             "a navigation URL (Result, lazy Season/Episode). For lazy Season "
             "entries without a URL (coflix), navigate with af.get(episode) instead."
         )
+
+    # Full URL without provider name: infer it from the URL itself.
+    if provider is None:
+        provider = _infer_provider(url)
+        if provider is None:
+            raise ValueError(
+                "Could not determine the provider from this URL: pass "
+                f"provider= explicitly ({', '.join(_TEXT_PROVIDERS)})."
+            )
 
     name = _norm_provider(provider)
     _ready(name)
@@ -370,7 +400,9 @@ def extract(url, headers: dict = None, provider: str = None, return_subs: bool =
         url: Embed player URL. A :class:`Player` from the model above is
             accepted too (its ``provider`` is used automatically).
         headers: HTTP headers for the request. When omitted, sensible
-            defaults are derived from ``provider`` (e.g. the site Referer).
+            defaults are derived from ``provider`` (e.g. the site Referer);
+            when ``provider`` is None it is inferred from the URL when
+            possible.
         provider: Provider name the URL came from (also inferred from a
             :class:`Player` argument, or from a shorthand URL like
             ``montmyoboky:1234`` which belongs to Arkanime).
@@ -388,8 +420,12 @@ def extract(url, headers: dict = None, provider: str = None, return_subs: bool =
 
     # Shorthand embeds (e.g. "montmyoboky:9646") are Arkanime: the stream
     # lives behind the provider API, whose origin must be initialized.
-    if not name and str(url).lower().startswith("montmyoboky"):
-        name = "arkanime"
+    if not name:
+        u = str(url).lower()
+        if u.startswith("montmyoboky"):
+            name = "arkanime"
+        else:
+            name = _infer_provider(u)
 
     headers = dict(headers or {})
     if name == "coflix":

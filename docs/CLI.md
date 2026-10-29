@@ -25,7 +25,7 @@
 
 | Flag               | Action                                                  |
 | -------------------| --------------------------------------------------------|
-| `--provider NAME`  | Restrict to one provider: `coflix`, `anime-sama`, `french-stream`, `arkanime` |
+| `--provider NAME`  | Restrict to one provider: `coflix`, `anime-sama`, `french-stream`, `arkanime`. **Optional** — for `--url`/`--extract` it is detected from the URL itself. |
 | `--json`           | Machine-readable JSON output instead of a pretty table   |
 | `--version`        | Print the version                                        |
 

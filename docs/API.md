@@ -92,10 +92,15 @@ af.search("mercredi", provider="coflix")  # one provider
 If every provider fails, an exception is raised; individual failures are
 skipped in merged mode. An unknown provider name raises `ValueError`.
 
-### `af.get(provider, url) -> Content | Episode`
+### `af.get(provider=None, url=None) -> Content | Episode`
 
 The navigation primitive: resolves a provider URL into a normalized object,
 depending on what the URL actually points to.
+
+The provider is detected from the URL itself whenever possible
+(`coflix`, `anime-sama`, `french-stream`, `arkanime` in the URL), so a bare
+URL works: `af.get("https://coflix.ac/serie/mercredi/")`. A clearly unknown
+URL raises a `ValueError` asking for an explicit provider.
 
 - `kind="movie"` content: `.players` is a list of `Player`.
 - `kind="series"` content: `.seasons`. Two lazy flavors, depending on the
