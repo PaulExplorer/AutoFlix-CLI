@@ -1,251 +1,119 @@
+from dataclasses import dataclass
+
+
+@dataclass
 class SearchResult:
-    def __init__(self, title: str, id: str, url: str, img: str, genres: list[str]):
-        self.title = title
-        self.id = id
-        self.url = url
-        self.img = img
-        self.genres = genres
 
-    def __str__(self):
-        
-        return f"SearchResult(
-           
-           title='{self.title}',
-           id='{self.id}', 
-           url='{self.url}', 
-           img='{self.img}', 
-           genres={self.genres})"
-        )
+    # paramètres obligatoires
+    title: str
+    url: str
+    img: str
+    genres: list[str]
 
-    def __repr__(self):
-        return str(self)
+    # paramètres facultatifs (toujours après les obligatoires)
+    id: str = ""
 
-
+@dataclass
 class Player:
-    def __init__(self, name: str, url: str):
-        self.name = name
-        self.url = url
-
-    def __str__(self):
-        return f"Player(name='{self.name}', url='{self.url}')"
-
-    def __repr__(self):
-        return str(self)
+    name: str
+    url: str
 
 
+@dataclass
 class Episode:
-    def __init__(self, title: str, players: list[Player]):
-        self.title = title
-        self.players = players
-
-    def __str__(self):
-        return f"Episode(title='{self.title}', players={self.players})"
-
-    def __repr__(self):
-        return str(self)
+    title: str
+    players: list[Player]
 
 
+@dataclass
 class SamaSeason:
-    def __init__(
-        self, title: str, url: str, lang: list[str], episodes: dict[str, list[Episode]]
-    ):
-        self.title = title
-        self.url = url
-        self.lang = lang
-        self.episodes = episodes
-
-    def __str__(self):
-        return f"SamaSeason(title='{self.title}', url='{self.url}', lang={self.lang}, episodes={self.episodes})"
-
-    def __repr__(self):
-        return str(self)
+    title: str
+    url: str
+    lang: list[str]
+    episodes: dict[str, list[Episode]]
 
 
+@dataclass
 class SeasonAccess:
-    def __init__(self, title: str, url: str):
-        self.title = title
-        self.url = url
-
-    def __str__(self):
-        return f"SeasonAccess(title='{self.title}', url='{self.url}')"
-
-    def __repr__(self):
-        return str(self)
+    title: str
+    url: str
 
 
+@dataclass
 class EpisodeAccess:
-    def __init__(self, title: str, url: str):
-        self.title = title
-        self.url = url
-
-    def __str__(self):
-        return f"EpisodeAccess(title='{self.title}', url='{self.url}')"
-
-    def __repr__(self):
-        return str(self)
+    title: str
+    url: str
 
 
+@dataclass
 class SamaSeries:
-    def __init__(
-        self,
-        title: str,
-        url: str,
-        img: str,
-        genres: list[str],
-        seasons: list[SeasonAccess],
-    ):
-        self.title = title
-        self.url = url
-        self.img = img
-        self.genres = genres
-        self.seasons = seasons
+    title: str
+    url: str
+    img: str
+    genres: list[str]
+    seasons: list[SeasonAccess]
 
-    def __str__(self):
-        return f"SamaSeries(title='{self.title}', url='{self.url}', img='{self.img}', genres={self.genres}, seasons={self.seasons})"
 
-    def __repr__(self):
-        return str(self)
-
+@dataclass
 class ArkSeason:
-    def __init__(
-        self, id:str, title: str, episodes: list[Episode]
-    ):
-        self.id = id
-        self.title = title
-        self.episodes = episodes
+    id: str
+    title: str
+    episodes: list[Episode]
 
-    def __str__(self):
-        return f"ArkSeason(id='{self.id}', title='{self.title}', episodes={self.episodes})"
 
-    def __repr__(self):
-        return str(self)
-
+@dataclass
 class ArkSeries:
-    def __init__(
-        self,
-        id:str,
-        title: str,
-        img: str,
-        genres: list[str],
-        seasons: list[ArkSeason],
-    ):
-        self.id = id
-        self.title = title
-        self.img = img
-        self.genres = genres
-        self.seasons = seasons
+    id: str
+    title: str
+    img: str
+    genres: list[str]
+    seasons: list[ArkSeason]
 
-    def __str__(self):
-        return f"ArkSeries(id='{self.id}', title='{self.title}', img='{self.img}', genres={self.genres}, seasons={self.seasons})"
 
-    def __repr__(self):
-        return str(self)
-
+@dataclass
 class ArkMovie:
-    def __init__(
-        self,
-        id:str,
-        title: str,
-        img: str,
-        genres: list[str],
-        players: list[Player]
-    ):
-        self.id = id
-        self.title = title
-        self.img = img
-        self.genres = genres
-        self.players = players
+    id: str
+    title: str
+    img: str
+    genres: list[str]
+    players: list[Player]
 
-    def __str__(self):
-        return f"ArkMovie(id='{self.id}', title='{self.title}', img='{self.img}', genres={self.genres}, players={self.players})"
 
-    def __repr__(self):
-        return str(self)
-
+@dataclass
 class CoflixMovie:
-    def __init__(
-        self,
-        title: str,
-        url: str,
-        img: str,
-        genres: list[str],
-        players: list[Player],
-    ):
-        self.title = title
-        self.url = url
-        self.img = img
-        self.genres = genres
-        self.players = players
+    title: str
+    url: str
+    img: str
+    genres: list[str]
+    players: list[Player]
 
-    def __str__(self):
-        return f"CoflixMovie(title='{self.title}', url='{self.url}', img='{self.img}', genres={self.genres}, players={self.players})"
 
-    def __repr__(self):
-        return str(self)
-
+@dataclass
 class CoflixSeason:
-    def __init__(self, title: str, episodes: list[EpisodeAccess]):
-        self.title = title
-        self.episodes = episodes
+    title: str
+    episodes: list[EpisodeAccess]
 
-    def __str__(self):
-        return f"CoflixSeason(title='{self.title}', episodes={self.episodes})"
 
-    def __repr__(self):
-        return str(self)
-
+@dataclass
 class CoflixSeries:
-    def __init__(
-        self,
-        title: str,
-        url: str,
-        img: str,
-        genres: list[str],
-        seasons: list[CoflixSeason],
-    ):
-        self.title = title
-        self.url = url
-        self.img = img
-        self.genres = genres
-        self.seasons = seasons
-
-    def __str__(self):
-        return f"CoflixSeries(title='{self.title}', url='{self.url}', img='{self.img}', genres={self.genres}, seasons={self.seasons})"
-
-    def __repr__(self):
-        return str(self)
+    title: str
+    url: str
+    img: str
+    genres: list[str]
+    seasons: list[CoflixSeason]
 
 
+@dataclass
 class FrenchStreamMovie:
-    def __init__(
-        self,
-        title: str,
-        url: str,
-        img: str,
-        genres: list[str],
-        players: list[Player],
-    ):
-        self.title = title
-        self.url = url
-        self.img = img
-        self.genres = genres
-        self.players = players
-
-    def __str__(self):
-        return f"FrenchStreamMovie(title='{self.title}', url='{self.url}', img='{self.img}', genres={self.genres}, players={self.players})"
-
-    def __repr__(self):
-        return str(self)
+    title: str
+    url: str
+    img: str
+    genres: list[str]
+    players: list[Player]
 
 
+@dataclass
 class FrenchStreamSeason:
-    def __init__(self, title: str, url: str, episodes: dict[str, list[Episode]]):
-        self.title = title
-        self.url = url
-        self.episodes = episodes
-
-    def __str__(self):
-        return f"FrenchStreamSeason(title='{self.title}', url='{self.url}', episodes={self.episodes})"
-
-    def __repr__(self):
-        return str(self)
+    title: str
+    url: str
+    episodes: dict[str, list[Episode]]
