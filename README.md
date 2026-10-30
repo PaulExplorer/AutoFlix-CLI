@@ -41,6 +41,21 @@ pip install autoflix-cli
 
 > **Note:** You need an external media player such as **MPV**, **VLC** or **a browser** installed.
 
+### Optional: **fzf** (nicer menus)
+
+```bash
+# Linux (Fedora/Debian/Arch)
+sudo dnf install fzf   # or: apt install fzf / pacman -S fzf
+# macOS
+brew install fzf
+# Windows
+winget install junegunn.fzf
+```
+
+When **fzf** is on your ``PATH``, all interactive menus get instant
+fuzzy search and standard keybindings. Without it, AutoFlix falls
+back to its built-in arrow-key menus — everything works either way.
+
 ## 💻 Usage
 
 ```bash
