@@ -29,6 +29,7 @@ from .handlers import (
     goldenanime,
     goldenms,
     arkanime,
+    franime,
 )
 from . import history_ui
 from . import proxy
@@ -222,6 +223,11 @@ def _run():
     registry.register(
         "🎌 Anime-Sama (Anime and animated movies)",
         anime_sama.handle_anime_sama,
+        supported_languages=["fr"],
+    )
+    registry.register(
+        "🎴 FRAnime (Anime)",
+        franime.handle_franime,
         supported_languages=["fr"],
     )
     registry.register(

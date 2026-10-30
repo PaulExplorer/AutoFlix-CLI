@@ -1,8 +1,2 @@
-# Some files from python, uv and vscode
-.venv
-__pycache__
-.vscode
-dist/
-
-# file with my tests of players
-test.md 
+# Created by venv; see https://docs.python.org/3/library/venv.html
+*

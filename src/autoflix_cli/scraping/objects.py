@@ -1,12 +1,21 @@
 class SearchResult:
-    def __init__(self, title: str, url: str, img: str, genres: list[str]):
+    def __init__(self, title: str, id: str, url: str, img: str, genres: list[str]):
         self.title = title
+        self.id = id
         self.url = url
         self.img = img
         self.genres = genres
 
     def __str__(self):
-        return f"SearchResult(title='{self.title}', url='{self.url}', img='{self.img}', genres={self.genres})"
+        
+        return f"SearchResult(
+           
+           title='{self.title}',
+           id='{self.id}', 
+           url='{self.url}', 
+           img='{self.img}', 
+           genres={self.genres})"
+        )
 
     def __repr__(self):
         return str(self)
