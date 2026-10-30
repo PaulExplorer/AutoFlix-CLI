@@ -12,6 +12,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+from .fzf_menu import FzfError, fzf_enabled, select_with_fzf
+
 # Shared console for all static (non-interactive) output.
 # ``highlight=False`` avoids mangling URLs with Rich highlighting.
 console = Console(highlight=False)
@@ -550,9 +552,14 @@ def select_from_list(
     allow_filter: bool = True,
     is_disabled: Callable[[str], bool] | None = None,
 ) -> int:
-    """Let the user pick one option with arrow keys (stable, lightweight).
+    """Let the user pick one option (stable, lightweight).
 
-    Features:
+    Backend: when ``fzf`` is installed on an interactive terminal it
+    drives the menu (fuzzy type-to-search, standard keybindings,
+    overlay). Otherwise the built-in readchar menu below is used, with
+    the numbered ``input()`` fallback when stdin/stdout is not a TTY.
+
+    Built-in menu features:
     - Up/Down (or j/k), Home/End, PageUp/PageDown navigation.
     - Type-to-filter on long lists, Backspace to erase, Ctrl-U or Esc to
       clear the filter.
@@ -593,6 +600,22 @@ def select_from_list(
     # Non-interactive environments (pipes, dumb terminals, CI): fallback.
     if not _is_interactive():
         return _fallback_select(items, prompt, default_index)
+
+    # Preferred backend: fzf drives the menu when installed (fuzzy
+    # search, standard keybindings, overlay UI). On failure, or when
+    # fzf is not installed, the built-in menu below takes over.
+    if fzf_enabled():
+        try:
+            chosen = select_with_fzf(
+                items, prompt, default_index, is_disabled=disabled
+            )
+        except FzfError:
+            pass  # fzf broken on this system: use the built-in menu.
+        else:
+            console.print(
+                f"\n[bold cyan]❯ {prompt}[/bold cyan] [green]{items[chosen]}[/green]"
+            )
+            return chosen
 
     filter_enabled = allow_filter and len(items) > 4
     query = ""

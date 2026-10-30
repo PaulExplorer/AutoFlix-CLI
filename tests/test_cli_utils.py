@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import pytest
+
 from autoflix_cli.cli_utils import (
     clean_title,
     print_error,
@@ -61,3 +65,52 @@ def test_print_error_without_issue_link(capsys):
     captured = capsys.readouterr().out
     assert "Test failure message" in captured
     assert "https://github.com/PaulExplorer/AutoFlix-CLI/issues" not in captured
+
+
+def test_select_from_list_uses_fzf_backend(monkeypatch, capsys):
+    import autoflix_cli.cli_utils as cli_utils
+
+    seen = {}
+
+    def fake_fzf(options, prompt, default_index, *, is_disabled):
+        seen["prompt"] = prompt
+        seen["is_disabled"] = is_disabled
+        return 2  # "← Back"
+
+    monkeypatch.setattr(cli_utils, "_is_interactive", lambda: True)
+    monkeypatch.setattr(cli_utils, "fzf_enabled", lambda: True)
+    monkeypatch.setattr(cli_utils, "select_with_fzf", fake_fzf)
+    assert (
+        cli_utils.select_from_list(["mpv", "vlc", "← Back"], "Pick:") == 2
+    )
+    assert seen["prompt"] == "Pick:"
+    assert capsys.readouterr().out.strip() == "❯ Pick: ← Back"
+
+
+def test_select_from_list_falls_back_when_fzf_fails(monkeypatch):
+    import autoflix_cli.cli_utils as cli_utils
+    from autoflix_cli.fzf_menu import FzfError
+
+    def broken_fzf(*args, **kwargs):
+        raise FzfError("fzf cannot run")
+
+    monkeypatch.setattr(cli_utils, "_is_interactive", lambda: False)
+    monkeypatch.setattr(cli_utils, "fzf_enabled", lambda: True)
+    monkeypatch.setattr(cli_utils, "select_with_fzf", broken_fzf)
+    monkeypatch.setattr(
+        cli_utils, "_fallback_select", lambda opts, prompt, di: 99
+    )
+    assert cli_utils.select_from_list(["mpv", "vlc", "↩ Back"], "Pick:") == 99
+
+
+def test_select_from_list_skips_fzf_when_disabled(monkeypatch):
+    import autoflix_cli.cli_utils as cli_utils
+
+    def fail_fzf(*args, **kwargs):
+        pytest.fail("fzf backend must not run")
+
+    monkeypatch.setattr(cli_utils, "_is_interactive", lambda: False)
+    monkeypatch.setattr(cli_utils, "fzf_enabled", lambda: False)
+    monkeypatch.setattr(cli_utils, "select_with_fzf", fail_fzf)
+    monkeypatch.setattr(cli_utils, "_fallback_select", lambda opts, prompt, di: 1)
+    assert cli_utils.select_from_list(["mpv", "vlc"], "Pick:") == 1
