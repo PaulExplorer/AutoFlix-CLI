@@ -225,7 +225,7 @@ def resume_anime_sama(data):
             logo_url=data.get("logo_url"),
             headers={"Referer": anime_sama.website_origin},
             anilist_callback=lambda: _update_anilist_progress(
-                "Anime-Sama", series_dummy, season, selected_episode
+                "FRAnime", series_dummy, season, selected_episode
             ),
         )
 
