@@ -28,6 +28,7 @@ import json
 from .scraping.player import get_hls_link as _get_hls_link
 from .scraping.player import is_supported as _is_supported
 from .scraping import anime_sama, arkanime, coflix, french_stream
+from .scraping import franime as franime_scraper
 from .scraping.goldenanime import goldenanime
 from .scraping.goldenms import goldenms_extractor
 from . import proxy as _proxy
@@ -178,6 +179,7 @@ PROVIDERS = {
     "anime-sama": "Anime catalogue (VOSTFR, VF and more, seasons playable per language)",
     "french-stream": "French catalogue (movies and series)",
     "arkanime": "Anime (Arkanime API)",
+    "franime": "Anime catalogue (VO/VF, players resolved per episode)",
 }
 
 # Providers the search() merged mode runs on (i.e. all of them).
@@ -207,6 +209,8 @@ def _infer_provider(url: str):
         return "french-stream"
     if "arkanime" in u:
         return "arkanime"
+    if "franime" in u:
+        return "franime"
     return None
 
 
@@ -218,6 +222,8 @@ def _ready(provider: str):
         anime_sama.get_website_url()
     elif provider == "arkanime":
         arkanime.get_website_url()
+    elif provider == "franime":
+        franime_scraper.get_website_url()
     # french-stream has its origin at import time
 
 
@@ -232,7 +238,7 @@ def search(query: str, provider: str = None) -> list[Result]:
     Args:
         query: Text to look up (title, keywords...).
         provider: Optional provider name (``"coflix"``, ``"anime-sama"``,
-            ``"french-stream"``, ``"arkanime"``). ``None`` searches them all
+            ``"french-stream"``, ``"arkanime"``, ``"franime"``). ``None`` searches them all
             and merges the results (each tagged with ``.provider``).
 
     Returns:
@@ -251,6 +257,7 @@ def search(query: str, provider: str = None) -> list[Result]:
                 "anime-sama": anime_sama,
                 "french-stream": french_stream,
                 "arkanime": arkanime,
+                "franime": franime_scraper,
             }[p]
             for r in module.search(query):
                 results.append(Result(p, r.title, r.url, r.img, r.genres))
@@ -274,7 +281,7 @@ def get(provider=None, url: str = None):
     Args:
         provider: Provider name, optionally omitted when ``url`` is a full
             URL that speaks for itself (coflix, anime-sama, french-stream,
-            arkanime) — ``af.get(url_string)`` alone is accepted too. Or a
+            arkanime, franime) — ``af.get(url_string)`` alone is accepted too. Or a
             :class:`Result` (then ``url`` is ignored), or an
             :class:`Episode`/``Season`` with a ``url`` but no players.
         url: Content URL on that provider.
@@ -361,6 +368,44 @@ def get(provider=None, url: str = None):
         ]
         return Content(name, "season", c.title, url, None, [], seasons=seasons)
 
+    if name == "franime":
+        # Shorthand episode URL (see below): resolve its players now.
+        if url.startswith("franime://"):
+            parts = url[len("franime://"):].split("/")
+            anime_id, season_index, lang, episode_index = (
+                parts[0], int(parts[1]), parts[2], int(parts[3])
+            )
+            episode = _franime_episode(anime_id, season_index, lang, episode_index)
+            players = [Player(p.name, p.url, name) for p in franime_scraper.resolve_players(
+                anime_id, season_index, episode, lang
+            )]
+            return Episode(episode.title, url, players, name)
+
+        m = franime_scraper.season_url_re.search(url)
+        if m:
+            anime_id, season_index = m.group(1), int(m.group(2))
+            season = franime_scraper.get_season(url)
+            multi = len(season.lang) > 1
+            seasons = [
+                Season(
+                    lang if multi else season.title,
+                    url,
+                    [Episode(
+                        e.title,
+                        f"franime://{anime_id}/{season_index}/{lang.lower()}/{e.index}",
+                        None,
+                        name,
+                    ) for e in eps],
+                    name,
+                )
+                for lang, eps in season.episodes.items() if eps
+            ]
+            return Content(name, "season", season.title, url, None, [], seasons=seasons)
+
+        s = franime_scraper.get_series(url)
+        seasons = [Season(sa.title, sa.url, None, name) for sa in s.seasons]
+        return Content(name, "series", s.title, s.url, s.img, s.genres, seasons=seasons)
+
     # arkanime
     c = arkanime.get_content(url)
     if isinstance(c, arkanime.ArkMovie):
@@ -371,6 +416,15 @@ def get(provider=None, url: str = None):
         for s in c.seasons
     ]
     return Content(name, "series", c.title, c.id, c.img, c.genres, seasons=seasons)
+
+
+def _franime_episode(anime_id, season_index: int, lang: str, episode_index: int):
+    """Fetch the FranimeEpisode object of one language slot of an episode."""
+    season = franime_scraper.get_season(franime_scraper.season_url(anime_id, season_index))
+    for episode in season.episodes.get(lang.upper(), []):
+        if episode.index == episode_index:
+            return episode
+    raise ValueError(f"No episode {episode_index} in FRAnime season (lang {lang}).")
 
 
 def _sama_season(url: str, name: str):
