@@ -517,6 +517,10 @@ def _build_proxy_command(
         cmd.append(f"--meta-title={title}")
     else:
         cmd.append(f"--title={title}")
+        # mpv's ytdl_hook re-fetches the proxied URL a second time through
+        # its own requests: on rate-limiting CDNs (VidLink...) that doubles
+        # the upstream load for nothing. Raw proxy URLs need yt-dl anyway.
+        cmd.append("--ytdl=no")
 
     for path in subtitle_paths:
         cmd.append(f"--sub-file={path}")

@@ -338,6 +338,7 @@ def _flow_goldenms_stream(
             subtitle_url=None,
             subtitles=subtitle_tracks,
             is_direct=is_direct,
+            is_mp4=selection["type"].upper() == "MP4",
         )
 
         if success:
