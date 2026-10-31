@@ -97,6 +97,19 @@ def _download_subtitles(subtitle_items) -> list:
             headers = item.get("headers") if isinstance(item, dict) else None
             r = requests.get(url, timeout=15, impersonate="chrome", headers=headers)
             content = r.content
+            if r.status_code != 200:
+                print_error(f"Subtitle fetch failed ({r.status_code}): {url[:80]}")
+                continue
+            # Reject HTML error pages served with a 200 (they save to a
+            # text track file the player refuses to open).
+            head = content[:200].lstrip().lower()
+            if content and (
+                head.startswith(b"<!doctype html")
+                or head.startswith(b"<html")
+                or b"<body" in head
+            ):
+                print_error(f"Subtitle fetch returned an HTML page: {url[:80]}")
+                continue
             ext = _guess_subtitle_ext(url)
             if url.lower().endswith(".xz"):
                 content = lzma.decompress(content)

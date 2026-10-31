@@ -325,16 +325,11 @@ def _flow_goldenms_stream(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         )
 
-        # MoviesAPI sources already ship their Referer/Origin via selection headers;
-        # ensure they're present (Vidora CDN rejects requests without them).
-        if "moviesapi" in selection["source"].lower():
-            headers.setdefault("Referer", f"{goldenms_extractor.moviesapi_api}/")
-            headers.setdefault("Origin", goldenms_extractor.moviesapi_api)
-
-        # Videasy MP4/HLS CDNs require the Videasy player as referer/origin.
-        if "videasy" in selection["source"].lower():
-            headers.setdefault("Referer", "https://player.videasy.to/")
-            headers.setdefault("Origin", "https://player.videasy.to")
+        # VidLink's stream CDN (bcdn.hakunaymatata.com) serves media only with
+        # its player Referer/Origin; the extractor always ships them, this is
+        # just a safety net for older cached entries.
+        headers.setdefault("Referer", "https://filmboom.top/")
+        headers.setdefault("Origin", "https://filmboom.top")
 
         success = play_video(
             final_url,

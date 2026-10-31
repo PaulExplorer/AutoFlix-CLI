@@ -15,30 +15,40 @@ class AnimeExtractor:
     ``data/source_portal.jsonc`` instead of rewriting a scraper.
     """
 
-    # Providers order by stream quality preference (best first)
+    # Providers order by stream quality preference (best first).
+    # Only mkissa/anikoto/animegg/aniwaves answered reliably in testing;
+    # the others often return {error, stack} but are kept as fallbacks.
     PROVIDER_PRIORITY = [
-        "anizone",
+        "mkissa",
         "anikoto",
-        "kaa",
         "animegg",
+        "aniwaves",
+        "senshi",
+        "kaa",
         "reanime",
+        "anibd",
+        "anizone",
         "2dhive",
         "allmanga",
-        "anibd",
     ]
+
+    # The /episodes endpoint is slow (~30s / multi-MB payload); requests
+    # with the default 20s timeout always fail.
+    EPISODES_TIMEOUT = 60
 
     def __init__(self):
         self.bases = [
-            portals.get("aniwatch", "https://anivexa-api-production.up.railway.app"),
-            portals.get("aniwatch-fallback", "https://anivexa-api.vercel.app"),
+            portals.get("aniwatch", "https://anivexa-api-tu4a.onrender.com"),
+            portals.get("aniwatch-fallback", "https://anivexa-api-navy.vercel.app"),
         ]
         self.referer = portals.get("aniwatch-referer", "https://anizone.to")
+        self._episodes_cache = {}
 
-    def _get_json(self, path):
+    def _get_json(self, path, timeout=20):
         """GET a JSON payload from the first base that answers."""
         for base in self.bases:
             try:
-                r = scraper.get(base + path, timeout=20)
+                r = scraper.get(base + path, timeout=timeout)
                 if r.status_code == 200:
                     return r.json()
             except Exception:
@@ -67,14 +77,28 @@ class AnimeExtractor:
         return None
 
     def get_episodes(self, anilist_id):
-        """Episode lists per provider for a given AniList ID."""
-        data = self._get_json(f"/episodes/{anilist_id}")
-        if data and isinstance(data, dict):
+        """Episode lists per provider for a given AniList ID (cached in memory)."""
+        cached = self._episodes_cache.get(anilist_id)
+        if cached is not None:
+            return cached
+        data = self._get_json(
+            f"/episodes/{anilist_id}", timeout=self.EPISODES_TIMEOUT
+        )
+        if data and isinstance(data, dict) and any(
+            isinstance(v, dict) and isinstance(v.get("episodes"), dict)
+            for v in data.values()
+        ):
+            # Only cache payloads that actually contain episode lists so a
+            # transient failure triggers a fresh request next time.
+            self._episodes_cache[anilist_id] = data
             return data
         return {}
 
     def _subtitles_from_stream(self, stream):
         subtitles = []
+        # Subtitle CDNs enforce the same referer as the stream (often the
+        # host player like megaplay.buzz); propagate it on each track.
+        headers = dict(self._stream_headers(stream))
         for track in stream.get("subtitles") or []:
             url = track.get("url")
             if not url:
@@ -86,9 +110,18 @@ class AnimeExtractor:
                     "url": url,
                     "format": track.get("format"),
                     "default": bool(track.get("default")),
+                    "headers": headers,
                 }
             )
         return subtitles or None
+
+    def _stream_headers(self, stream):
+        """Playback headers for a stream (stream referer wins over portal)."""
+        headers = {"Referer": self.referer + "/"}
+        stream_referer = stream.get("referer")
+        if stream_referer:
+            headers["Referer"] = stream_referer
+        return headers
 
     def _stream_entry(self, provider, stream, language):
         url = stream.get("url")
@@ -110,10 +143,7 @@ class AnimeExtractor:
             out_type = "Player"
 
         server = stream.get("server") or provider
-        headers = {"Referer": self.referer + "/"}
-        stream_referer = stream.get("referer")
-        if stream_referer:
-            headers["Referer"] = stream_referer
+        headers = self._stream_headers(stream)
 
         return {
             "source": f"Anivexa ({provider} - {server})",
