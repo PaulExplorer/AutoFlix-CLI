@@ -8,7 +8,8 @@ from contextlib import contextmanager
 from typing import Callable, Sequence
 
 import readchar
-from rich.console import Console
+from rich.console import Console, Group
+from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
@@ -601,9 +602,6 @@ def select_from_list(
     cursor = 0
     # First visible row inside the filtered list.
     scroll = 0
-    # Number of physical lines drawn during the previous frame.
-    drawn_lines = 0
-    first_frame = True
 
     def visible_indices() -> list[int]:
         if not filter_enabled or not query:
@@ -631,11 +629,16 @@ def select_from_list(
                 return pos
         return cursor
 
-    def render(filtered: list[int]) -> list[str]:
-        """Build the ANSI-styled lines for the current frame."""
+    def render_menu(filtered: list[int]) -> Group:
+        """Build the renderable for the current frame.
+
+        Everything is Rich ``Text`` objects, so Rich owns width
+        measurement, cropping and cursor repositioning. Hand-written
+        ANSI line-shuffling can no longer desync on soft-wrapped lines.
+        """
         nonlocal scroll
-        width = max(20, shutil.get_terminal_size(fallback=(80, 24)).columns)
-        height = shutil.get_terminal_size(fallback=(80, 24)).lines
+        width = console.width
+        height = console.size.height
         reserved = 7 if filter_enabled else 6
         page = max(_MIN_VISIBLE_ROWS, min(_MAX_VISIBLE_ROWS, height - reserved))
         page = min(page, max(1, len(filtered)))
@@ -652,78 +655,63 @@ def select_from_list(
         scroll = max(0, min(scroll, max(0, len(filtered) - page)))
 
         inner_width = max(10, width - 6)
-        lines: list[str] = []
+        lines: list[Text] = []
 
         # Title line with position counter.
+        title = Text("❯ ", style="bold cyan")
+        title.append(prompt, style="bold cyan")
         if filtered:
-            counter = f" {_ANSI_DIM}[{cursor_clamped + 1}/{len(filtered)}]{_ANSI_RESET}"
-        else:
-            counter = ""
-        lines.append(f"{_ANSI_BOLD}{_ANSI_CYAN}❯ {prompt}{_ANSI_RESET}{counter}")
+            title.append(f" [{cursor_clamped + 1}/{len(filtered)}]", style="dim")
+        title.truncate(max_width=width, overflow="ellipsis", pad=False)
+        lines.append(title)
 
         # Active filter line.
         if filter_enabled and query:
-            lines.append(f"{_ANSI_DIM}/{_ANSI_RESET}{_truncate(query, inner_width)}▌")
+            lines.append(Text(f"/{_truncate(query, inner_width)}▌", style="dim"))
 
         window = filtered[scroll: scroll + page]
 
         # Top overflow hint.
         if scroll > 0:
-            lines.append(f"{_ANSI_DIM}  ▲ {scroll} more{_ANSI_RESET}")
+            lines.append(Text(f"  ▲ {scroll} more", style="dim"))
 
         for pos_in_window, original_idx in enumerate(window):
             pos = scroll + pos_in_window
             label = _truncate(items[original_idx], inner_width)
             if is_off[original_idx]:
-                lines.append(f"{_ANSI_DIM}    {label}{_ANSI_RESET}")
+                lines.append(Text(f"    {label}", style="dim"))
             elif pos == cursor_clamped:
-                lines.append(f"{_ANSI_BOLD}{_ANSI_BRIGHT_CYAN}❯ {label}{_ANSI_RESET}")
+                lines.append(Text(f"❯ {label}", style="bold bright_cyan"))
             else:
-                lines.append(f"  {label}")
+                lines.append(Text(f"  {label}"))
 
         # Bottom overflow hint.
         remaining = len(filtered) - (scroll + page)
         if remaining > 0:
-            lines.append(f"{_ANSI_DIM}  ▼ {remaining} more{_ANSI_RESET}")
+            lines.append(Text(f"  ▼ {remaining} more", style="dim"))
 
         if not filtered:
-            lines.append(f"{_ANSI_DIM}  No match for \"/{query}\".{_ANSI_RESET}")
+            lines.append(Text(f'  No match for "/{query}".', style="dim"))
 
         # Footer hints (contextual: show filter actions while filtering).
         if filter_enabled and query:
             lines.append(
-                f"{_ANSI_DIM}↑↓ move · ⌫ erase char · Ctrl-U / Esc clear filter · "
-                f"Enter select{_ANSI_RESET}"
+                Text(
+                    "↑↓ move · ⌫ erase char · Ctrl-U / Esc clear filter · Enter select",
+                    style="dim",
+                )
             )
         elif filter_enabled:
             lines.append(
-                f"{_ANSI_DIM}↑↓/j/k move · PgUp/PgDn page · type to filter · "
-                f"Enter select · Esc back{_ANSI_RESET}"
+                Text(
+                    "↑↓/j/k move · PgUp/PgDn page · type to filter · "
+                    "Enter select · Esc back",
+                    style="dim",
+                )
             )
         else:
-            lines.append(f"{_ANSI_DIM}↑↓ move · Enter select · Esc back{_ANSI_RESET}")
-        return lines
-
-    def draw(lines: list[str]) -> None:
-        """Redraw the block in place (no background thread, no flicker)."""
-        nonlocal drawn_lines, first_frame
-        out = sys.stdout
-        if first_frame:
-            # Leading blank line: breathing room between the previous
-            # output (e.g. another menu's confirmation) and this menu.
-            out.write("\n" + "\n".join(lines) + "\n")
-            first_frame = False
-        else:
-            out.write(f"\x1b[{drawn_lines}A")
-            for line in lines:
-                out.write("\r\x1b[2K" + line + "\n")
-            extra = drawn_lines - len(lines)
-            for _ in range(max(0, extra)):
-                out.write("\r\x1b[2K\n")
-            if extra > 0:
-                out.write(f"\x1b[{extra}A")
-        drawn_lines = len(lines)
-        out.flush()
+            lines.append(Text("↑↓ move · Enter select · Esc back", style="dim"))
+        return Group(*lines)
 
     # Initial cursor on the default entry (mapped into filtered space).
     initial_filtered = visible_indices()
@@ -740,9 +728,17 @@ def select_from_list(
     out.write(_HIDE_CURSOR)
     out.flush()
     _discard_typeahead()
+    console.print()  # breathing room between previous output and this menu.
+    live = Live(
+        render_menu(visible_indices()),
+        console=console,
+        auto_refresh=False,
+        vertical_overflow="visible",
+    )
     try:
+        live.start()
+        live.refresh()  # emit the initial frame immediately
         filtered = visible_indices()
-        draw(render(filtered))
 
         while True:
             try:
@@ -838,8 +834,9 @@ def select_from_list(
             filtered = visible_indices()
             if filtered:
                 cursor = max(0, min(cursor, len(filtered) - 1))
-            draw(render(filtered))
+            live.update(render_menu(filtered), refresh=True)
     finally:
+        live.stop()
         out.write(_SHOW_CURSOR)
         out.flush()
 
