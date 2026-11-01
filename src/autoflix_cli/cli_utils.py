@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from typing import Callable, Sequence
 
 import readchar
+from rich.cells import cell_len
 from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
@@ -158,32 +159,55 @@ def status(message: str):
 # Input helpers
 # ---------------------------------------------------------------------------
 
-def _visible_len(text: str) -> int:
-    """Return the printable length of a string containing ANSI codes."""
-    return len(re.sub(r"\x1b\[[0-9;]*m", "", text))
-
-
-def _input_prefix(prompt: str, default: str | None = None) -> str:
-    """Build the ANSI-styled prefix printed before the editable buffer."""
-    extra = ""
+def _input_prefix(prompt: str, default: str | None = None) -> Text:
+    """Build the styled prompt printed before the editable buffer."""
+    prefix = Text("❯ ", style="bold cyan")
+    prefix.append(prompt, style="bold cyan")
     if default:
-        extra += f" {_ANSI_DIM}({default}){_ANSI_RESET}"
-    extra += f" {_ANSI_DIM}[Esc cancels]{_ANSI_RESET}"
-    return f"{_ANSI_BOLD}{_ANSI_CYAN}❯ {prompt}{_ANSI_RESET}{extra}: "
+        prefix.append(f" ({default})", style="dim")
+    prefix.append(" [Esc cancels]", style="dim")
+    prefix.append(": ")
+    return prefix
 
 
-def _redraw_line(prefix: str, buffer: str) -> None:
-    """Redraw prompt + input buffer on the same terminal line."""
+def _redraw_line(prefix: Text, buffer: str) -> None:
+    """Redraw prompt + input buffer, always within one physical line.
+
+    The prefix is truncated first on very narrow terminals, then the
+    buffer keeps its tail (newest characters) visible. Keeping the whole
+    line inside one physical row is what makes the ``\\r`` + clear
+    escape sequences reliable; a soft-wrapped line used to duplicate the
+    prompt on every keypress.
+    """
     width = max(20, shutil.get_terminal_size(fallback=(80, 24)).columns)
-    room = max(10, width - _visible_len(prefix) - 2)
+    text = prefix.copy()
+    # Keep room for ": " and a few visible characters of the buffer even
+    # on very narrow terminals.
+    max_prefix = max(8, width - 10)
+    truncated = text.cell_len > max_prefix
+    if truncated:
+        text.truncate(max_width=max_prefix, overflow="ellipsis", pad=False)
+        text.append(": ")
+    room = max(2, width - 1 - text.cell_len)
     display = buffer.replace("\t", " ")
-    if len(display) > room:
-        display = "…" + display[-(room - 1):]
-    sys.stdout.write("\r\x1b[2K" + prefix + display)
-    sys.stdout.flush()
+    # Cell-aware tail cut so wide glyphs (emoji...) cannot overshoot.
+    if cell_len(display) > room:
+        cut = len(display)
+        used = 1  # room for the ellipsis
+        for i in range(len(display) - 1, -1, -1):
+            if used + cell_len(display[i]) > room:
+                break
+            used += cell_len(display[i])
+            cut = i
+        display = "…" + display[cut:]
+    text.append(display)
+    out = sys.stdout
+    out.write("\r\x1b[2K")
+    console.print(text, end="", soft_wrap=True)
+    out.flush()
 
 
-def _read_line_posix(prefix: str) -> str | None:
+def _read_line_posix(prefix: Text) -> str | None:
     """Read one line in cbreak mode. Returns None on Esc/Ctrl-C/Ctrl-D/EOF.
 
     Minimal append-only editor: printable characters (including pasted
@@ -192,8 +216,8 @@ def _read_line_posix(prefix: str) -> str | None:
     cursor, by design: keeps this lightweight and predictable).
 
     Args:
-        prefix: Styled prompt reprinted on every redraw so typing never
-            erases it.
+        prefix: Styled prompt (Rich Text) reprinted on every redraw so
+            typing never erases it.
     """
     buf: list[str] = []
     while True:
@@ -240,7 +264,7 @@ def _read_line_posix(prefix: str) -> str | None:
         # Anything else (arrows, function keys...): ignore.
 
 
-def _read_line_windows(prefix: str) -> str | None:
+def _read_line_windows(prefix: Text) -> str | None:
     """Read one line on Windows. Returns None on Esc/Ctrl-C/Ctrl-Z."""
     import msvcrt
 
@@ -280,8 +304,15 @@ def _read_line_windows(prefix: str) -> str | None:
         # Anything else: ignore.
 
 
-def _read_line(prefix: str) -> str | None:
-    """Read one line with Esc-cancel support. Returns None if cancelled."""
+def _read_line(prefix: Text) -> str | None:
+    """Read one line in raw mode using ``prefix`` as the styled prompt.
+
+    Args:
+        prefix: Styled prompt (Rich Text) reprinted on every redraw.
+
+    Returns:
+        The typed line, or ``None`` when cancelled (Esc / Ctrl-C / EOF).
+    """
     if os.name == "nt":
         return _read_line_windows(prefix)
     return _read_line_posix(prefix)
@@ -313,11 +344,10 @@ def get_user_input(prompt: str, default: str | None = None) -> str | None:
     """
     suffix = f" [dim]({default})[/dim]" if default else ""
     if _is_interactive():
-        # Raw write (not Rich): the prompt contains no markup to render
-        # and _read_line() reprints this exact prefix on every keypress.
         prefix = _input_prefix(prompt, default)
-        sys.stdout.write("\n" + prefix)
+        sys.stdout.write("\n")
         sys.stdout.flush()
+        _redraw_line(prefix, "")
         try:
             value = _read_line(prefix)
         except (EOFError, KeyboardInterrupt):
@@ -348,13 +378,12 @@ def confirm(prompt: str, default: bool = True) -> bool:
     """
     hint = "Y/n" if default else "y/N"
     if _is_interactive():
-        prefix = (
-            f"{_ANSI_BOLD}{_ANSI_CYAN}❯ {prompt}{_ANSI_RESET} "
-            f"{_ANSI_DIM}[{hint}]{_ANSI_RESET} "
-            f"{_ANSI_DIM}[Esc cancels]{_ANSI_RESET}: "
-        )
-        sys.stdout.write(prefix)
-        sys.stdout.flush()
+        prefix = Text("❯ ", style="bold cyan")
+        prefix.append(prompt, style="bold cyan")
+        prefix.append(f" [{hint}]", style="dim")
+        prefix.append(" [Esc cancels]", style="dim")
+        prefix.append(": ")
+        _redraw_line(prefix, "")
         try:
             value = _read_line(prefix)
         except (EOFError, KeyboardInterrupt):
