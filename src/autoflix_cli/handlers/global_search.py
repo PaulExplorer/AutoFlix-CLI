@@ -156,7 +156,7 @@ def handle_global_search():
     user_lang = tracker.get_language()
     allowed = {p["key"] for p in registry.get_providers(user_lang)}
     sources = _select_sources(allowed)
-    opens = {key: spec["open"] for key, spec in sources}
+    opens = {spec["key"]: spec["open"] for spec in sources}
 
     if not sources:
         print_warning("No providers available for the global search.")
