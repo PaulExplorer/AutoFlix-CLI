@@ -163,12 +163,9 @@ DEFAULT_SOURCE_PORTAL = {
     "aniwatch-referer": "https://anizone.to",
     "animetosho": "https://feed.animetosho.xyz",
     "opensubtitles-stremio": "https://opensubtitles-v3.strem.io",
-    "videasy": "https://api.videasy.net",
-    "videasy-referer": "https://cineby.gd",
     "vidlink": "https://vidlink.pro",
     "hexa": "https://themoviedb.hexa.su",
     "hexa-referer": "https://hexa.su",
     "multi-decrypt": "https://enc-dec.app/api",
     "mapple": "https://mapple.uk",
-    "xpass": "https://play.xpass.top",
 }

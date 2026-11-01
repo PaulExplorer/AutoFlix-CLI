@@ -267,8 +267,28 @@ def get_or_create_session(url, fresh=False):
 REQUEST_TIMEOUT = (5, 30)
 
 
+def _retry_sleep(attempt, rate_limited=False, retry_after=None):
+    """Backoff between fetch attempts.
+
+    A 429 means the CDN rate-limits this IP: retrying 0.3s later only
+    deepens the penalty. Wait for the server's ``Retry-After`` when
+    provided, otherwise several seconds so the limiter gets a chance to
+    release us between attempts.
+    """
+    if rate_limited:
+        if retry_after is not None:
+            try:
+                return min(float(retry_after), 10.0)
+            except (TypeError, ValueError):
+                pass
+        return min(1.5 * attempt + random.uniform(0.5, 1.5), 6.0)
+    return 0.3 * attempt + random.uniform(0, 0.3)
+
+
 def fetch_with_retry(url, headers, method="GET", stream=False, max_retries=3):
     attempt = 0
+    rate_limited = False
+    retry_after = None
 
     while attempt < max_retries:
         # First attempt reuses pooled connections; retries go through a fresh
@@ -291,6 +311,12 @@ def fetch_with_retry(url, headers, method="GET", stream=False, max_retries=3):
 
             # Transient error (rate limit / 5xx / challenge) -> retry
             if _is_retryable_status(response.status_code):
+                rate_limited = response.status_code == 429
+                if rate_limited:
+                    try:
+                        retry_after = response.headers.get("Retry-After")
+                    except Exception:
+                        retry_after = None
                 response.close()
                 raise requests.RequestsError(f"Status {response.status_code}")
 
@@ -315,8 +341,11 @@ def fetch_with_retry(url, headers, method="GET", stream=False, max_retries=3):
                     e,
                 )
                 return None
-            # Backoff with a little jitter: ~0.3s, then ~0.6s, etc.
-            time.sleep(0.3 * attempt + random.uniform(0, 0.3))
+            # Backoff: short jittered waits for 5xx/challenges, longer
+            # waits (or Retry-After) when the CDN rate-limited us.
+            time.sleep(_retry_sleep(attempt, rate_limited, retry_after))
+            rate_limited = False
+            retry_after = None
 
 
 def fetch_segment(url, headers, environ=None, client_range=None, max_retries=2):
@@ -335,6 +364,8 @@ def fetch_segment(url, headers, environ=None, client_range=None, max_retries=2):
     """
     is_cancelled = _client_gone_check(environ or {})
     attempt = 0
+    rate_limited = False
+    retry_after = None
 
     while attempt < max_retries:
         response = None
@@ -360,6 +391,9 @@ def fetch_segment(url, headers, environ=None, client_range=None, max_retries=2):
 
             # Transient error (rate limit / 5xx / challenge) -> retry
             if _is_retryable_status(status):
+                if status == 429:
+                    rate_limited = True
+                    retry_after = response.headers.get("Retry-After")
                 raise requests.RequestsError(f"Status {status}")
 
             data = bytearray()
@@ -420,8 +454,11 @@ def fetch_segment(url, headers, environ=None, client_range=None, max_retries=2):
                     e,
                 )
                 return None, None, {}
-            # Simple backoff with jitter: waits ~0.3s, then ~0.6s, etc.
-            time.sleep(0.3 * attempt + random.uniform(0, 0.3))
+            # Short jittered backoff by default, longer wait on 429 so a
+            # rate-limiting CDN gets time to release us between attempts.
+            time.sleep(_retry_sleep(attempt, rate_limited, retry_after))
+            rate_limited = False
+            retry_after = None
         finally:
             if response is not None:
                 try:
