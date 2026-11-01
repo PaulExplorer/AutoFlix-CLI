@@ -8,7 +8,9 @@ from contextlib import contextmanager
 from typing import Callable, Sequence
 
 import readchar
-from rich.console import Console
+from rich.cells import cell_len
+from rich.console import Console, Group
+from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
@@ -34,18 +36,6 @@ __all__ = [
     "select_from_list",
     "clean_title",
 ]
-
-# --- Minimal ANSI palette used only inside the interactive menu loop ---
-# Raw ANSI is used there (instead of Rich) so a keypress redraws a few
-# lines synchronously without any background thread or flicker.
-_ANSI_RESET = "\x1b[0m"
-_ANSI_BOLD = "\x1b[1m"
-_ANSI_DIM = "\x1b[2m"
-_ANSI_CYAN = "\x1b[36m"
-_ANSI_BRIGHT_CYAN = "\x1b[96m"
-_ANSI_GREEN = "\x1b[32m"
-_ANSI_GREY = "\x1b[90m"
-_ANSI_YELLOW = "\x1b[33m"
 
 _HIDE_CURSOR = "\x1b[?25l"
 _SHOW_CURSOR = "\x1b[?25h"
@@ -157,32 +147,56 @@ def status(message: str):
 # Input helpers
 # ---------------------------------------------------------------------------
 
-def _visible_len(text: str) -> int:
-    """Return the printable length of a string containing ANSI codes."""
-    return len(re.sub(r"\x1b\[[0-9;]*m", "", text))
-
-
-def _input_prefix(prompt: str, default: str | None = None) -> str:
-    """Build the ANSI-styled prefix printed before the editable buffer."""
-    extra = ""
+def _input_prefix(prompt: str, default: str | None = None) -> Text:
+    """Build the styled prompt printed before the editable buffer."""
+    prefix = Text()
+    prefix.append("❯ ", style="bold cyan")
+    prefix.append(prompt, style="bold cyan")
     if default:
-        extra += f" {_ANSI_DIM}({default}){_ANSI_RESET}"
-    extra += f" {_ANSI_DIM}[Esc cancels]{_ANSI_RESET}"
-    return f"{_ANSI_BOLD}{_ANSI_CYAN}❯ {prompt}{_ANSI_RESET}{extra}: "
+        prefix.append(f" ({default})", style="dim")
+    prefix.append(" [Esc cancels]", style="dim")
+    prefix.append(": ")
+    return prefix
 
 
-def _redraw_line(prefix: str, buffer: str) -> None:
-    """Redraw prompt + input buffer on the same terminal line."""
+def _redraw_line(prefix: Text, buffer: str) -> None:
+    """Redraw prompt + input buffer, always within one physical line.
+
+    The prefix is truncated first on very narrow terminals, then the
+    buffer keeps its tail (newest characters) visible. Keeping the whole
+    line inside one physical row is what makes the ``\\r`` + clear
+    escape sequences reliable; a soft-wrapped line used to duplicate the
+    prompt on every keypress.
+    """
     width = max(20, shutil.get_terminal_size(fallback=(80, 24)).columns)
-    room = max(10, width - _visible_len(prefix) - 2)
+    text = prefix.copy()
+    # Keep room for ": " and a few visible characters of the buffer even
+    # on very narrow terminals.
+    max_prefix = max(8, width - 10)
+    truncated = text.cell_len > max_prefix
+    if truncated:
+        text.truncate(max_width=max_prefix, overflow="ellipsis", pad=False)
+        text.append(": ")
+    room = max(2, width - 1 - text.cell_len)
     display = buffer.replace("\t", " ")
-    if len(display) > room:
-        display = "…" + display[-(room - 1):]
-    sys.stdout.write("\r\x1b[2K" + prefix + display)
-    sys.stdout.flush()
+    # Cell-aware tail cut so wide glyphs (emoji...) cannot overshoot.
+    if cell_len(display) > room:
+        cut = len(display)
+        used = 1  # room for the ellipsis
+        for i in range(len(display) - 1, -1, -1):
+            if used + cell_len(display[i]) > room:
+                break
+            used += cell_len(display[i])
+            cut = i
+        display = "…" + display[cut:]
+    text.append(display)
+    out = sys.stdout
+    out.write("\r\x1b[2K")
+    console.print(text, end="", soft_wrap=True)
+    out.flush()
 
 
-def _read_line_posix(prefix: str) -> str | None:
+def _read_line_posix(prefix: Text) -> str | None:
     """Read one line in cbreak mode. Returns None on Esc/Ctrl-C/Ctrl-D/EOF.
 
     Minimal append-only editor: printable characters (including pasted
@@ -191,8 +205,8 @@ def _read_line_posix(prefix: str) -> str | None:
     cursor, by design: keeps this lightweight and predictable).
 
     Args:
-        prefix: Styled prompt reprinted on every redraw so typing never
-            erases it.
+        prefix: Styled prompt (Rich Text) reprinted on every redraw so
+            typing never erases it.
     """
     buf: list[str] = []
     while True:
@@ -239,7 +253,7 @@ def _read_line_posix(prefix: str) -> str | None:
         # Anything else (arrows, function keys...): ignore.
 
 
-def _read_line_windows(prefix: str) -> str | None:
+def _read_line_windows(prefix: Text) -> str | None:
     """Read one line on Windows. Returns None on Esc/Ctrl-C/Ctrl-Z."""
     import msvcrt
 
@@ -279,8 +293,15 @@ def _read_line_windows(prefix: str) -> str | None:
         # Anything else: ignore.
 
 
-def _read_line(prefix: str) -> str | None:
-    """Read one line with Esc-cancel support. Returns None if cancelled."""
+def _read_line(prefix: Text) -> str | None:
+    """Read one line in raw mode using ``prefix`` as the styled prompt.
+
+    Args:
+        prefix: Styled prompt (Rich Text) reprinted on every redraw.
+
+    Returns:
+        The typed line, or ``None`` when cancelled (Esc / Ctrl-C / EOF).
+    """
     if os.name == "nt":
         return _read_line_windows(prefix)
     return _read_line_posix(prefix)
@@ -312,11 +333,10 @@ def get_user_input(prompt: str, default: str | None = None) -> str | None:
     """
     suffix = f" [dim]({default})[/dim]" if default else ""
     if _is_interactive():
-        # Raw write (not Rich): the prompt contains no markup to render
-        # and _read_line() reprints this exact prefix on every keypress.
         prefix = _input_prefix(prompt, default)
-        sys.stdout.write("\n" + prefix)
+        sys.stdout.write("\n")
         sys.stdout.flush()
+        _redraw_line(prefix, "")
         try:
             value = _read_line(prefix)
         except (EOFError, KeyboardInterrupt):
@@ -347,13 +367,13 @@ def confirm(prompt: str, default: bool = True) -> bool:
     """
     hint = "Y/n" if default else "y/N"
     if _is_interactive():
-        prefix = (
-            f"{_ANSI_BOLD}{_ANSI_CYAN}❯ {prompt}{_ANSI_RESET} "
-            f"{_ANSI_DIM}[{hint}]{_ANSI_RESET} "
-            f"{_ANSI_DIM}[Esc cancels]{_ANSI_RESET}: "
-        )
-        sys.stdout.write(prefix)
-        sys.stdout.flush()
+        prefix = Text()
+        prefix.append("❯ ", style="bold cyan")
+        prefix.append(prompt, style="bold cyan")
+        prefix.append(f" [{hint}]", style="dim")
+        prefix.append(" [Esc cancels]", style="dim")
+        prefix.append(": ")
+        _redraw_line(prefix, "")
         try:
             value = _read_line(prefix)
         except (EOFError, KeyboardInterrupt):
@@ -407,13 +427,14 @@ def _is_disabled(option: str) -> bool:
 
 
 def _truncate(text: str, width: int) -> str:
-    """Truncate a row to the given width, keeping one line only."""
+    """Truncate a row to the given display width, keeping one line only."""
     single_line = text.replace("\n", " ").replace("\r", " ")
-    if width <= 4:
-        return single_line[: max(0, width)]
-    if len(single_line) > width:
-        return single_line[: width - 1] + "…"
-    return single_line
+    t = Text(single_line)
+    # Text.truncate uses Rich's cell_len: emoji / double-width glyphs are
+    # measured the way terminals actually display them.
+    if t.cell_len > width:
+        t.truncate(max_width=width, overflow="ellipsis", pad=False)
+    return t.plain
 
 
 def _fallback_select(options: Sequence[str], prompt: str, default_index: int) -> int:
@@ -600,9 +621,6 @@ def select_from_list(
     cursor = 0
     # First visible row inside the filtered list.
     scroll = 0
-    # Number of physical lines drawn during the previous frame.
-    drawn_lines = 0
-    first_frame = True
 
     def visible_indices() -> list[int]:
         if not filter_enabled or not query:
@@ -630,11 +648,16 @@ def select_from_list(
                 return pos
         return cursor
 
-    def render(filtered: list[int]) -> list[str]:
-        """Build the ANSI-styled lines for the current frame."""
+    def render_menu(filtered: list[int]) -> Group:
+        """Build the renderable for the current frame.
+
+        Everything is Rich ``Text`` objects, so Rich owns width
+        measurement, cropping and cursor repositioning. Hand-written
+        ANSI line-shuffling can no longer desync on soft-wrapped lines.
+        """
         nonlocal scroll
-        width = max(20, shutil.get_terminal_size(fallback=(80, 24)).columns)
-        height = shutil.get_terminal_size(fallback=(80, 24)).lines
+        width = console.width
+        height = console.size.height
         reserved = 7 if filter_enabled else 6
         page = max(_MIN_VISIBLE_ROWS, min(_MAX_VISIBLE_ROWS, height - reserved))
         page = min(page, max(1, len(filtered)))
@@ -651,78 +674,64 @@ def select_from_list(
         scroll = max(0, min(scroll, max(0, len(filtered) - page)))
 
         inner_width = max(10, width - 6)
-        lines: list[str] = []
+        lines: list[Text] = []
 
         # Title line with position counter.
+        title = Text()
+        title.append("❯ ", style="bold cyan")
+        title.append(prompt, style="bold cyan")
         if filtered:
-            counter = f" {_ANSI_DIM}[{cursor_clamped + 1}/{len(filtered)}]{_ANSI_RESET}"
-        else:
-            counter = ""
-        lines.append(f"{_ANSI_BOLD}{_ANSI_CYAN}❯ {prompt}{_ANSI_RESET}{counter}")
+            title.append(f" [{cursor_clamped + 1}/{len(filtered)}]", style="dim")
+        title.truncate(max_width=width, overflow="ellipsis", pad=False)
+        lines.append(title)
 
         # Active filter line.
         if filter_enabled and query:
-            lines.append(f"{_ANSI_DIM}/{_ANSI_RESET}{_truncate(query, inner_width)}▌")
+            lines.append(Text(f"/{_truncate(query, inner_width)}▌", style="dim"))
 
         window = filtered[scroll: scroll + page]
 
         # Top overflow hint.
         if scroll > 0:
-            lines.append(f"{_ANSI_DIM}  ▲ {scroll} more{_ANSI_RESET}")
+            lines.append(Text(f"  ▲ {scroll} more", style="dim"))
 
         for pos_in_window, original_idx in enumerate(window):
             pos = scroll + pos_in_window
             label = _truncate(items[original_idx], inner_width)
             if is_off[original_idx]:
-                lines.append(f"{_ANSI_DIM}    {label}{_ANSI_RESET}")
+                lines.append(Text(f"    {label}", style="dim"))
             elif pos == cursor_clamped:
-                lines.append(f"{_ANSI_BOLD}{_ANSI_BRIGHT_CYAN}❯ {label}{_ANSI_RESET}")
+                lines.append(Text(f"❯ {label}", style="bold bright_cyan"))
             else:
-                lines.append(f"  {label}")
+                lines.append(Text(f"  {label}"))
 
         # Bottom overflow hint.
         remaining = len(filtered) - (scroll + page)
         if remaining > 0:
-            lines.append(f"{_ANSI_DIM}  ▼ {remaining} more{_ANSI_RESET}")
+            lines.append(Text(f"  ▼ {remaining} more", style="dim"))
 
         if not filtered:
-            lines.append(f"{_ANSI_DIM}  No match for \"/{query}\".{_ANSI_RESET}")
+            lines.append(Text(f'  No match for "/{query}".', style="dim"))
 
         # Footer hints (contextual: show filter actions while filtering).
         if filter_enabled and query:
             lines.append(
-                f"{_ANSI_DIM}↑↓ move · ⌫ erase char · Ctrl-U / Esc clear filter · "
-                f"Enter select{_ANSI_RESET}"
+                Text(
+                    "↑↓ move · ⌫ erase char · Ctrl-U / Esc clear filter · Enter select",
+                    style="dim",
+                )
             )
         elif filter_enabled:
             lines.append(
-                f"{_ANSI_DIM}↑↓/j/k move · PgUp/PgDn page · type to filter · "
-                f"Enter select · Esc back{_ANSI_RESET}"
+                Text(
+                    "↑↓/j/k move · PgUp/PgDn page · type to filter · "
+                    "Enter select · Esc back",
+                    style="dim",
+                )
             )
         else:
-            lines.append(f"{_ANSI_DIM}↑↓ move · Enter select · Esc back{_ANSI_RESET}")
-        return lines
-
-    def draw(lines: list[str]) -> None:
-        """Redraw the block in place (no background thread, no flicker)."""
-        nonlocal drawn_lines, first_frame
-        out = sys.stdout
-        if first_frame:
-            # Leading blank line: breathing room between the previous
-            # output (e.g. another menu's confirmation) and this menu.
-            out.write("\n" + "\n".join(lines) + "\n")
-            first_frame = False
-        else:
-            out.write(f"\x1b[{drawn_lines}A")
-            for line in lines:
-                out.write("\r\x1b[2K" + line + "\n")
-            extra = drawn_lines - len(lines)
-            for _ in range(max(0, extra)):
-                out.write("\r\x1b[2K\n")
-            if extra > 0:
-                out.write(f"\x1b[{extra}A")
-        drawn_lines = len(lines)
-        out.flush()
+            lines.append(Text("↑↓ move · Enter select · Esc back", style="dim"))
+        return Group(*lines)
 
     # Initial cursor on the default entry (mapped into filtered space).
     initial_filtered = visible_indices()
@@ -739,9 +748,17 @@ def select_from_list(
     out.write(_HIDE_CURSOR)
     out.flush()
     _discard_typeahead()
+    console.print()  # breathing room between previous output and this menu.
+    live = Live(
+        render_menu(visible_indices()),
+        console=console,
+        auto_refresh=False,
+        vertical_overflow="visible",
+    )
     try:
+        live.start()
+        live.refresh()  # emit the initial frame immediately
         filtered = visible_indices()
-        draw(render(filtered))
 
         while True:
             try:
@@ -837,8 +854,9 @@ def select_from_list(
             filtered = visible_indices()
             if filtered:
                 cursor = max(0, min(cursor, len(filtered) - 1))
-            draw(render(filtered))
+            live.update(render_menu(filtered), refresh=True)
     finally:
+        live.stop()
         out.write(_SHOW_CURSOR)
         out.flush()
 
