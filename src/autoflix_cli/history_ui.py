@@ -6,7 +6,15 @@ from .cli_utils import (
     select_from_list,
     print_success,
 )
-from .handlers import anime_sama, coflix, french_stream, goldenanime, goldenms, arkanime
+from .handlers import (
+    anime_sama,
+    coflix,
+    french_stream,
+    goldenanime,
+    goldenms,
+    arkanime,
+    franime,
+)
 
 
 def handle_resume(data):
@@ -24,6 +32,8 @@ def handle_resume(data):
         goldenms.resume_goldenms(data)
     elif provider == "ArkAnime":
         arkanime.resume_arkanime(data)
+    elif provider == "FRAnime":
+        franime.resume_franime(data)
 
 
 def format_history_entry(entry: dict) -> str:

@@ -17,7 +17,11 @@ from ..scraping import anime_sama as anime_sama_scraper
 from . import goldenanime
 from . import arkanime as arkanime_handler
 from ..scraping import arkanime as arkanime_scraper
+from . import franime as franime_handler
+from ..scraping import franime as franime_scraper
+from ..scraping.utils import NoEpisodesFoundError
 from .playback import play_episode_flow
+from .anilist_update import _update_anilist_progress
 from ..player_manager import play_video
 from ..scraping import player
 from ..scraping.objects import ArkMovie
@@ -364,10 +368,10 @@ def _continue_watching_entry(user_id: int, entry: dict):
         print_info(f"Target: [cyan]{media_title}[/cyan] - Episode {next_episode_num}")
 
     # --- Provider Selection ---
-    providers = ["Anime-Sama (VF/VOSTFR)", "GoldenAnime (VO)", "⛩️ ArkAnime (Anime & Animations)", "← Back"]
+    providers = ["Anime-Sama (VF/VOSTFR)", "GoldenAnime (VO)", "⛩️ ArkAnime (Anime & Animations)", "FrAnime (VF/VOSTFR)", "← Back"]
     p_choice = select_from_list(providers, "Select Provider:")
 
-    if p_choice == 3:  # Back
+    if p_choice == 4:  # Back
         return
 
     # Extract cover URL
@@ -452,6 +456,76 @@ def _continue_watching_entry(user_id: int, entry: dict):
                     continue
             break
 
+    if p_choice == 3:  # FrAnime
+        series = _search_and_select_series(franime_scraper, media_title, romaji_title)
+        if not series or not series.seasons:
+            if series and not series.seasons:
+                print_warning("No seasons found.")
+            return
+
+        selected_season_access = _auto_select_season(series.seasons, media_title, romaji_title)
+        if not selected_season_access:
+            return
+
+        # The season URL is "https://franime.fr/anime/<id>/<season_index>",
+        # the index is what the FRAnime resolver endpoints expect.
+        season_index = int(selected_season_access.url.rstrip("/").rsplit("/", 1)[1])
+
+        print_info(f"Loading [cyan]{selected_season_access.title}[/cyan]...")
+        try:
+            season = franime_scraper.get_season(selected_season_access.url)
+        except NoEpisodesFoundError:
+            print_error("No links found for this content: it is probably not released yet.")
+            return
+        except Exception as e:
+            print_error(f"Could not load season: {e}")
+            return
+
+        langs = list(season.episodes.keys())
+        if not langs:
+            print_warning("No episodes found.")
+            return
+
+        selected_lang = franime_handler._select_language(langs)
+        if selected_lang is None:
+            return
+        episodes = season.episodes[selected_lang]
+
+        tracker.set_anilist_mapping("FRAnime", series.title, media_id, season.title)
+
+        start_ep_idx = _auto_select_episode(episodes, next_episode_num)
+        if start_ep_idx is None:
+            return
+
+        ep_idx = start_ep_idx
+        while True:
+            selected_episode = episodes[ep_idx]
+            if not franime_handler._resolve_episode_players(
+                series.url, season_index, selected_episode, selected_lang
+            ):
+                break
+
+            success = play_episode_flow(
+                provider_name="FRAnime",
+                series_title=series.title,
+                season_title=season.title,
+                episode=selected_episode,
+                series_url=series.url,
+                season_url=selected_season_access.url,
+                logo_url=series.img,
+                headers={"Referer": franime_scraper.website_origin + "/"},
+                anilist_id=media_id,
+                anilist_callback=lambda: _update_anilist_progress(
+                    "FRAnime", series, season, selected_episode
+                ),
+            )
+            if success and ep_idx + 1 < len(episodes):
+                if select_from_list(["Yes", "No"], f"Play next: {episodes[ep_idx+1].title}?") == 0:
+                    ep_idx += 1
+                    continue
+            break
+        return
+
     else:  # Anime-Sama
         series = _search_and_select_series(anime_sama_scraper, media_title, romaji_title)
         if not series or not series.seasons:
@@ -517,6 +591,7 @@ def _search_and_select_series(scraper, media_title, romaji_title):
     scraper_name = scraper.__name__.split('.')[-1]
     if scraper_name == "anime_sama": scraper_name = "Anime-Sama"
     elif scraper_name == "arkanime": scraper_name = "ArkAnime"
+    elif scraper_name == "franime": scraper_name = "FRAnime"
     
     print_info(f"Searching for '{media_title}' on {scraper_name}...")
     results = scraper.search(media_title)
