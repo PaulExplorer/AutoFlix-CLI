@@ -155,7 +155,7 @@
     "type": "veev",
     "ext": "mp4",
   },
-  "xtremestream": { "type": "xtremestream" },
+  "xtremestream": { "type": "xtremestream", "referrer": "https://lecteur1.xtremestream.xyz/" },
   "montmyoboky": {"type": "montmyoboky", "modes": { "mpv": "proxy" } },
   "vidzy": { "type": "xupload", "referrer": "https://vidzy.org/" },
   "voe": { "type": "voe", "modes": { "mpv": "proxy" } },
