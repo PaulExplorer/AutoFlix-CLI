@@ -37,18 +37,6 @@ __all__ = [
     "clean_title",
 ]
 
-# --- Minimal ANSI palette used only inside the interactive menu loop ---
-# Raw ANSI is used there (instead of Rich) so a keypress redraws a few
-# lines synchronously without any background thread or flicker.
-_ANSI_RESET = "\x1b[0m"
-_ANSI_BOLD = "\x1b[1m"
-_ANSI_DIM = "\x1b[2m"
-_ANSI_CYAN = "\x1b[36m"
-_ANSI_BRIGHT_CYAN = "\x1b[96m"
-_ANSI_GREEN = "\x1b[32m"
-_ANSI_GREY = "\x1b[90m"
-_ANSI_YELLOW = "\x1b[33m"
-
 _HIDE_CURSOR = "\x1b[?25l"
 _SHOW_CURSOR = "\x1b[?25h"
 

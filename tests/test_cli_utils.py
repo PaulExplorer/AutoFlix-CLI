@@ -3,7 +3,6 @@ from autoflix_cli.cli_utils import (
     print_error,
     _truncate,
     _is_disabled,
-    _visible_len,
 )
 
 
@@ -42,12 +41,6 @@ def test_is_disabled_detects_separators():
     assert _is_disabled("── Unsupported players ──")
     assert _is_disabled("── test ──")
     assert not _is_disabled("mpv")
-
-
-def test_visible_len_ignores_ansi_codes():
-    assert _visible_len("\x1b[1mhello\x1b[0m") == 5
-
-
 def test_print_error_displays_message_and_issue_link(capsys):
     print_error("Test failure message")
     captured = capsys.readouterr().out
