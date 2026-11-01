@@ -149,7 +149,8 @@ def status(message: str):
 
 def _input_prefix(prompt: str, default: str | None = None) -> Text:
     """Build the styled prompt printed before the editable buffer."""
-    prefix = Text("❯ ", style="bold cyan")
+    prefix = Text()
+    prefix.append("❯ ", style="bold cyan")
     prefix.append(prompt, style="bold cyan")
     if default:
         prefix.append(f" ({default})", style="dim")
@@ -366,7 +367,8 @@ def confirm(prompt: str, default: bool = True) -> bool:
     """
     hint = "Y/n" if default else "y/N"
     if _is_interactive():
-        prefix = Text("❯ ", style="bold cyan")
+        prefix = Text()
+        prefix.append("❯ ", style="bold cyan")
         prefix.append(prompt, style="bold cyan")
         prefix.append(f" [{hint}]", style="dim")
         prefix.append(" [Esc cancels]", style="dim")
@@ -675,7 +677,8 @@ def select_from_list(
         lines: list[Text] = []
 
         # Title line with position counter.
-        title = Text("❯ ", style="bold cyan")
+        title = Text()
+        title.append("❯ ", style="bold cyan")
         title.append(prompt, style="bold cyan")
         if filtered:
             title.append(f" [{cursor_clamped + 1}/{len(filtered)}]", style="dim")
