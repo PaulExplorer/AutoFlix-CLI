@@ -10,6 +10,7 @@ class ProviderRegistry:
         name: str,
         handler: Callable,
         supported_languages: Optional[List[str]] = None,
+        key: Optional[str] = None,
     ):
         """
         Register a streaming provider.
@@ -17,12 +18,15 @@ class ProviderRegistry:
         :param name: Display name of the provider (e.g. '🎌 Anime-Sama').
         :param handler: The function to execute when this provider is chosen.
         :param supported_languages: List of languages ('fr', 'en', etc.). None means all languages are supported.
+        :param key: Stable identifier used by other features (e.g. the global
+            search) to target this provider programmatically.
         """
         self.providers.append(
             {
                 "name": name,
                 "handler": handler,
                 "supported_languages": supported_languages,
+                "key": key,
             }
         )
 

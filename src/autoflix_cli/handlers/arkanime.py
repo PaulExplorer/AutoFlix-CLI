@@ -17,6 +17,127 @@ from .playback import play_episode_flow
 from .anilist_update import _update_anilist_progress
 
 
+def open_result(selection):
+    """Open a search result: load the content, browse and play."""
+    print_info(f"Loading [cyan]{selection.title}[/cyan]...")
+    try:
+        content = arkanime.get_content(selection.url)
+    except Exception as e:
+        print_error(f"Error loading content: {e}")
+        pause()
+        return
+
+    if isinstance(content, ArkMovie):
+        console.print(f"\n[bold]🎬 Movie:[/bold] [cyan]{content.title}[/cyan]\n")
+
+        saved_progress = tracker.get_series_progress("ArkAnime", content.title)
+        if saved_progress:
+            choice = select_from_list(
+                ["Watch again/Resume", "Cancel"],
+                f"Found saved progress for {content.title}:",
+            )
+            if choice == 0:
+                resume_arkanime(saved_progress)
+                return
+
+        if not content.players:
+            print_warning("No players found.")
+            pause()
+            return
+
+        supported_players = [
+            p for p in content.players if player.is_supported(p.url)
+        ]
+        if not supported_players:
+            print_warning("No supported players found.")
+            pause()
+            return
+
+        headers = {"Referer": arkanime.website_origin}
+        play_episode_flow(
+            provider_name="ArkAnime",
+            series_title=content.title,
+            season_title="Movie",
+            episode=content,
+            series_url=content.id,
+            season_url=content.id,
+            logo_url=content.img,
+            headers=headers,
+        )
+        return
+
+    series = content
+
+    if not series.seasons:
+        print_warning("No seasons found.")
+        pause()
+        return
+
+    # Check for saved progress for this specific series
+    saved_progress = tracker.get_series_progress("ArkAnime", series.title)
+    if saved_progress:
+        choice = select_from_list(
+            [
+                f"Resume {saved_progress['season_title']} - {saved_progress['episode_title']}",
+                "Browse Seasons",
+                "← Cancel",
+            ],
+            f"Found saved progress for {series.title}:",
+        )
+        if choice == 0:
+            resume_arkanime(saved_progress)
+            return
+        if choice == 2:
+            return
+
+    season_options = [s.title for s in series.seasons] + ["← Back"]
+    season_idx = select_from_list(season_options, "📺 Select Season:")
+    if season_idx == len(series.seasons):
+        return
+    season = series.seasons[season_idx]
+
+    if not season.episodes:
+        print_warning("No episodes found.")
+        pause()
+        return
+
+    ep_options = [e.title for e in season.episodes] + ["← Back"]
+    ep_idx = select_from_list(ep_options, "📺 Select Episode:")
+    if ep_idx == len(season.episodes):
+        return
+
+    while True:
+        selected_episode = season.episodes[ep_idx]
+        headers = {"Referer": arkanime.website_origin}
+
+        success = play_episode_flow(
+            provider_name="ArkAnime",
+            series_title=series.title,
+            season_title=season.title,
+            episode=selected_episode,
+            series_url=series.id,  # using id for url since we matched it
+            season_url=str(season.id), # Using id for season url
+            logo_url=series.img,
+            headers=headers,
+            anilist_callback=lambda: _update_anilist_progress(
+                "ArkAnime", series, season, selected_episode
+            ),
+        )
+
+        if success:
+            if ep_idx + 1 < len(season.episodes):
+                next_ep = season.episodes[ep_idx + 1]
+                choice = select_from_list(
+                    ["Yes", "No"], f"Play next episode: {next_ep.title}?"
+                )
+                if choice == 0:
+                    ep_idx += 1
+                    continue
+            break
+        else:
+            break
+
+
 def handle_arkanime():
     """Handle ArkAnime provider flow."""
     arkanime.get_website_url()
@@ -47,125 +168,7 @@ def handle_arkanime():
         if choice_idx == len(results):
             continue
 
-        selection = results[choice_idx]
-
-        print_info(f"Loading [cyan]{selection.title}[/cyan]...")
-        try:
-            content = arkanime.get_content(selection.url)
-        except Exception as e:
-            print_error(f"Error loading content: {e}")
-            pause()
-            continue
-
-        if isinstance(content, ArkMovie):
-            console.print(f"\n[bold]🎬 Movie:[/bold] [cyan]{content.title}[/cyan]\n")
-
-            saved_progress = tracker.get_series_progress("ArkAnime", content.title)
-            if saved_progress:
-                choice = select_from_list(
-                    ["Watch again/Resume", "Cancel"],
-                    f"Found saved progress for {content.title}:",
-                )
-                if choice == 0:
-                    resume_arkanime(saved_progress)
-                    continue
-
-            if not content.players:
-                print_warning("No players found.")
-                pause()
-                continue
-
-            supported_players = [
-                p for p in content.players if player.is_supported(p.url)
-            ]
-            if not supported_players:
-                print_warning("No supported players found.")
-                pause()
-                continue
-
-            headers = {"Referer": arkanime.website_origin}
-            play_episode_flow(
-                provider_name="ArkAnime",
-                series_title=content.title,
-                season_title="Movie",
-                episode=content,
-                series_url=content.id,
-                season_url=content.id,
-                logo_url=content.img,
-                headers=headers,
-            )
-            continue
-
-        series = content
-
-        if not series.seasons:
-            print_warning("No seasons found.")
-            pause()
-            continue
-
-        # Check for saved progress for this specific series
-        saved_progress = tracker.get_series_progress("ArkAnime", series.title)
-        if saved_progress:
-            choice = select_from_list(
-                [
-                    f"Resume {saved_progress['season_title']} - {saved_progress['episode_title']}",
-                    "Browse Seasons",
-                    "← Cancel",
-                ],
-                f"Found saved progress for {series.title}:",
-            )
-            if choice == 0:
-                resume_arkanime(saved_progress)
-                continue
-            if choice == 2:
-                continue
-
-        season_options = [s.title for s in series.seasons] + ["← Back"]
-        season_idx = select_from_list(season_options, "📺 Select Season:")
-        if season_idx == len(series.seasons):
-            continue
-        season = series.seasons[season_idx]
-
-        if not season.episodes:
-            print_warning("No episodes found.")
-            pause()
-            continue
-
-        ep_options = [e.title for e in season.episodes] + ["← Back"]
-        ep_idx = select_from_list(ep_options, "📺 Select Episode:")
-        if ep_idx == len(season.episodes):
-            continue
-
-        while True:
-            selected_episode = season.episodes[ep_idx]
-            headers = {"Referer": arkanime.website_origin}
-
-            success = play_episode_flow(
-                provider_name="ArkAnime",
-                series_title=series.title,
-                season_title=season.title,
-                episode=selected_episode,
-                series_url=series.id,  # using id for url since we matched it
-                season_url=str(season.id), # Using id for season url
-                logo_url=series.img,
-                headers=headers,
-                anilist_callback=lambda: _update_anilist_progress(
-                    "ArkAnime", series, season, selected_episode
-                ),
-            )
-
-            if success:
-                if ep_idx + 1 < len(season.episodes):
-                    next_ep = season.episodes[ep_idx + 1]
-                    choice = select_from_list(
-                        ["Yes", "No"], f"Play next episode: {next_ep.title}?"
-                    )
-                    if choice == 0:
-                        ep_idx += 1
-                        continue
-                break
-            else:
-                break
+        open_result(results[choice_idx])
 
 
 def resume_arkanime(data):

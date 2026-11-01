@@ -26,6 +26,7 @@ from .handlers import (
     coflix,
     french_stream,
     anilist,
+    global_search,
     goldenanime,
     goldenms,
     arkanime,
@@ -221,39 +222,52 @@ def _run():
 
     # Register Providers
     registry.register(
+        "🌐 Global (All providers)",
+        global_search.handle_global_search,
+        supported_languages=None,
+        key="global",
+    )
+    registry.register(
         "🎌 Anime-Sama (Anime and animated movies)",
         anime_sama.handle_anime_sama,
         supported_languages=["fr"],
+        key="anime_sama",
     )
     registry.register(
         "🎴 FRAnime (Anime)",
         franime.handle_franime,
         supported_languages=["fr"],
+        key="franime",
     )
     registry.register(
         "⛩️ ArkAnime (Anime & Animations)",
         arkanime.handle_arkanime,
         supported_languages=["fr", "en"], # Assuming multi or depending on ArkAnime source
+        key="arkanime",
     )
     registry.register(
         "✨ GoldenAnime (VO and Subtitles)",
         goldenanime.handle_goldenanime,
         supported_languages=None,
+        key="goldenanime",
     )
     registry.register(
         "🌟 GoldenMS (Movies & Series)",
         goldenms.handle_goldenms,
         supported_languages=None,
+        key="goldenms",
     )
     registry.register(
         "🎬 Coflix (Series and movies)",
         coflix.handle_coflix,
         supported_languages=["fr"],
+        key="coflix",
     )
     registry.register(
         "🇫🇷 French-Stream (Series and movies)",
         french_stream.handle_french_stream,
         supported_languages=["fr"],
+        key="french_stream",
     )
 
     # Check for updates
