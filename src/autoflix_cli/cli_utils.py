@@ -407,13 +407,14 @@ def _is_disabled(option: str) -> bool:
 
 
 def _truncate(text: str, width: int) -> str:
-    """Truncate a row to the given width, keeping one line only."""
+    """Truncate a row to the given display width, keeping one line only."""
     single_line = text.replace("\n", " ").replace("\r", " ")
-    if width <= 4:
-        return single_line[: max(0, width)]
-    if len(single_line) > width:
-        return single_line[: width - 1] + "…"
-    return single_line
+    t = Text(single_line)
+    # Text.truncate uses Rich's cell_len: emoji / double-width glyphs are
+    # measured the way terminals actually display them.
+    if t.cell_len > width:
+        t.truncate(max_width=width, overflow="ellipsis", pad=False)
+    return t.plain
 
 
 def _fallback_select(options: Sequence[str], prompt: str, default_index: int) -> int:
