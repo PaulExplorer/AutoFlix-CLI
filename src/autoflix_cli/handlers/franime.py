@@ -87,6 +87,113 @@ def _resolve_episode_players(series_id, season_index, selected_episode, lang):
     return False
 
 
+def open_result(selection):
+    """Open a search result: load the anime, browse and play."""
+    print_info(f"Loading [cyan]{selection.title}[/cyan]...")
+    try:
+        series = franime.get_series(selection)
+    except Exception as e:
+        print_error(f"Could not load the anime: {e}")
+        pause()
+        return
+
+    if not series.seasons:
+        print_warning("No seasons found.")
+        pause()
+        return
+
+    saved_progress = tracker.get_series_progress("FRAnime", series.title)
+    if saved_progress:
+        choice = select_from_list(
+            [
+                f"Resume {saved_progress['season_title']} - {saved_progress['episode_title']}",
+                "Browse Seasons",
+                "← Cancel",
+            ],
+            f"Found saved progress for {series.title}:",
+        )
+        if choice == 0:
+            resume_franime(saved_progress)
+            return
+        if choice == 2:
+            return
+
+    season_options = [s.title for s in series.seasons] + ["← Back"]
+    season_idx = select_from_list(season_options, "📺 Select Season:")
+    if season_idx == len(series.seasons):
+        return
+    selected_season_access = series.seasons[season_idx]
+
+    # The season URL is "https://franime.fr/anime/<id>/<season_index>",
+    # the index is what the FRAnime resolver endpoints expect.
+    season_index = int(selected_season_access.url.rstrip("/").rsplit("/", 1)[1])
+
+    print_info(f"Loading [cyan]{selected_season_access.title}[/cyan]...")
+    try:
+        season = franime.get_season(selected_season_access.url)
+    except NoEpisodesFoundError:
+        print_error(
+            "No links found for this content: it is probably not released yet."
+        )
+        pause()
+        return
+    except Exception as e:
+        print_error(f"Could not load season: {e}")
+        pause()
+        return
+
+    langs = list(season.episodes.keys())
+    if not langs:
+        print_warning("No episodes found.")
+        pause()
+        return
+
+    selected_lang = _select_language(langs)
+    if selected_lang is None:
+        return
+    episodes = season.episodes[selected_lang]
+
+    ep_options = [e.title for e in episodes] + ["← Back"]
+    ep_idx = select_from_list(ep_options, "📺 Select Episode:")
+    if ep_idx == len(episodes):
+        return
+
+    while True:
+        selected_episode = episodes[ep_idx]
+
+        if not _resolve_episode_players(
+            series.url, season_index, selected_episode, selected_lang
+        ):
+            break
+
+        success = play_episode_flow(
+            provider_name="FRAnime",
+            series_title=series.title,
+            season_title=season.title,
+            episode=selected_episode,
+            series_url=series.url,
+            season_url=selected_season_access.url,
+            logo_url=series.img,
+            headers={"Referer": franime.website_origin + "/"},
+            anilist_callback=lambda: _update_anilist_progress(
+                "FRAnime", series, season, selected_episode
+            ),
+        )
+
+        if success:
+            if ep_idx + 1 < len(episodes):
+                next_ep = episodes[ep_idx + 1]
+                choice = select_from_list(
+                    ["Yes", "No"], f"Play next episode: {next_ep.title}?"
+                )
+                if choice == 0:
+                    ep_idx += 1
+                    continue
+            break
+        else:
+            break
+
+
 def handle_franime():
     """Handle FRAnime provider flow."""
     franime.get_website_url()
@@ -117,111 +224,7 @@ def handle_franime():
         if choice_idx == len(results):
             continue
 
-        selection = results[choice_idx]
-
-        print_info(f"Loading [cyan]{selection.title}[/cyan]...")
-        try:
-            series = franime.get_series(selection)
-        except Exception as e:
-            print_error(f"Could not load the anime: {e}")
-            pause()
-            continue
-
-        if not series.seasons:
-            print_warning("No seasons found.")
-            pause()
-            continue
-
-        saved_progress = tracker.get_series_progress("FRAnime", series.title)
-        if saved_progress:
-            choice = select_from_list(
-                [
-                    f"Resume {saved_progress['season_title']} - {saved_progress['episode_title']}",
-                    "Browse Seasons",
-                    "← Cancel",
-                ],
-                f"Found saved progress for {series.title}:",
-            )
-            if choice == 0:
-                resume_franime(saved_progress)
-                return
-            if choice == 2:
-                continue
-
-        season_options = [s.title for s in series.seasons] + ["← Back"]
-        season_idx = select_from_list(season_options, "📺 Select Season:")
-        if season_idx == len(series.seasons):
-            continue
-        selected_season_access = series.seasons[season_idx]
-
-        # The season URL is "https://franime.fr/anime/<id>/<season_index>",
-        # the index is what the FRAnime resolver endpoints expect.
-        season_index = int(selected_season_access.url.rstrip("/").rsplit("/", 1)[1])
-
-        print_info(f"Loading [cyan]{selected_season_access.title}[/cyan]...")
-        try:
-            season = franime.get_season(selected_season_access.url)
-        except NoEpisodesFoundError:
-            print_error(
-                "No links found for this content: it is probably not released yet."
-            )
-            pause()
-            continue
-        except Exception as e:
-            print_error(f"Could not load season: {e}")
-            pause()
-            continue
-
-        langs = list(season.episodes.keys())
-        if not langs:
-            print_warning("No episodes found.")
-            pause()
-            continue
-
-        selected_lang = _select_language(langs)
-        if selected_lang is None:
-            continue
-        episodes = season.episodes[selected_lang]
-
-        ep_options = [e.title for e in episodes] + ["← Back"]
-        ep_idx = select_from_list(ep_options, "📺 Select Episode:")
-        if ep_idx == len(episodes):
-            continue
-
-        while True:
-            selected_episode = episodes[ep_idx]
-
-            if not _resolve_episode_players(
-                series.url, season_index, selected_episode, selected_lang
-            ):
-                break
-
-            success = play_episode_flow(
-                provider_name="FRAnime",
-                series_title=series.title,
-                season_title=season.title,
-                episode=selected_episode,
-                series_url=series.url,
-                season_url=selected_season_access.url,
-                logo_url=series.img,
-                headers={"Referer": franime.website_origin + "/"},
-                anilist_callback=lambda: _update_anilist_progress(
-                    "FRAnime", series, season, selected_episode
-                ),
-            )
-
-            if success:
-                if ep_idx + 1 < len(episodes):
-                    next_ep = episodes[ep_idx + 1]
-                    choice = select_from_list(
-                        ["Yes", "No"], f"Play next episode: {next_ep.title}?"
-                    )
-                    if choice == 0:
-                        ep_idx += 1
-                        continue
-                break
-            else:
-                break
+        open_result(results[choice_idx])
 
 
 def resume_franime(data):
