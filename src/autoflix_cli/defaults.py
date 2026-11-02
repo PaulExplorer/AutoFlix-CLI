@@ -122,7 +122,7 @@ DEFAULT_PLAYERS = {
     "embed4me": {"type": "embed4me"},
     "coflix.upn": {"type": "embed4me"},
     "veev": {"type": "veev", "ext": "mp4"},
-    "xtremestream": {"type": "xtremestream"},
+    "xtremestream": {"type": "xtremestream", "referrer": "path"},
     "montmyoboky": {"type": "montmyoboky"},
     "vidzy": { "type": "xupload", "referrer": "https://vidzy.org/", },
     "voe": { "type": "voe" },

@@ -204,6 +204,66 @@ def _looks_blocked(response: ProbeResponse) -> bool:
     return head.startswith((b"<html", b"<!doctype", b"<script", b"<head", b"<body"))
 
 
+def _first_uri(text: str, base: str = "") -> str:
+    """First URI line of an m3u8 playlist (resolved against ``base``)."""
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        return urllib.parse.urljoin(base, line)
+    return None
+
+
+def _deep_check_hls(master_text, stream_url, request_headers, fetch, timeout) -> str:
+    """Reads one variant and one segment; returns an error string or "".
+
+    A master playlist answering 200 says nothing about the media files
+    behind it: xtremestream keeps serving playlists whose video segments
+    are purged from its CDN (only the audio track survives). So the probe
+    follows one variant and fetches the start of its first segment; a
+    4xx/challenge there is what the user would see at playback.
+    """
+    try:
+        variant_url = _first_uri(master_text, stream_url)
+        if not variant_url:
+            return ""  # nothing reachable to check; keep the playlist verdict
+        vresp = fetch(variant_url, request_headers, timeout=timeout)
+        if vresp.status not in (200, 206):
+            return f"HTTP {vresp.status}"
+        segment_url = _first_uri(vresp.text, variant_url)
+        if not segment_url:
+            return ""
+        sresp = fetch(segment_url, request_headers, range_bytes=True, timeout=timeout)
+        if sresp.status not in (200, 206):
+            return f"HTTP {sresp.status}"
+        if _looks_blocked(sresp):
+            return "blocked"
+    except Exception as e:
+        return f"{type(e).__name__}: {e}"
+    return ""
+
+
+def _probe_referer(stream_url: str, player_config: dict = None) -> str:
+    """The Referer the proxy would send for this stream ("" = keep as-is).
+
+    The proxy derives the Referer from the player config and the embed host,
+    not from the source site. Some embeds reject the site's own Referer
+    (xtremestream answers 403 to anything but its own domain), so probing
+    with the site's headers mis-scores those sources as dead.
+    """
+    setting = (player_config or {}).get("referrer")
+    if setting == "full":
+        # "full" needs the embed page URL, which the probe does not carry.
+        return ""
+    host = urllib.parse.urlparse(stream_url).hostname
+    # The proxy serves some playlists itself (xtremestream /xs/master);
+    # it sets its own upstream headers, nothing to override here.
+    if not host or host in ("127.0.0.1", "localhost", "::1") or not isinstance(setting, (str, type(None))):
+        return ""
+    referer = f"https://{host}/" if setting in (None, "path") else setting
+    return referer if referer.endswith("/") else f"{referer}/"
+
+
 def probe_stream(
     stream_url: str,
     headers: dict,
@@ -219,11 +279,15 @@ def probe_stream(
     """
     fetch = fetch or _default_fetch
     kind = guess_kind(stream_url, player_config)
+    request_headers = dict(headers or {})
+    probe_referer = _probe_referer(stream_url, player_config)
+    if probe_referer:
+        request_headers["Referer"] = probe_referer
     result = {"ok": False, "kind": KIND_DEAD, "heights": [], "bandwidths": [], "size": 0}
 
     try:
         response = fetch(
-            stream_url, headers, range_bytes=(kind == KIND_MP4), timeout=timeout
+            stream_url, request_headers, range_bytes=(kind == KIND_MP4), timeout=timeout
         )
     except Exception as e:
         result["error"] = f"{type(e).__name__}: {e}"
@@ -254,6 +318,14 @@ def probe_stream(
     if _looks_blocked(response):
         result["error"] = "blocked"
         return result
+
+    if kind == KIND_HLS_MASTER and "#EXT-X-STREAM-INF" in response.text:
+        deep_error = _deep_check_hls(
+            response.text, stream_url, request_headers, fetch, timeout
+        )
+        if deep_error:
+            result["error"] = deep_error
+            return result
 
     qualities = parse_master_qualities(response.text)
     result.update(

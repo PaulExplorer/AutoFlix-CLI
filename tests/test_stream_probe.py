@@ -215,6 +215,178 @@ def test_probe_forwards_timeout_to_the_fetcher():
     assert seen["timeout"] == 3.5
 
 
+# --- referer ----------------------------------------------------------------
+
+
+def test_probe_referer_path_setting_uses_embed_host():
+    assert (
+        sp._probe_referer(
+            "https://lecteur1.xtremestream.xyz/player/xs1.php", {"referrer": "path"}
+        )
+        == "https://lecteur1.xtremestream.xyz/"
+    )
+
+
+def test_probe_referer_without_config_uses_embed_host():
+    # Same rule the proxy applies to unconfigured players, so a host judged
+    # here is judged with the Referer it would face during playback.
+    assert sp._probe_referer("https://cdn.tld/a.m3u8", {}) == "https://cdn.tld/"
+
+
+def test_probe_referer_loopback_streams_keep_caller_headers():
+    # The proxy serves the xtremestream ftk pipeline itself (/xs/master):
+    # probing it needs no Referer override.
+    assert (
+        sp._probe_referer(
+            "http://127.0.0.1:48913/xs/master?data=abc", {"referrer": "path"}
+        )
+        == ""
+    )
+
+
+def test_probe_referer_explicit_string_is_used_verbatim():
+    assert (
+        sp._probe_referer("https://vidzy.cc/x.m3u8", {"referrer": "https://vidzy.org/"})
+        == "https://vidzy.org/"
+    )
+
+
+def test_probe_referer_full_and_blank_host_keep_caller_headers():
+    # "full" needs the embed page URL, which probing does not carry.
+    assert sp._probe_referer("https://cdn.tld/a.m3u8", {"referrer": "full"}) == ""
+    assert sp._probe_referer("not-a-url", {}) == ""
+
+
+def test_probe_sends_embed_referer_to_the_fetcher():
+    seen = {}
+
+    def _fetch(url, headers, range_bytes=False, timeout=None):
+        seen.update(headers)
+        return sp.ProbeResponse(200, {}, MASTER.encode())
+
+    result = sp.probe_stream(
+        "https://lecteur1.xtremestream.xyz/player/xs1.php?data=abc",
+        {"Referer": "https://coflix.domains/"},
+        {"type": "xtremestream", "referrer": "path"},
+        fetch=_fetch,
+    )
+    assert result["ok"] is True
+    # A foreign (site) Referer gets xs1.php to answer 403.
+    assert seen["Referer"] == "https://lecteur1.xtremestream.xyz/"
+
+
+def test_probe_overrides_nothing_when_no_referer_to_send():
+    seen = {}
+
+    def _fetch(url, headers, range_bytes=False, timeout=None):
+        seen.update(headers)
+        return sp.ProbeResponse(200, {}, MASTER.encode())
+
+    sp.probe_stream(
+        "https://cdn.tld/master.m3u8",
+        {"Referer": "https://site.tld/", "X-Custom": "1"},
+        {"referrer": "full"},
+        fetch=_fetch,
+    )
+    assert seen["Referer"] == "https://site.tld/"
+    assert seen["X-Custom"] == "1"
+
+
+# --- deep segment check ------------------------------------------------------
+
+
+def _fetch_by_url(responses):
+    def _fetch(url, headers, range_bytes=False, timeout=None):
+        return responses[url]
+
+    return _fetch
+
+
+def test_probe_master_with_dead_first_segment_is_dead():
+    """xtremestream case: reachable playlists over a purged CDN video."""
+    responses = {
+        "https://cdn.tld/master.m3u8": sp.ProbeResponse(200, {}, MASTER.encode()),
+        "https://cdn.tld/1080/index.m3u8": sp.ProbeResponse(200, {}, MEDIA.encode()),
+        "https://cdn.tld/1080/seg1.ts": sp.ProbeResponse(404, {}, b"<html>404</html>"),
+    }
+    result = sp.probe_stream(
+        "https://cdn.tld/master.m3u8", {}, {}, fetch=_fetch_by_url(responses)
+    )
+    assert result["ok"] is False
+    assert result["error"] == "HTTP 404"
+
+
+def test_probe_master_live_segments_stay_ok():
+    responses = {
+        "https://cdn.tld/master.m3u8": sp.ProbeResponse(200, {}, MASTER.encode()),
+        "https://cdn.tld/1080/index.m3u8": sp.ProbeResponse(200, {}, MEDIA.encode()),
+        "https://cdn.tld/1080/seg1.ts": sp.ProbeResponse(
+            206, {"Content-Range": "bytes 0-65535/50000000"}, b"\x47" * 64
+        ),
+    }
+    result = sp.probe_stream(
+        "https://cdn.tld/master.m3u8", {}, {}, fetch=_fetch_by_url(responses)
+    )
+    assert result["ok"] is True
+    assert result["kind"] == sp.KIND_HLS_MASTER
+    assert result["heights"] == [1080, 720]
+
+
+def test_probe_master_blocked_first_segment_is_dead():
+    responses = {
+        "https://cdn.tld/master.m3u8": sp.ProbeResponse(200, {}, MASTER.encode()),
+        "https://cdn.tld/1080/index.m3u8": sp.ProbeResponse(200, {}, MEDIA.encode()),
+        "https://cdn.tld/1080/seg1.ts": sp.ProbeResponse(
+            200, {}, b"<!DOCTYPE html><html><body>Just a moment...</body></html>"
+        ),
+    }
+    result = sp.probe_stream(
+        "https://cdn.tld/master.m3u8", {}, {}, fetch=_fetch_by_url(responses)
+    )
+    assert result["ok"] is False
+    assert result["error"] == "blocked"
+
+
+def test_probe_master_variant_error_is_dead():
+    """A variant playlist that refuses to load kills the source too."""
+    responses = {
+        "https://cdn.tld/master.m3u8": sp.ProbeResponse(200, {}, MASTER.encode()),
+        "https://cdn.tld/1080/index.m3u8": sp.ProbeResponse(410, {}, b"gone"),
+        # Never reached: no segment URL will come out of a 410 page
+        "https://cdn.tld/1080/seg1.ts": sp.ProbeResponse(200, {}, b"\x47"),
+    }
+    result = sp.probe_stream(
+        "https://cdn.tld/master.m3u8", {}, {}, fetch=_fetch_by_url(responses)
+    )
+    assert result["ok"] is False
+    assert result["error"] == "HTTP 410"
+
+
+def test_probe_master_without_segment_line_keeps_playlist_verdict():
+    media_empty = "#EXTM3U\n#EXT-X-TARGETDURATION:10\n"
+    responses = {
+        "https://cdn.tld/master.m3u8": sp.ProbeResponse(200, {}, MASTER.encode()),
+        "https://cdn.tld/1080/index.m3u8": sp.ProbeResponse(200, {}, media_empty.encode()),
+    }
+    result = sp.probe_stream(
+        "https://cdn.tld/master.m3u8", {}, {}, fetch=_fetch_by_url(responses)
+    )
+    assert result["ok"] is True
+
+
+def test_probe_media_playlist_is_not_deep_checked():
+    """Media playlists keep the cheap check (no variant chase)."""
+    calls = []
+
+    def _fetch(url, headers, range_bytes=False, timeout=None):
+        calls.append(url)
+        return sp.ProbeResponse(200, {}, MEDIA.encode())
+
+    result = sp.probe_stream("https://cdn.tld/media.m3u8", {}, {}, fetch=_fetch)
+    assert result["ok"] is True
+    assert calls == ["https://cdn.tld/media.m3u8"]
+
+
 # --- ranking ----------------------------------------------------------------
 
 
