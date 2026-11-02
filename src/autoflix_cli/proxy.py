@@ -984,6 +984,31 @@ def xs_audio():
     )
 
 
+def _xs_media_response(payload: bytes) -> Response:
+    return Response(
+        payload,
+        status=200,
+        headers={"Content-Type": "video/mp2t", "Access-Control-Allow-Origin": "*"},
+    )
+
+
+def _xs_fetch_upstream_segment(cdn_hosts, headers, data_id, index, lang, quality):
+    """Download one upstream segment (audio passthrough or encrypted video)."""
+    if not cdn_hosts:
+        return None, None, {}
+    host = cdn_hosts[index % len(cdn_hosts)]
+
+    if lang and re.fullmatch(r"[A-Za-z0-9_-]+", lang):
+        # Audio segments are clear MPEG-TS (AAC only): direct passthrough.
+        url = f"https://{host}/cdn/down/{data_id}/hls_audio/{lang}/seg_{index:03d}.aac"
+        return fetch_segment(url, headers, request.environ)
+
+    if not re.fullmatch(r"\d+p?", quality):
+        return None, None, {}
+    url = f"https://{host}/cdn/down/{data_id}/{quality}_enc/{quality}{index}.html"
+    return fetch_segment(url, headers, request.environ)
+
+
 @app.route("/xs/segment.ts")
 def xs_segment():
     data_id = request.args.get("data", "")
@@ -1007,13 +1032,22 @@ def xs_segment():
     if not cdn_hosts:
         return "Manifest has no CDN host", 502
 
+    if not lang and not re.fullmatch(r"\d+p?", quality):
+        return "Missing or invalid quality", 400
+
     host = cdn_hosts[index % len(cdn_hosts)]
     headers = {"Referer": f"{_xs_origin(player_url)}/"}
 
+    # The player abandoned the transfer (seek/cancel): nothing to serve.
+    try:
+        result = _xs_fetch_upstream_segment(
+            cdn_hosts, headers, data_id, index, lang, quality
+        )
+    except _SegmentCancelled:
+        return "Cancelled", 499
+
     if lang and re.fullmatch(r"[A-Za-z0-9_-]+", lang):
-        # Audio segments are clear MPEG-TS (AAC only): direct passthrough.
-        url = f"https://{host}/cdn/down/{data_id}/hls_audio/{lang}/seg_{index:03d}.aac"
-        media, status, extra = fetch_segment(url, headers, request.environ)
+        media, status, extra = result
         if media is None:
             return "Error fetching audio segment", 502
         return Response(
@@ -1026,11 +1060,7 @@ def xs_segment():
             },
         )
 
-    if not re.fullmatch(r"\d+p?", quality):
-        return "Missing or invalid quality", 400
-
-    url = f"https://{host}/cdn/down/{data_id}/{quality}_enc/{quality}{index}.html"
-    raw, status, extra = fetch_segment(url, headers, request.environ)
+    raw, status, extra = result
     if raw is None:
         return "Error fetching video segment", 502
 
@@ -1041,14 +1071,7 @@ def xs_segment():
     for force in (False, True):
         try:
             key = _xs_key(data_id, player_url, force=force)
-            return Response(
-                _xs_decrypt(raw, index, key),
-                status=200,
-                headers={
-                    "Content-Type": "video/mp2t",
-                    "Access-Control-Allow-Origin": "*",
-                },
-            )
+            return _xs_media_response(_xs_decrypt(raw, index, key))
         except (XsPipelineError, ValueError) as e:
             error = e
     log.warning("xtremestream segment %s/%s failed: %s", data_id, index, error)
