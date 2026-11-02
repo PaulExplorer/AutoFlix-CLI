@@ -281,6 +281,101 @@ def test_probe_overrides_nothing_when_no_referer_to_send():
     assert seen["X-Custom"] == "1"
 
 
+# --- deep segment check ------------------------------------------------------
+
+
+def _fetch_by_url(responses):
+    def _fetch(url, headers, range_bytes=False, timeout=None):
+        return responses[url]
+
+    return _fetch
+
+
+def test_probe_master_with_dead_first_segment_is_dead():
+    """xtremestream case: reachable playlists over a purged CDN video."""
+    responses = {
+        "https://cdn.tld/master.m3u8": sp.ProbeResponse(200, {}, MASTER.encode()),
+        "https://cdn.tld/1080/index.m3u8": sp.ProbeResponse(200, {}, MEDIA.encode()),
+        "https://cdn.tld/1080/seg1.ts": sp.ProbeResponse(404, {}, b"<html>404</html>"),
+    }
+    result = sp.probe_stream(
+        "https://cdn.tld/master.m3u8", {}, {}, fetch=_fetch_by_url(responses)
+    )
+    assert result["ok"] is False
+    assert result["error"] == "HTTP 404"
+
+
+def test_probe_master_live_segments_stay_ok():
+    responses = {
+        "https://cdn.tld/master.m3u8": sp.ProbeResponse(200, {}, MASTER.encode()),
+        "https://cdn.tld/1080/index.m3u8": sp.ProbeResponse(200, {}, MEDIA.encode()),
+        "https://cdn.tld/1080/seg1.ts": sp.ProbeResponse(
+            206, {"Content-Range": "bytes 0-65535/50000000"}, b"\x47" * 64
+        ),
+    }
+    result = sp.probe_stream(
+        "https://cdn.tld/master.m3u8", {}, {}, fetch=_fetch_by_url(responses)
+    )
+    assert result["ok"] is True
+    assert result["kind"] == sp.KIND_HLS_MASTER
+    assert result["heights"] == [1080, 720]
+
+
+def test_probe_master_blocked_first_segment_is_dead():
+    responses = {
+        "https://cdn.tld/master.m3u8": sp.ProbeResponse(200, {}, MASTER.encode()),
+        "https://cdn.tld/1080/index.m3u8": sp.ProbeResponse(200, {}, MEDIA.encode()),
+        "https://cdn.tld/1080/seg1.ts": sp.ProbeResponse(
+            200, {}, b"<!DOCTYPE html><html><body>Just a moment...</body></html>"
+        ),
+    }
+    result = sp.probe_stream(
+        "https://cdn.tld/master.m3u8", {}, {}, fetch=_fetch_by_url(responses)
+    )
+    assert result["ok"] is False
+    assert result["error"] == "blocked"
+
+
+def test_probe_master_variant_error_is_dead():
+    """A variant playlist that refuses to load kills the source too."""
+    responses = {
+        "https://cdn.tld/master.m3u8": sp.ProbeResponse(200, {}, MASTER.encode()),
+        "https://cdn.tld/1080/index.m3u8": sp.ProbeResponse(410, {}, b"gone"),
+        # Never reached: no segment URL will come out of a 410 page
+        "https://cdn.tld/1080/seg1.ts": sp.ProbeResponse(200, {}, b"\x47"),
+    }
+    result = sp.probe_stream(
+        "https://cdn.tld/master.m3u8", {}, {}, fetch=_fetch_by_url(responses)
+    )
+    assert result["ok"] is False
+    assert result["error"] == "HTTP 410"
+
+
+def test_probe_master_without_segment_line_keeps_playlist_verdict():
+    media_empty = "#EXTM3U\n#EXT-X-TARGETDURATION:10\n"
+    responses = {
+        "https://cdn.tld/master.m3u8": sp.ProbeResponse(200, {}, MASTER.encode()),
+        "https://cdn.tld/1080/index.m3u8": sp.ProbeResponse(200, {}, media_empty.encode()),
+    }
+    result = sp.probe_stream(
+        "https://cdn.tld/master.m3u8", {}, {}, fetch=_fetch_by_url(responses)
+    )
+    assert result["ok"] is True
+
+
+def test_probe_media_playlist_is_not_deep_checked():
+    """Media playlists keep the cheap check (no variant chase)."""
+    calls = []
+
+    def _fetch(url, headers, range_bytes=False, timeout=None):
+        calls.append(url)
+        return sp.ProbeResponse(200, {}, MEDIA.encode())
+
+    result = sp.probe_stream("https://cdn.tld/media.m3u8", {}, {}, fetch=_fetch)
+    assert result["ok"] is True
+    assert calls == ["https://cdn.tld/media.m3u8"]
+
+
 # --- ranking ----------------------------------------------------------------
 
 
