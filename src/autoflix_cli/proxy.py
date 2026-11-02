@@ -402,6 +402,12 @@ def fetch_segment(url, headers, environ=None, client_range=None, max_retries=2):
                     raise _SegmentCancelled()
                 data.extend(chunk)
 
+            # A definitive dead link is served upstream-status included: the
+            # player skips a 4xx segment but treats the proxy's 502 as fatal,
+            # and the body here is just the host's error page anyway.
+            if status in (404, 410):
+                return bytes(data), status, {}
+
             # A challenge/empty page back where a segment was expected is
             # treated as a failure and retried rather than served to the
             # player as a corrupt segment.
