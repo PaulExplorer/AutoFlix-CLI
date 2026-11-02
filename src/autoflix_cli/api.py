@@ -24,6 +24,7 @@ Typical flow::
 
 from urllib.parse import quote
 import json
+import urllib.parse
 
 from .scraping.player import get_hls_link as _get_hls_link
 from .scraping.player import is_supported as _is_supported
@@ -608,6 +609,11 @@ def proxy_url(stream_url: str, headers: dict = None, kind: str = "stream") -> st
     """
     if not _proxy.PROXY_PORT:
         raise RuntimeError("Proxy is not running: call start_proxy() first.")
+    # Streams the proxy serves itself (xtremestream /xs/master): hand back
+    # the local URL untouched instead of wrapping it a second time.
+    parsed = urllib.parse.urlsplit(stream_url)
+    if parsed.hostname in ("127.0.0.1", "localhost", "::1") and parsed.port == _proxy.PROXY_PORT:
+        return stream_url
     endpoint = "video" if kind == "video" else "stream"
     h = json.dumps(headers or {})
     return f"{_proxy.PROXY_URL}/{endpoint}?url={quote(stream_url)}&headers={quote(h)}"
