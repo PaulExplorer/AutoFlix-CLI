@@ -256,7 +256,9 @@ def _probe_referer(stream_url: str, player_config: dict = None) -> str:
         # "full" needs the embed page URL, which the probe does not carry.
         return ""
     host = urllib.parse.urlparse(stream_url).hostname
-    if not host or not isinstance(setting, (str, type(None))):
+    # The proxy serves some playlists itself (xtremestream /xs/master);
+    # it sets its own upstream headers, nothing to override here.
+    if not host or host in ("127.0.0.1", "localhost", "::1") or not isinstance(setting, (str, type(None))):
         return ""
     referer = f"https://{host}/" if setting in (None, "path") else setting
     return referer if referer.endswith("/") else f"{referer}/"

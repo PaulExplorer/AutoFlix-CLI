@@ -432,6 +432,15 @@ def _build_proxy_url(
     if not proxy.PROXY_URL:
         return None
 
+    # Some streams are served by the proxy itself (xtremestream /xs/master
+    # decrypts the ftk segments). Wrapping an already-local URL a second time
+    # would make /stream re-proxy every child URI, so hand it back untouched.
+    parsed = urllib.parse.urlsplit(stream_url)
+    if parsed.hostname in ("127.0.0.1", "localhost", "::1") and (
+        parsed.port == proxy.PROXY_PORT or parsed.port is None
+    ):
+        return stream_url
+
     endpoint = "stream"
     if player_config.get("ext") == "mp4" or is_mp4:
         endpoint = "video"
