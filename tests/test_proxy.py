@@ -255,3 +255,198 @@ def test_strip_image_wrapper_png_garbage_tail_kept():
     """IEND present but no TS/fMP4 payload after it: untouched (defensive)."""
     wrapped = _FAKE_PNG_HEAD + b"garbage-after-iend" * 8
     assert proxy._strip_image_wrapper(wrapped) == wrapped
+
+
+# ---------------------------------------------------------------------------
+# xtremestream (ftk pipeline)
+# ---------------------------------------------------------------------------
+import json
+
+from Crypto.Cipher import AES as _AES
+
+
+def _xs_encrypted(plain: bytes, key: bytes, index: int) -> bytes:
+    """AES-CBC sandbag used by the tests: IV = big-endian index + PKCS7 pad."""
+    pad = proxy.AES.block_size - len(plain) % proxy.AES.block_size
+    cipher = _AES.new(key, proxy.AES.MODE_CBC, iv=index.to_bytes(16, "big"))
+    return cipher.encrypt(plain + bytes([pad]) * pad)
+
+
+def test_xs_xor_filter_recovers_json():
+    token = "deadbeef.1793617200"
+    data_id = "c37f3680"
+    manifest = {"720": {"durs": [10, 4.4]}, "audio": [], "cdn": ["h1"]}
+    plain = json.dumps(manifest).encode()
+    payload = bytes(
+        b ^ d
+        for b, d in zip(plain, proxy._xs_xor_filter(bytes(len(plain)), data_id, token))
+    )
+    assert json.loads(proxy._xs_xor_filter(payload, data_id, token)) == manifest
+
+
+def test_xs_variant_names_sorted_by_resolution():
+    manifest = {
+        "720": {"durs": [10]},
+        "1080": {"durs": [10]},
+        "480p": {"durs": [10]},
+        "audio": [],
+        "cdn": ["h1"],
+    }
+    assert proxy._xs_variant_names(manifest) == ["1080", "720", "480p"]
+
+
+def test_xs_playlist_text_shape():
+    text = proxy._xs_playlist_text([10, 4.4], 10, lambda i: f"u{i}")
+    lines = text.splitlines()
+    assert lines[0] == "#EXTM3U"
+    assert "#EXT-X-TARGETDURATION:10" in text
+    assert "#EXT-X-PLAYLIST-TYPE:VOD" in text
+    assert "#EXTINF:10,\nu0" in text
+    assert "#EXTINF:4.4,\nu1" in text
+    assert text.endswith("#EXT-X-ENDLIST\n")
+
+
+def test_xs_decrypt_with_index_iv_and_pkcs7():
+    key = bytes(range(16))
+    plain = b"\x47" + b"TS payload" * 20  # not a multiple of 16
+    raw = _xs_encrypted(plain, key, 7)
+    assert proxy._xs_decrypt(raw, 7, key) == plain
+
+
+def test_xs_decrypt_rejects_garbage():
+    # Wrong key -> no 0x47 sync byte -> ValueError (and not a crash).
+    raw = _xs_encrypted(b"\x42" * 64, b"\x00" * 16, 0)
+    with pytest.raises(ValueError):
+        proxy._xs_decrypt(raw, 0, b"\x01" * 16)
+
+
+MANIFEST = {
+    "720": {
+        "td": 10,
+        "n": 3,
+        "durs": [7.12, 3.08, 10],
+        "bw": 573020,
+        "res": "1280x720",
+    },
+    "audio": [{"lang": "und", "name": "und", "default": False, "td": 6, "durs": [6, 6]}],
+    "cdn": ["h1.tld", "h2.tld"],
+}
+PLAYER_URL = "https://lecteur1.xtremestream.xyz/player/index.php?data=abc"
+PLAYER_URL_Q = urllib.parse.quote(PLAYER_URL, safe="")
+
+
+@pytest.fixture
+def xs_client(monkeypatch):
+    monkeypatch.setattr(proxy, "_xs_manifest", lambda *a, **k: MANIFEST)
+    monkeypatch.setattr(proxy, "_xs_key", lambda *a, **k: b"\x01" * 16)
+    return proxy.app.test_client()
+
+
+def test_xs_master_playlist(xs_client):
+    url = f"/xs/master?data=abc&u={PLAYER_URL_Q}"
+    resp = xs_client.get(url)
+    assert resp.status_code == 200
+    text = resp.data.decode()
+    assert "#EXTM3U" in text
+    assert (
+        "#EXT-X-STREAM-INF:BANDWIDTH=573020,RESOLUTION=1280x720,AUDIO=\"aud\""
+        in text
+    )
+    assert f'/xs/media?data=abc&u={PLAYER_URL_Q}&q=720' in text
+    assert 'TYPE=AUDIO,GROUP-ID="aud"' in text
+    assert "DEFAULT=NO" in text  # track["default"] is False
+
+
+def test_xs_media_playlist(xs_client):
+    url = f"/xs/media?data=abc&u={PLAYER_URL_Q}&q=720"
+    resp = xs_client.get(url)
+    assert resp.status_code == 200
+    text = resp.data.decode()
+    assert "TARGETDURATION:10" in text
+    assert "/xs/segment.ts?data=abc&u=" in text
+    assert "&q=720&i=2" in text
+    assert "#EXTINF:7.12," in text
+
+
+def test_xs_audio_playlist(xs_client):
+    url = f"/xs/audio?data=abc&u={PLAYER_URL_Q}&lang=und"
+    resp = xs_client.get(url)
+    assert resp.status_code == 200
+    text = resp.data.decode()
+    assert "&a=und&i=1" in text
+    # Unknown lang -> 404.
+    assert xs_client.get("/xs/audio?data=abc&u=x&lang=zz").status_code == 404
+
+
+def test_xs_media_unknown_quality(xs_client):
+    resp = xs_client.get("/xs/media?data=abc&q=666&u=x")
+    assert resp.status_code == 404
+
+
+def test_xs_video_segment_decrypted(xs_client, monkeypatch):
+    key = bytes(range(16))
+    plain = b"\x47" + b"video data" * 30
+    raw = _xs_encrypted(plain, key, 1)
+    seen = {}
+
+    def fake_fetch(url, headers, environ=None, client_range=None, max_retries=2):
+        seen["url"] = url
+        seen["headers"] = headers
+        return raw, 200, {}
+
+    monkeypatch.setattr(proxy, "fetch_segment", fake_fetch)
+    monkeypatch.setattr(proxy, "_xs_key", lambda *a, **k: key)
+
+    resp = xs_client.get(f"/xs/segment.ts?data=abc&u={PLAYER_URL_Q}&q=720&i=1")
+    assert resp.status_code == 200
+    assert resp.data == plain
+    assert resp.headers["Content-Type"] == "video/mp2t"
+    # cdn hosts rotate by index modulo: h2 for i=1 of 2 hosts.
+    assert seen["url"] == "https://h2.tld/cdn/down/abc/720_enc/7201.html"
+    assert seen["headers"] == {"Referer": "https://lecteur1.xtremestream.xyz/"}
+
+
+def test_xs_video_segment_retries_fresh_key(xs_client, monkeypatch):
+    """A garbage decrypt (stale key) triggers one force-refresh attempt."""
+    key = bytes(range(16))
+    plain = b"\x47" + b"data" * 20
+    raw = _xs_encrypted(plain, key, 3)
+
+    monkeypatch.setattr(proxy, "fetch_segment", lambda *a, **k: (raw, 200, {}))
+    keys = []
+
+    def fake_key(*args, force=False, **kw):
+        keys.append(force)
+        return b"\xff" * 16 if len(keys) == 1 else key
+
+    monkeypatch.setattr(proxy, "_xs_key", fake_key)
+    resp = xs_client.get("/xs/segment.ts?data=abc&u=x&q=720&i=3")
+    assert resp.status_code == 200
+    assert resp.data == plain
+    assert keys == [False, True]
+
+
+def test_xs_audio_segment_passthrough(xs_client, monkeypatch):
+    audio = b"\x47" + b"aac ts" * 20
+    seen = {}
+
+    def fake_fetch(url, headers, environ=None, client_range=None, max_retries=2):
+        seen["url"] = url
+        return audio, 200, {}
+
+    monkeypatch.setattr(proxy, "fetch_segment", fake_fetch)
+    resp = xs_client.get("/xs/segment.ts?data=abc&u=x&a=und&i=2")
+    assert resp.status_code == 200
+    assert resp.data == audio
+    assert seen["url"] == "https://h1.tld/cdn/down/abc/hls_audio/und/seg_002.aac"
+
+
+def test_xs_segment_bad_index_and_missing_params(xs_client):
+    assert xs_client.get("/xs/segment.ts?data=abc&u=x&q=720&i=zz").status_code == 400
+    assert xs_client.get("/xs/segment.ts?data=abc&q=720&i=1").status_code == 400  # no u
+    assert xs_client.get("/xs/segment.ts?data=abc&u=x&i=1").status_code == 400  # no q
+
+def test_xs_master_requires_params():
+    client = proxy.app.test_client()
+    assert client.get("/xs/master").status_code == 400
+

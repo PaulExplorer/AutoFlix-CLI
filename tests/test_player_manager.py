@@ -38,6 +38,34 @@ def test_refresh_resolved_source_dead_returns_none(monkeypatch):
     assert pm._refresh_resolved_source(_make_source("https://cdn/old.m3u8")) is None
 
 
+def test_build_proxy_url_passes_through_local_xs_urls(monkeypatch):
+    """xtremestream already serves /xs/master itself: no second wrapping."""
+    monkeypatch.setattr(proxy, "PROXY_PORT", 48913)
+    monkeypatch.setattr(proxy, "PROXY_URL", "http://127.0.0.1:48913")
+    local = (
+        "http://127.0.0.1:48913/xs/master"
+        "?data=abc&u=https%3A%2F%2Flecteur1.xtremestream.xyz%2Fplayer%2Findex.php"
+    )
+    assert pm._build_proxy_url(local, {}, {}, False) == local
+    # A foreign URL keeps the regular /stream wrapping.
+    wrapped = pm._build_proxy_url("https://cdn.tld/a.m3u8", {}, {}, False)
+    assert wrapped == (
+        "http://127.0.0.1:48913/stream"
+        f"?url={urllib.parse.quote('https://cdn.tld/a.m3u8')}"
+        f"&headers={urllib.parse.quote(json.dumps({}))}"
+    )
+
+
+def test_build_proxy_url_no_proxy_running():
+    """No proxy up: no local URL can be built (the local xs URL included)."""
+    prior = proxy.PROXY_PORT
+    proxy.PROXY_PORT = 0
+    try:
+        assert pm._build_proxy_url("http://127.0.0.1:0/xs/master?data=a&u=b", {}, {}, False) is None
+    finally:
+        proxy.PROXY_PORT = prior
+
+
 def test_refresh_resolved_source_exception_returns_none(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("dns")

@@ -42,6 +42,25 @@ def test_player_reexports_extractors():
     }
 
 
+def test_xtremestream_emits_local_ftk_pipeline_url(monkeypatch):
+    from autoflix_cli import proxy
+    from autoflix_cli.scraping.extractors import xtremestream
+
+    monkeypatch.setattr(proxy, "PROXY_PORT", 48913)
+    monkeypatch.setattr(proxy, "PROXY_URL", "http://127.0.0.1:48913")
+    source = "https://lecteur1.xtremestream.xyz/player/index.php?data=abc123"
+    result = xtremestream.get_hls_link_xtremestream(source, {})
+    assert result is not None
+    assert result.startswith("http://127.0.0.1:48913/xs/master?data=abc123")
+    assert "u=" in result
+    # The proxy already serves the full pipeline (extractor + pass-through in
+    # player_manager), so no second /stream wrapping is needed.
+    assert "/stream?url=" not in result
+    # Nothing extractable -> None, and never a proxy start.
+    monkeypatch.setattr(proxy, "start_proxy_server", lambda port=0: (_ for _ in ()).throw(AssertionError("must not start")))
+    assert xtremestream.get_hls_link_xtremestream("https://lecteur1.xtremestream.xyz/player/x.html", {}) is None
+
+
 def test_xupload_decode_with_width_constant(monkeypatch):
     stream = "https://u14.vidzy.cc/hls2/02/00046/abc123_o/master.m3u8?t=tok"
     blob = _xupload_blob(stream, "vidzy.cc", 126)

@@ -233,6 +233,17 @@ def test_probe_referer_without_config_uses_embed_host():
     assert sp._probe_referer("https://cdn.tld/a.m3u8", {}) == "https://cdn.tld/"
 
 
+def test_probe_referer_loopback_streams_keep_caller_headers():
+    # The proxy serves the xtremestream ftk pipeline itself (/xs/master):
+    # probing it needs no Referer override.
+    assert (
+        sp._probe_referer(
+            "http://127.0.0.1:48913/xs/master?data=abc", {"referrer": "path"}
+        )
+        == ""
+    )
+
+
 def test_probe_referer_explicit_string_is_used_verbatim():
     assert (
         sp._probe_referer("https://vidzy.cc/x.m3u8", {"referrer": "https://vidzy.org/"})
