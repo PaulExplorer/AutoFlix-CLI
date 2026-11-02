@@ -204,6 +204,25 @@ def _looks_blocked(response: ProbeResponse) -> bool:
     return head.startswith((b"<html", b"<!doctype", b"<script", b"<head", b"<body"))
 
 
+def _probe_referer(stream_url: str, player_config: dict = None) -> str:
+    """The Referer the proxy would send for this stream ("" = keep as-is).
+
+    The proxy derives the Referer from the player config and the embed host,
+    not from the source site. Some embeds reject the site's own Referer
+    (xtremestream answers 403 to anything but its own domain), so probing
+    with the site's headers mis-scores those sources as dead.
+    """
+    setting = (player_config or {}).get("referrer")
+    if setting == "full":
+        # "full" needs the embed page URL, which the probe does not carry.
+        return ""
+    host = urllib.parse.urlparse(stream_url).hostname
+    if not host or not isinstance(setting, (str, type(None))):
+        return ""
+    referer = f"https://{host}/" if setting in (None, "path") else setting
+    return referer if referer.endswith("/") else f"{referer}/"
+
+
 def probe_stream(
     stream_url: str,
     headers: dict,
@@ -219,11 +238,15 @@ def probe_stream(
     """
     fetch = fetch or _default_fetch
     kind = guess_kind(stream_url, player_config)
+    request_headers = dict(headers or {})
+    probe_referer = _probe_referer(stream_url, player_config)
+    if probe_referer:
+        request_headers["Referer"] = probe_referer
     result = {"ok": False, "kind": KIND_DEAD, "heights": [], "bandwidths": [], "size": 0}
 
     try:
         response = fetch(
-            stream_url, headers, range_bytes=(kind == KIND_MP4), timeout=timeout
+            stream_url, request_headers, range_bytes=(kind == KIND_MP4), timeout=timeout
         )
     except Exception as e:
         result["error"] = f"{type(e).__name__}: {e}"

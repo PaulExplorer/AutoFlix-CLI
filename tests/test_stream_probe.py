@@ -215,6 +215,72 @@ def test_probe_forwards_timeout_to_the_fetcher():
     assert seen["timeout"] == 3.5
 
 
+# --- referer ----------------------------------------------------------------
+
+
+def test_probe_referer_path_setting_uses_embed_host():
+    assert (
+        sp._probe_referer(
+            "https://lecteur1.xtremestream.xyz/player/xs1.php", {"referrer": "path"}
+        )
+        == "https://lecteur1.xtremestream.xyz/"
+    )
+
+
+def test_probe_referer_without_config_uses_embed_host():
+    # Same rule the proxy applies to unconfigured players, so a host judged
+    # here is judged with the Referer it would face during playback.
+    assert sp._probe_referer("https://cdn.tld/a.m3u8", {}) == "https://cdn.tld/"
+
+
+def test_probe_referer_explicit_string_is_used_verbatim():
+    assert (
+        sp._probe_referer("https://vidzy.cc/x.m3u8", {"referrer": "https://vidzy.org/"})
+        == "https://vidzy.org/"
+    )
+
+
+def test_probe_referer_full_and_blank_host_keep_caller_headers():
+    # "full" needs the embed page URL, which probing does not carry.
+    assert sp._probe_referer("https://cdn.tld/a.m3u8", {"referrer": "full"}) == ""
+    assert sp._probe_referer("not-a-url", {}) == ""
+
+
+def test_probe_sends_embed_referer_to_the_fetcher():
+    seen = {}
+
+    def _fetch(url, headers, range_bytes=False, timeout=None):
+        seen.update(headers)
+        return sp.ProbeResponse(200, {}, MASTER.encode())
+
+    result = sp.probe_stream(
+        "https://lecteur1.xtremestream.xyz/player/xs1.php?data=abc",
+        {"Referer": "https://coflix.domains/"},
+        {"type": "xtremestream", "referrer": "path"},
+        fetch=_fetch,
+    )
+    assert result["ok"] is True
+    # A foreign (site) Referer gets xs1.php to answer 403.
+    assert seen["Referer"] == "https://lecteur1.xtremestream.xyz/"
+
+
+def test_probe_overrides_nothing_when_no_referer_to_send():
+    seen = {}
+
+    def _fetch(url, headers, range_bytes=False, timeout=None):
+        seen.update(headers)
+        return sp.ProbeResponse(200, {}, MASTER.encode())
+
+    sp.probe_stream(
+        "https://cdn.tld/master.m3u8",
+        {"Referer": "https://site.tld/", "X-Custom": "1"},
+        {"referrer": "full"},
+        fetch=_fetch,
+    )
+    assert seen["Referer"] == "https://site.tld/"
+    assert seen["X-Custom"] == "1"
+
+
 # --- ranking ----------------------------------------------------------------
 
 
