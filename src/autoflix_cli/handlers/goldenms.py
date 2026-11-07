@@ -49,9 +49,10 @@ def _is_valid(r):
     type_ = r.get("type", "").upper()
     return (
         type_ == "M3U8"
-        or type_ == "VIDEO"
-        or type_ == "MP4"
+        or type_ == "MPD"
+        or type_ in ("VIDEO", "MP4")
         or ".m3u8" in url
+        or ".mpd" in url.lower()
         or "master" in url.lower()
         or player_scraper.is_supported(url)
     )
@@ -291,9 +292,9 @@ def _flow_goldenms_stream(
 
         is_direct = (
             ".m3u8" in final_url.lower()
+            or ".mpd" in final_url.lower()
             or ".mp4" in final_url.lower()
-            or type_ == "MP4"
-            or type_ == "M3U8"
+            or type_ in ("MPD", "MP4", "M3U8")
         )
 
         # Player Support
@@ -324,12 +325,9 @@ def _flow_goldenms_stream(
             "User-Agent",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         )
-
-        # VidLink's stream CDN (bcdn.hakunaymatata.com) serves media only with
-        # its player Referer/Origin; the extractor always ships them, this is
-        # just a safety net for older cached entries.
-        headers.setdefault("Referer", "https://filmboom.top/")
-        headers.setdefault("Origin", "https://filmboom.top")
+        # The extractor ships VidLink's Referer/Origin and, for DASH
+        # manifests, the CloudFront signed cookie (playlistHeaders): keep
+        # them, they authorize every manifest/segment fetch.
 
         success = play_video(
             final_url,

@@ -442,7 +442,11 @@ def _build_proxy_url(
         return stream_url
 
     endpoint = "stream"
-    if player_config.get("ext") == "mp4" or is_mp4:
+    if stream_url.lower().split("?")[0].endswith(".mpd"):
+        # DASH manifests get their own route: /stream rewrites HLS only and
+        # /video would force a single-file download path.
+        endpoint = "mpd"
+    elif player_config.get("ext") == "mp4" or is_mp4:
         endpoint = "video"
 
     encoded_url = urllib.parse.quote(stream_url)
