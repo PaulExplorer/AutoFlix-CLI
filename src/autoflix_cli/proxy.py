@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import threading
 import socket
@@ -683,6 +684,12 @@ def _serve_segment(default_content_type):
     except ValueError:
         headers = {}
 
+    return _serve_segment_body(target_url, headers, default_content_type)
+
+
+def _serve_segment_body(target_url, headers, default_content_type):
+    """Fetch and serve one upstream segment body (shared by /ts and /mpx)."""
+
     # mpv issues Range requests for byterange-based HLS (EXT-X-BYTERANGE, some
     # fMP4 init segments). Forward them so the exact slice is fetched and
     # served, instead of returning the whole file (misaligned => corruption).
@@ -726,6 +733,99 @@ def _serve_segment(default_content_type):
     response_headers.update(extra_headers)
 
     return Response(data, status=status, headers=response_headers)
+
+
+# ---------------------------------------------------------------------------
+# Route: /mpd + /mpx (DASH manifests and segments)
+# ---------------------------------------------------------------------------
+# VidLink's DASH lane (x-playback-environment: webkit) hands out a manifest
+# on sacdn.hakunaymatata.com authorised by CloudFront signed cookies (a
+# Cookie header, not URL signature). The manifest and every segment need it,
+# so /mpd rewrites the manifest to a local BaseURL and /mpx re-attaches the
+# full header set (taken from the BaseURL path) on each upstream request.
+def _mpd_token(headers):
+    """Opaque path-safe encoding of the header set carried by /mpx URLs."""
+    return base64.urlsafe_b64encode(
+        json.dumps(headers, separators=(",", ":")).encode()
+    ).decode().rstrip("=")
+
+
+def _mpd_untoken(token):
+    """Inverse of _mpd_token; raises ValueError on malformed input."""
+    payload = token + "=" * (-len(token) % 4)
+    data = json.loads(base64.urlsafe_b64decode(payload.encode()).decode("utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("header set must be an object")
+    return data
+
+
+def _rewrite_mpd(content, upstream_url, headers):
+    """Point every manifest-relative segment URL at this proxy.
+
+    DASH segment templates are relative; by inserting a BaseURL at each
+    Period the player resolves them under /mpx/<token>/<scheme>/<host>/<dir>/,
+    which re-attaches the signed Cookie upstream. Absolute URLs inside the
+    manifest would bypass the proxy, so an existing BaseURL is replaced.
+    """
+    parts = urllib.parse.urlsplit(upstream_url)
+    mpd_dir = (parts.path.rsplit("/", 1)[0] or "")
+    if not mpd_dir.endswith("/"):
+        mpd_dir += "/"
+    base = (
+        f"http://{PROXY_HOST}:{PROXY_PORT}/mpx/{_mpd_token(headers)}"
+        f"/{parts.scheme}/{parts.netloc}{mpd_dir}"
+    )
+
+    content = re.sub(
+        r"<BaseURL\b[^>]*>.*?</BaseURL>", "", content, flags=re.DOTALL
+    )
+    tag = f"<BaseURL>{base}</BaseURL>"
+    if "<Period" in content:
+        content = re.sub(r"(<Period\b[^>]*>)", r"\g<1>" + tag, content)
+    else:
+        content = re.sub(r"(<MPD\b[^>]*>)", r"\g<1>" + tag, content)
+    return content
+
+
+@app.route("/mpd")
+def proxy_mpd():
+    target_url = request.args.get("url")
+    headers_str = request.args.get("headers", "{}")
+
+    if not target_url:
+        return "Missing URL parameter", 400
+
+    try:
+        headers = json.loads(headers_str)
+    except ValueError:
+        headers = {}
+
+    resp = fetch_with_retry(target_url, headers)
+    if not resp or resp.status_code not in (200, 206):
+        return "Error fetching upstream mpd", 502
+
+    content = resp.text
+    if "<MPD" in content:
+        content = _rewrite_mpd(content, target_url, headers)
+
+    return Response(
+        content,
+        mimetype="application/dash+xml",
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
+
+
+@app.route("/mpx/<token>/<scheme>/<path:p>")
+def proxy_mpx(token, scheme, p):
+    """Segment/init passthrough for DASH (headers ride in the BaseURL)."""
+    if scheme not in ("http", "https"):
+        return "Bad scheme", 400
+    try:
+        headers = _mpd_untoken(token)
+    except Exception:
+        return "Bad header token", 400
+
+    return _serve_segment_body(f"{scheme}://{p}", headers, "video/mp4")
 
 
 # ---------------------------------------------------------------------------
@@ -1142,7 +1242,7 @@ def proxy_video():
 # ---------------------------------------------------------------------------
 @app.route("/player")
 def proxy_player_ui():
-    html_content = """<!DOCTYPE html>
+    html_content = r"""<!DOCTYPE html>
 <html>
 <head>
     <title>AutoFlix Web Player</title>
@@ -1159,6 +1259,7 @@ def proxy_player_ui():
         .message button { margin-top: 20px; padding: 10px 20px; font-size: 18px; cursor: pointer; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dashjs@latest/dist/dash.all.min.js"></script>
     <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
 </head>
 <body>
@@ -1183,6 +1284,7 @@ def proxy_player_ui():
             const subPath = urlParams.get('sub_path');
             
             const isMp4 = source && source.indexOf('/video') !== -1;
+            const isMpd = source && (source.indexOf('/mpd?') !== -1 || /\.mpd([?#]|$)/.test(source));
             const closeBtn = document.getElementById('closeBtn');
 
             // Setup subtitle track if provided
@@ -1207,7 +1309,19 @@ def proxy_player_ui():
             let player;
 
             if (source) {
-                if (isMp4 || !Hls.isSupported()) {
+                if (isMpd) {
+                    // DASH (GoldenMS/VidLink): dash.js builds on the MSE
+                    // machinery itself, so the native video element's
+                    // controls + heartbeat below apply as-is.
+                    const dash = dashjs.MediaPlayer().create();
+                    dash.updateSettings({
+                        streaming: {
+                            abr: { autoSwitchBitrate: { video: true } },
+                        },
+                    });
+                    dash.initialize(video, source, true);
+                    player = null;
+                } else if (isMp4 || !Hls.isSupported()) {
                     // Native playback for MP4 or native HLS (Safari)
                     video.src = source;
                     player = new Plyr(video, defaultOptions);
