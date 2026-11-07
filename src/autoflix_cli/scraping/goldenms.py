@@ -16,8 +16,22 @@ VIDLINK_KEY_HEX = "c75136c5668bbfe65a7ecad431a745db68b5f381555b38d8f6c699449cf11
 VIDLINK_KEY = bytes.fromhex(VIDLINK_KEY_HEX)
 VIDLINK_NONCE = bytes(24)
 
-# VidLink's stream CDN only serves media to requests presenting these values.
-CANON_HEADERS = {"Referer": "https://filmboom.top/", "Origin": "https://filmboom.top"}
+# Fallback headers for VidLink's own CDN hosts (sacdn/cacdn). The old
+# filmboom.top referer is dead: per-quality "headers" in the API answer are
+# empty and every direct MP4 is flagged requiresProxy anyway.
+CANON_HEADERS = {"Referer": "https://vidlink.pro/", "Origin": "https://vidlink.pro"}
+
+# Playback environment VidLink maps to its DASH + signed-cookie delivery.
+# Without it the API answers with direct MP4s on bcdn.hakunaymatata.com
+# flagged requiresProxy, which answer 429/403 to every non-browser client.
+# "webkit" returns a DASH manifest on sacdn.hakunaymatata.com whose
+# CloudFront cookies arrive in stream.playlistHeaders.
+PLAYBACK_ENVIRONMENT = "webkit"
+
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
+)
 
 QUALITY_ORDER = ["1080", "720", "480", "360"]
 
@@ -75,8 +89,9 @@ def _encrypt_token_fallback(media_id, decrypt_api):
 class MediaExtractor:
     """Movie and Series extractor backed by VidLink (auto-hosted API).
 
-    Returns direct MP4/HLS links with available subtitle tracks. The stream
-    CDN requires VidLink's player referer/origin (filmboom.top).
+    Returns a DASH manifest (with signed CloudFront cookies) plus subtitle
+    tracks. The manifest host requires the cookies VidLink hands out in
+    stream.playlistHeaders.
     """
 
     def __init__(self):
@@ -86,7 +101,7 @@ class MediaExtractor:
         self.decrypt_api = decrypt_api.rstrip("/")
 
     def _cdn_headers(self, quality_headers=None):
-        """Normalize per-quality headers onto VidLink's CDN referer/origin."""
+        """Normalize per-quality headers onto VidLink's referer/origin."""
         rh = oh = None
         if quality_headers:
             rh = quality_headers.get("referer") or quality_headers.get("Referer")
@@ -96,27 +111,8 @@ class MediaExtractor:
             "Origin": oh or CANON_HEADERS["Origin"],
         }
 
-    def _build_entries(self, data, media_id):
-        """Turn a VidLink API payload into AutoFlix stream entries."""
-        stream_info = data.get("stream") or {}
-        stype = (stream_info.get("type") or "").lower()
-
-        candidates = []
-        qualities = stream_info.get("qualities") or {}
-        ordered = QUALITY_ORDER + [
-            q for q in qualities if q not in QUALITY_ORDER
-        ]
-        for q in ordered:
-            entry = qualities.get(q) or {}
-            url = entry.get("url")
-            if url:
-                candidates.append((f"{q}p", url, entry.get("headers")))
-
-        if not candidates:
-            fallback_url = stream_info.get("playlist") or stream_info.get("url")
-            if fallback_url:
-                candidates.append(("Auto", fallback_url, None))
-
+    @staticmethod
+    def _build_subtitles(data):
         subtitles = []
         for t in data.get("captions") or []:
             if not t.get("url"):
@@ -130,6 +126,58 @@ class MediaExtractor:
                     "headers": dict(CANON_HEADERS),
                 }
             )
+        return subtitles
+
+    def _build_entries(self, data, media_id):
+        """Turn a VidLink API payload into AutoFlix stream entries."""
+        stream_info = data.get("stream") or {}
+        stype = (stream_info.get("type") or "").lower()
+
+        # DASH route (x-playback-environment: webkit): a manifest on
+        # sacdn.hakunaymatata.com authorised by CloudFront signed cookies
+        # (playlistHeaders). It is the only delivery that plays outside the
+        # player's own proxy server.
+        playlist = stream_info.get("playlist") or ""
+        playlist_headers = stream_info.get("playlistHeaders") or {}
+        if playlist and (stype == "dash" or ".mpd" in playlist.lower()):
+            headers = {
+                **CANON_HEADERS,
+                "User-Agent": USER_AGENT,
+                **playlist_headers,
+                **(stream_info.get("headers") or {}),
+            }
+            subtitles = self._build_subtitles(stream_info)
+            return [
+                {
+                    "source": "VidLink",
+                    "quality": "Auto",
+                    "url": playlist,
+                    "type": "MPD",
+                    "subtitles": subtitles or None,
+                    "headers": headers,
+                }
+            ]
+
+        candidates = []
+        qualities = stream_info.get("qualities") or {}
+        ordered = QUALITY_ORDER + [
+            q for q in qualities if q not in QUALITY_ORDER
+        ]
+        for q in ordered:
+            entry = qualities.get(q) or {}
+            url = entry.get("url")
+            if not url:
+                continue
+            # VidLink flags direct MP4s requiresProxy: they play only through
+            # its own proxy server and 429/403 to every non-browser client.
+            if entry.get("requiresProxy"):
+                continue
+            candidates.append((f"{q}p", url, entry.get("headers")))
+
+        if not candidates:
+            return []
+
+        subtitles = self._build_subtitles(stream_info)
 
         results = []
         seen = set()
@@ -151,7 +199,7 @@ class MediaExtractor:
         return results
 
     def search_vidlink(self, tmdb_id, season=None, episode=None):
-        """Extraction via VidLink. Direct HLS/MP4 by TMDB ID."""
+        """Extraction via VidLink: DASH manifest + signed cookies by TMDB ID."""
         if not tmdb_id:
             return []
 
@@ -177,6 +225,8 @@ class MediaExtractor:
                     "Accept": "application/json",
                     "Origin": self.vidlink_api,
                     "Referer": f"{self.vidlink_api}/",
+                    "User-Agent": USER_AGENT,
+                    "X-Playback-Environment": PLAYBACK_ENVIRONMENT,
                 },
                 timeout=15,
             )
