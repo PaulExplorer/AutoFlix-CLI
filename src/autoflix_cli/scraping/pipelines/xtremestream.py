@@ -15,10 +15,10 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 from flask import Response, request
 
-# Lazy attribute access on the shared proxy module: safe in both import
-# orders (pipeline first or proxy first).
+# Lazy attribute access on the shared proxy module (_proxy.*): safe in
+# both import orders (pipeline first or proxy first).
 from ... import proxy as _proxy
-
+from ...log import log
 
 # The web player (XSFTK in ftk_engine.js) no longer exposes a playlist URL:
 # index.php boots with a signed token (``vt``) and everything happens through
@@ -320,7 +320,6 @@ def xs_segment():
     if not lang and not re.fullmatch(r"\d+p?", quality):
         return "Missing or invalid quality", 400
 
-    host = cdn_hosts[index % len(cdn_hosts)]
     headers = {"Referer": f"{_xs_origin(player_url)}/"}
 
     # The player abandoned the transfer (seek/cancel): nothing to serve.
