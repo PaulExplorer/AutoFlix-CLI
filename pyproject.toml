@@ -32,8 +32,38 @@ Repository = "https://github.com/PaulExplorer/autoflix-cli.git"
 autoflix = "autoflix_cli.main:main"
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.14"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# Lint convention: what ruff flags on this codebase.
+# "On" are bug classes (the pyflakes F checks find real dead code / missing
+# names, B catches closure and mutable-default traps, E722 catches bare
+# except). Everything else in ruff's default set is opinionated style that
+# the existing codebase deliberately uses (blind excepts, except-pass,
+# implicit Optionals...): those checks are ignored so `ruff check` stays a
+# zero-noise contract — CI/IDE silence equals "no bug-class findings".
+[tool.ruff.lint]
+select = [
+    "F",     # pyflakes: unused names, undefined names, shadowed bindings
+    "B",     # bugbear: late-binding closures, mutable defaults, chained raises
+    "E722",  # bare except
+    "I",     # import sorting
+    "RUF022",# sorted __all__
+    "W",     # whitespace correctness
+]
+ignore = [
+    "F403", "F405",  # from tests/support import * style
+    "B008",          # read-only default args here
+    "BLE001",        # broad `except Exception` is the repo-wide convention
+    "S110",          # try-except-pass on scraper probes is intended
+    "S112",          # try-except-continue on scraper loops is intended
+    "PLW0602",       # `global` reads in the proxy are deliberate
+    "TRY004",        # TypeError preference is not the house style
+    "C901",          # large functions stay for now
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["autoflix_cli"]
