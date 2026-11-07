@@ -4,6 +4,7 @@ import urllib.parse
 import pytest
 
 from autoflix_cli import proxy
+from autoflix_cli.scraping.pipelines import xtremestream as xs
 
 
 def test_is_blocked_page():
@@ -267,8 +268,8 @@ from Crypto.Cipher import AES as _AES
 
 def _xs_encrypted(plain: bytes, key: bytes, index: int) -> bytes:
     """AES-CBC sandbag used by the tests: IV = big-endian index + PKCS7 pad."""
-    pad = proxy.AES.block_size - len(plain) % proxy.AES.block_size
-    cipher = _AES.new(key, proxy.AES.MODE_CBC, iv=index.to_bytes(16, "big"))
+    pad = xs.AES.block_size - len(plain) % xs.AES.block_size
+    cipher = _AES.new(key, xs.AES.MODE_CBC, iv=index.to_bytes(16, "big"))
     return cipher.encrypt(plain + bytes([pad]) * pad)
 
 
@@ -279,9 +280,9 @@ def test_xs_xor_filter_recovers_json():
     plain = json.dumps(manifest).encode()
     payload = bytes(
         b ^ d
-        for b, d in zip(plain, proxy._xs_xor_filter(bytes(len(plain)), data_id, token))
+        for b, d in zip(plain, xs._xs_xor_filter(bytes(len(plain)), data_id, token))
     )
-    assert json.loads(proxy._xs_xor_filter(payload, data_id, token)) == manifest
+    assert json.loads(xs._xs_xor_filter(payload, data_id, token)) == manifest
 
 
 def test_xs_variant_names_sorted_by_resolution():
@@ -292,11 +293,11 @@ def test_xs_variant_names_sorted_by_resolution():
         "audio": [],
         "cdn": ["h1"],
     }
-    assert proxy._xs_variant_names(manifest) == ["1080", "720", "480p"]
+    assert xs._xs_variant_names(manifest) == ["1080", "720", "480p"]
 
 
 def test_xs_playlist_text_shape():
-    text = proxy._xs_playlist_text([10, 4.4], 10, lambda i: f"u{i}")
+    text = xs._xs_playlist_text([10, 4.4], 10, lambda i: f"u{i}")
     lines = text.splitlines()
     assert lines[0] == "#EXTM3U"
     assert "#EXT-X-TARGETDURATION:10" in text
@@ -310,14 +311,14 @@ def test_xs_decrypt_with_index_iv_and_pkcs7():
     key = bytes(range(16))
     plain = b"\x47" + b"TS payload" * 20  # not a multiple of 16
     raw = _xs_encrypted(plain, key, 7)
-    assert proxy._xs_decrypt(raw, 7, key) == plain
+    assert xs._xs_decrypt(raw, 7, key) == plain
 
 
 def test_xs_decrypt_rejects_garbage():
     # Wrong key -> no 0x47 sync byte -> ValueError (and not a crash).
     raw = _xs_encrypted(b"\x42" * 64, b"\x00" * 16, 0)
     with pytest.raises(ValueError):
-        proxy._xs_decrypt(raw, 0, b"\x01" * 16)
+        xs._xs_decrypt(raw, 0, b"\x01" * 16)
 
 
 MANIFEST = {
@@ -337,8 +338,8 @@ PLAYER_URL_Q = urllib.parse.quote(PLAYER_URL, safe="")
 
 @pytest.fixture
 def xs_client(monkeypatch):
-    monkeypatch.setattr(proxy, "_xs_manifest", lambda *a, **k: MANIFEST)
-    monkeypatch.setattr(proxy, "_xs_key", lambda *a, **k: b"\x01" * 16)
+    monkeypatch.setattr(xs, "_xs_manifest", lambda *a, **k: MANIFEST)
+    monkeypatch.setattr(xs, "_xs_key", lambda *a, **k: b"\x01" * 16)
     return proxy.app.test_client()
 
 
@@ -395,7 +396,7 @@ def test_xs_video_segment_decrypted(xs_client, monkeypatch):
         return raw, 200, {}
 
     monkeypatch.setattr(proxy, "fetch_segment", fake_fetch)
-    monkeypatch.setattr(proxy, "_xs_key", lambda *a, **k: key)
+    monkeypatch.setattr(xs, "_xs_key", lambda *a, **k: key)
 
     resp = xs_client.get(f"/xs/segment.ts?data=abc&u={PLAYER_URL_Q}&q=720&i=1")
     assert resp.status_code == 200
@@ -419,7 +420,7 @@ def test_xs_video_segment_retries_fresh_key(xs_client, monkeypatch):
         keys.append(force)
         return b"\xff" * 16 if len(keys) == 1 else key
 
-    monkeypatch.setattr(proxy, "_xs_key", fake_key)
+    monkeypatch.setattr(xs, "_xs_key", fake_key)
     resp = xs_client.get("/xs/segment.ts?data=abc&u=x&q=720&i=3")
     assert resp.status_code == 200
     assert resp.data == plain
