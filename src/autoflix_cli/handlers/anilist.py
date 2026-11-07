@@ -445,8 +445,8 @@ def _continue_watching_entry(user_id: int, entry: dict):
                 logo_url=series.img,
                 headers={"Referer": arkanime_scraper.website_origin},
                 anilist_id=media_id,
-                anilist_callback=lambda: arkanime_handler._update_anilist_progress(
-                    "ArkAnime", series_dummy, season, selected_episode
+                anilist_callback=lambda episode=selected_episode: arkanime_handler._update_anilist_progress(
+                    "ArkAnime", series_dummy, season, episode
                 ),
             )
             if success and ep_idx + 1 < len(episodes):
@@ -514,8 +514,8 @@ def _continue_watching_entry(user_id: int, entry: dict):
                 logo_url=series.img,
                 headers={"Referer": franime_scraper.website_origin + "/"},
                 anilist_id=media_id,
-                anilist_callback=lambda: _update_anilist_progress(
-                    "FRAnime", series, season, selected_episode
+                anilist_callback=lambda episode=selected_episode: _update_anilist_progress(
+                    "FRAnime", series, season, episode
                 ),
             )
             if success and ep_idx + 1 < len(episodes):
@@ -571,8 +571,8 @@ def _continue_watching_entry(user_id: int, entry: dict):
                 logo_url=series.img,
                 headers={"Referer": anime_sama_scraper.website_origin},
                 anilist_id=media_id,
-                anilist_callback=lambda: anime_sama_handler._update_anilist_progress(
-                    "Anime-Sama", series_dummy, season, selected_episode
+                anilist_callback=lambda episode=selected_episode: anime_sama_handler._update_anilist_progress(
+                    "Anime-Sama", series_dummy, season, episode
                 ),
             )
             if success and ep_idx + 1 < len(episodes):

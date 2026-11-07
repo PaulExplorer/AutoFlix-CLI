@@ -27,7 +27,7 @@ def get_hls_link_kakaflix(url: str, headers: dict, config: dict = None) -> str:
 
     try:
         link: str = soup.find("iframe").attrs["src"]
-    except:
+    except Exception:
         return get_hls_link(response.url, headers)
     else:
         return get_hls_link(link, headers)

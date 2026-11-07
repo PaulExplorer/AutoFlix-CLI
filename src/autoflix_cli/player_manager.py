@@ -699,7 +699,7 @@ def _play_via_proxy(
         hint = _player_exit_hint(e.returncode)
         if hint:
             print_error(f"Error running player via proxy: {e} ({hint}).")
-            raise _PlaybackAborted()
+            raise _PlaybackAborted() from e
         print_error(f"Error running player via proxy: {e}")
     except Exception as e:
         print_error(f"Error running player via proxy: {e}")
@@ -749,7 +749,7 @@ def _play_direct(
         hint = _player_exit_hint(e.returncode)
         if hint:
             print_error(f"Error running player: {e} ({hint}).")
-            raise _PlaybackAborted()
+            raise _PlaybackAborted() from e
         print_error(f"Error running player: {e}")
     except Exception as e:
         print_error(f"An unexpected error occurred: {e}")

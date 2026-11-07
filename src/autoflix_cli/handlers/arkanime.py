@@ -117,8 +117,8 @@ def open_result(selection):
             season_url=str(season.id), # Using id for season url
             logo_url=series.img,
             headers=headers,
-            anilist_callback=lambda: _update_anilist_progress(
-                "ArkAnime", series, season, selected_episode
+            anilist_callback=lambda episode=selected_episode: _update_anilist_progress(
+                "ArkAnime", series, season, episode
             ),
         )
 
@@ -275,8 +275,8 @@ def resume_arkanime(data):
             season_url=str(season.id),
             logo_url=data.get("logo_url"),
             headers=headers,
-            anilist_callback=lambda: _update_anilist_progress(
-                "ArkAnime", series_dummy, season, selected_episode
+            anilist_callback=lambda episode=selected_episode: _update_anilist_progress(
+                "ArkAnime", series_dummy, season, episode
             ),
         )
 

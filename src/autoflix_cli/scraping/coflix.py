@@ -78,7 +78,7 @@ def search(query: str) -> list[SearchResult]:
             if result.find("img").attrs["src"]:
                 image: str = "https:" + result.find("img").attrs["src"]
             else: image = None
-        except: image = None
+        except Exception: image = None
 
         title = result.find("p", {"class": "md-manga-card-name"}).text
         url = result.find("a").attrs["href"]
@@ -193,7 +193,7 @@ def get_content_img(soup) -> str:
     try:
         if soup.find("img", {"class": "cf-movie-cover-img"}).attrs["src"]:
             return soup.find("img", {"class": "cf-movie-cover-img"}).attrs["src"]
-    except: pass
+    except Exception: pass
 
     return None
 
@@ -229,7 +229,7 @@ def get_season_name(soup, id):
 
     try:
         return "Saison" + (int(id) + 1)
-    except:
+    except Exception:
         return "Saison Inconnu"
 
 def get_series(url: str) -> CoflixSeries:

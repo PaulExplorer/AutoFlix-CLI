@@ -280,7 +280,9 @@ def test_xs_xor_filter_recovers_json():
     plain = json.dumps(manifest).encode()
     payload = bytes(
         b ^ d
-        for b, d in zip(plain, xs._xs_xor_filter(bytes(len(plain)), data_id, token))
+        for b, d in zip(
+            plain, xs._xs_xor_filter(bytes(len(plain)), data_id, token), strict=False
+        )
     )
     assert json.loads(xs._xs_xor_filter(payload, data_id, token)) == manifest
 

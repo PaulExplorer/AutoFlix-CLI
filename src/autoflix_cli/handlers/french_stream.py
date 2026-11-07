@@ -247,9 +247,6 @@ def resume_french_stream(data):
             selected_episode = episodes[ep_idx]
             if not selected_episode.players:
                 return
-            supported = [
-                p for p in selected_episode.players if player.is_supported(p.url)
-            ]
 
             success = play_episode_flow(
                 provider_name="French-Stream",

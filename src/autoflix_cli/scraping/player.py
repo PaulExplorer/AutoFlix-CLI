@@ -131,7 +131,7 @@ PLAYER_EXTRACTORS = {
 }
 
 
-def get_hls_link(url: str, headers: dict = {}, return_subs: bool = False) -> str | tuple[str | None, str | None] | None:
+def get_hls_link(url: str, headers: dict | None = None, return_subs: bool = False) -> str | tuple[str | None, str | None] | None:
     """
     Extract HLS/video link from a player URL.
     Automatically detects the player type and uses the appropriate parser.
@@ -144,6 +144,8 @@ def get_hls_link(url: str, headers: dict = {}, return_subs: bool = False) -> str
     Returns:
         HLS/video stream URL if successful, None otherwise. If return_subs is True, returns (stream_url, subtitle_url).
     """
+    if headers is None:
+        headers = {}
 
     # Find matching player and parse accordingly
     for player_name, config in players.items():
@@ -206,7 +208,7 @@ def match_player_config(url: str) -> tuple:
     return {}, ""
 
 
-def test_all_scrapers_verbose(url: str, headers: dict = {}) -> dict[str, dict]:
+def test_all_scrapers_verbose(url: str, headers: dict | None = None) -> dict[str, dict]:
     """
     Test all scrapers with timing and error details.
 
@@ -218,6 +220,8 @@ def test_all_scrapers_verbose(url: str, headers: dict = {}) -> dict[str, dict]:
         dict mapping scraper name -> {"ok": bool, "stream_url": str | None,
         "error": str | None, "elapsed": float}
     """
+    if headers is None:
+        headers = {}
     results: dict[str, dict] = {}
     for name, extractor in PLAYER_EXTRACTORS.items():
         started = time.monotonic()
@@ -249,7 +253,7 @@ def test_all_scrapers_verbose(url: str, headers: dict = {}) -> dict[str, dict]:
     return results
 
 
-def test_all_scrapers(url: str, headers: dict = {}) -> dict[str, str]:
+def test_all_scrapers(url: str, headers: dict | None = None) -> dict[str, str]:
     """
     Test all available scrapers on a given URL to find which ones work.
 

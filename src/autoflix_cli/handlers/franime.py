@@ -172,8 +172,8 @@ def open_result(selection):
             season_url=selected_season_access.url,
             logo_url=series.img,
             headers={"Referer": franime.website_origin + "/"},
-            anilist_callback=lambda: _update_anilist_progress(
-                "FRAnime", series, season, selected_episode
+            anilist_callback=lambda episode=selected_episode: _update_anilist_progress(
+                "FRAnime", series, season, episode
             ),
         )
 
@@ -319,8 +319,8 @@ def resume_franime(data):
             season_url=season_url,
             logo_url=data.get("logo_url"),
             headers={"Referer": franime.website_origin + "/"},
-            anilist_callback=lambda: _update_anilist_progress(
-                "FRAnime", series_dummy, season, selected_episode
+            anilist_callback=lambda episode=selected_episode: _update_anilist_progress(
+                "FRAnime", series_dummy, season, episode
             ),
         )
 
