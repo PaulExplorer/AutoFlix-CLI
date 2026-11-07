@@ -1,7 +1,7 @@
 import pytest
 
-from autoflix_cli.scraping.objects import SearchResult
 from autoflix_cli.handlers import global_search as gs
+from autoflix_cli.scraping.objects import SearchResult
 
 
 def _result(title, url="https://example.test/x"):

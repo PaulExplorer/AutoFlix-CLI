@@ -1,21 +1,23 @@
+import re
 import urllib.parse
+
 from curl_cffi import requests
-from ..scraping.goldenms import goldenms_extractor
-from ..scraping.subtitles import subtitle_extractor
+
 from ..cli_utils import (
-    select_from_list,
-    print_header,
-    print_info,
-    print_warning,
-    print_success,
     get_user_input,
     pause,
+    print_header,
+    print_info,
+    print_success,
+    print_warning,
+    select_from_list,
 )
-from ..player_manager import play_video
-from ..tracker import tracker
 from ..languages import get_language_label
+from ..player_manager import play_video
 from ..scraping import player as player_scraper
-import re
+from ..scraping.goldenms import goldenms_extractor
+from ..scraping.subtitles import subtitle_extractor
+from ..tracker import tracker
 
 
 def search_cinemeta(title: str, is_movie: bool):

@@ -1,15 +1,16 @@
 import base64
-import threading
-import socket
 import json
-import time
 import random
-import select
-import urllib.parse
 import re
+import select
+import socket
+import threading
+import time
+import urllib.parse
+
 import m3u8
-from flask import Flask, request, Response, stream_with_context
-from curl_cffi import requests, CurlOpt
+from curl_cffi import CurlOpt, requests
+from flask import Flask, Response, request, stream_with_context
 
 from .log import log
 
@@ -1184,6 +1185,7 @@ def run_flask(port):
     global _server_instance
     # Disable verbose flask/werkzeug logs for performance
     import logging
+
     from werkzeug.serving import make_server
 
     log = logging.getLogger("werkzeug")

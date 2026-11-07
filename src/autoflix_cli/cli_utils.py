@@ -19,22 +19,22 @@ from rich.text import Text
 console = Console(highlight=False)
 
 __all__ = [
-    "console",
-    "clear_screen",
-    "print_banner",
-    "print_header",
-    "print_success",
-    "print_error",
-    "print_info",
-    "print_warning",
-    "print_step",
-    "print_divider",
-    "status",
-    "get_user_input",
-    "confirm",
-    "pause",
-    "select_from_list",
     "clean_title",
+    "clear_screen",
+    "confirm",
+    "console",
+    "get_user_input",
+    "pause",
+    "print_banner",
+    "print_divider",
+    "print_error",
+    "print_header",
+    "print_info",
+    "print_step",
+    "print_success",
+    "print_warning",
+    "select_from_list",
+    "status",
 ]
 
 _HIDE_CURSOR = "\x1b[?25l"

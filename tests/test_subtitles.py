@@ -11,7 +11,11 @@ from autoflix_cli.scraping.subtitles.language_tags import (
     languages_match,
     normalize_language,
 )
-from autoflix_cli.scraping.subtitles.matching import guess_format, is_batch, matches_episode
+from autoflix_cli.scraping.subtitles.matching import (
+    guess_format,
+    is_batch,
+    matches_episode,
+)
 from autoflix_cli.scraping.subtitles.models import Subtitle, SubtitleQuery
 from autoflix_cli.scraping.subtitles.providers import (
     AnimeToshoProvider,

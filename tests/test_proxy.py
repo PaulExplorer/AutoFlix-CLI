@@ -19,8 +19,8 @@ def test_is_blocked_page():
 
 
 def test_is_allowed_subtitle_path(tmp_path):
-    import tempfile
     import os
+    import tempfile
 
     fd, allowed = tempfile.mkstemp(prefix="autoflix_sub_", suffix=".srt")
     os.close(fd)

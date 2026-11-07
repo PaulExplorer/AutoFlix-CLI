@@ -1,18 +1,17 @@
-from bs4 import BeautifulSoup
-from .objects import (
-    SearchResult,
-    FrenchStreamMovie,
-    Player,
-    FrenchStreamSeason,
-    Episode,
-)
-
 import json
 
+from bs4 import BeautifulSoup
 from curl_cffi import requests as cffi_requests
-from ..proxy import DNS_OPTIONS
 
+from ..proxy import DNS_OPTIONS
 from .config import portals
+from .objects import (
+    Episode,
+    FrenchStreamMovie,
+    FrenchStreamSeason,
+    Player,
+    SearchResult,
+)
 
 website_origin = portals["french-stream"]
 if not website_origin.startswith("http"):

@@ -1,20 +1,18 @@
-from ..scraping import arkanime, player
-from ..scraping.objects import ArkMovie, ArkSeries
 from ..cli_utils import (
-    select_from_list,
-    print_success,
+    console,
+    get_user_input,
+    pause,
+    print_error,
     print_header,
     print_info,
-    print_error,
     print_warning,
-    get_user_input,
-    console,
-    pause,
+    select_from_list,
 )
-from ..player_manager import play_video
+from ..scraping import arkanime, player
+from ..scraping.objects import ArkMovie
 from ..tracker import tracker
-from .playback import play_episode_flow
 from .anilist_update import _update_anilist_progress
+from .playback import play_episode_flow
 
 
 def open_result(selection):

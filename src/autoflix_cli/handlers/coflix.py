@@ -1,16 +1,15 @@
-from ..scraping import coflix, player
-from ..scraping.objects import CoflixMovie, CoflixSeries
 from ..cli_utils import (
-    select_from_list,
+    console,
+    get_user_input,
+    pause,
+    print_error,
     print_header,
     print_info,
-    print_error,
     print_warning,
-    get_user_input,
-    console,
-    pause,
+    select_from_list,
 )
-from ..player_manager import play_video
+from ..scraping import coflix, player
+from ..scraping.objects import CoflixMovie, CoflixSeries
 from ..tracker import tracker
 from .playback import play_episode_flow
 

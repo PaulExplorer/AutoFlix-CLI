@@ -1,7 +1,7 @@
 from autoflix_cli.config_loader import (
+    load_config,
     strip_json_comments,
     strip_trailing_commas,
-    load_config,
 )
 
 

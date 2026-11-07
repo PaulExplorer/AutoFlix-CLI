@@ -1,10 +1,8 @@
 """The shared 'add extra subtitles?' prompt and its playback wiring (no network)."""
 
-import pytest
 
 from autoflix_cli.handlers import playback, subtitle_prompt
 from autoflix_cli.scraping.objects import Episode, Player
-
 
 # --- pure helpers -----------------------------------------------------------
 

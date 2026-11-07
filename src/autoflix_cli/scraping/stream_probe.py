@@ -19,8 +19,8 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from . import player
 from ..proxy import DNS_OPTIONS
+from . import player
 
 # Stream kinds. A dead link is a kind too, so a probe result and a probe
 # failure share a single shape all the way up to the menu.

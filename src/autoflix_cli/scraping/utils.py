@@ -1,7 +1,9 @@
-from typing import Optional, Union, List
-import re, json
+import re
+from typing import List, Optional, Union
+
 from bs4 import BeautifulSoup
-from .objects import Player, Episode
+
+from .objects import Episode, Player
 
 
 class NoEpisodesFoundError(Exception):

@@ -1,21 +1,17 @@
-from ..scraping import anime_sama, player
-from ..scraping.utils import NoEpisodesFoundError
 from ..cli_utils import (
-    select_from_list,
+    get_user_input,
+    pause,
+    print_error,
     print_header,
     print_info,
     print_warning,
-    print_success,
-    print_error,
-    get_user_input,
-    console,
-    pause,
+    select_from_list,
 )
-from ..player_manager import play_video
+from ..scraping import anime_sama
+from ..scraping.utils import NoEpisodesFoundError
 from ..tracker import tracker
-from .playback import play_episode_flow
 from .anilist_update import _update_anilist_progress
-
+from .playback import play_episode_flow
 
 # On Anime-Sama, "vostfr" is the original version (VO), everything else
 # (vf, vf1, vf2, vcn, ...) is a translated/dubbed version.

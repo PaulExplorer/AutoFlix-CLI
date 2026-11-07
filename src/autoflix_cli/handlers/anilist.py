@@ -1,30 +1,29 @@
-from ..anilist import anilist_client
-from ..tracker import tracker
 import re
+
+from ..anilist import anilist_client
 from ..cli_utils import (
-    select_from_list,
-    print_info,
-    print_warning,
-    print_error,
-    print_success,
-    get_user_input,
     clean_title,
     clear_screen,
+    get_user_input,
+    print_error,
     print_header,
+    print_info,
+    print_success,
+    print_warning,
+    select_from_list,
 )
-from . import anime_sama as anime_sama_handler
 from ..scraping import anime_sama as anime_sama_scraper
-from . import goldenanime
-from . import arkanime as arkanime_handler
 from ..scraping import arkanime as arkanime_scraper
-from . import franime as franime_handler
 from ..scraping import franime as franime_scraper
-from ..scraping.utils import NoEpisodesFoundError
-from .playback import play_episode_flow
-from .anilist_update import _update_anilist_progress
-from ..player_manager import play_video
-from ..scraping import player
 from ..scraping.objects import ArkMovie
+from ..scraping.utils import NoEpisodesFoundError
+from ..tracker import tracker
+from . import anime_sama as anime_sama_handler
+from . import arkanime as arkanime_handler
+from . import franime as franime_handler
+from . import goldenanime
+from .anilist_update import _update_anilist_progress
+from .playback import play_episode_flow
 
 
 def handle_anilist_continue():
@@ -70,7 +69,7 @@ def _browse_anilist_list(user_id: int, status: str, display_name: str):
     """Browse and interact with an AniList list (CURRENT, PLANNING, COMPLETED, DROPPED)."""
     print_info(f"Fetching your {display_name.lower()} list from AniList...")
     entries = anilist_client.get_user_list(user_id, status)
-    
+
     if not entries:
         print_warning(f"No anime found in {display_name}.")
         from ..cli_utils import pause
@@ -87,7 +86,7 @@ def _browse_anilist_list(user_id: int, status: str, display_name: str):
             progress = e["progress"] or 0
             total = e["media"]["episodes"] or "?"
             score = e.get("score")
-            
+
             # Calculate latest released episode & episodes behind (like before)
             next_airing = e["media"].get("nextAiringEpisode")
             latest_released = None
@@ -107,7 +106,7 @@ def _browse_anilist_list(user_id: int, status: str, display_name: str):
                     status_info += f" - {behind} ep behind"
                 else:
                     status_info += " - Up to date"
-            
+
             if score:
                 status_info += f" - ⭐ {score}/100"
 
@@ -123,7 +122,7 @@ def _browse_anilist_list(user_id: int, status: str, display_name: str):
 
         selected_entry = entries[choice_idx]
         _handle_entry_actions(user_id, selected_entry, status, entries)
-        
+
         # After action, refresh the list
         entries = anilist_client.get_user_list(user_id, status)
 
@@ -135,11 +134,11 @@ def _handle_entry_actions(user_id: int, entry: dict, current_status: str, entrie
     media_id = entry["mediaId"]
     progress = entry["progress"] or 0
     total = media["episodes"] or "?"
-    
+
     while True:
         clear_screen()
         print_header(f"📺 {media_title}")
-        
+
         status_display = {
             "CURRENT": "🟢 Currently Watching",
             "PLANNING": "📅 Planning",
@@ -147,7 +146,7 @@ def _handle_entry_actions(user_id: int, entry: dict, current_status: str, entrie
             "DROPPED": "❌ Dropped",
             "PAUSED": "⏸️ Paused",
         }.get(current_status, current_status)
-        
+
         print_info(f"Status: {status_display}")
         print_info(f"Progress: {progress}/{total}" if isinstance(total, int) else f"Progress: {progress}/{total}")
         if entry.get("score"):
@@ -155,7 +154,7 @@ def _handle_entry_actions(user_id: int, entry: dict, current_status: str, entrie
 
         # Build action menu based on current status
         actions = []
-        
+
         if current_status == "CURRENT":
             actions = [
                 "▶ Continue Watching",
@@ -428,7 +427,7 @@ def _continue_watching_entry(user_id: int, entry: dict):
         start_ep_idx = _auto_select_episode(episodes, next_episode_num)
         if start_ep_idx is None:
             return
-        
+
         class SeriesDummy:
             def __init__(self, t): self.title = t
         series_dummy = SeriesDummy(series.title)
@@ -536,7 +535,7 @@ def _continue_watching_entry(user_id: int, entry: dict):
         selected_season_access = _auto_select_season(series.seasons, media_title, romaji_title)
         if not selected_season_access:
             return
-        
+
         print_info(f"Loading [cyan]{selected_season_access.title}[/cyan]...")
         season = anime_sama_scraper.get_season(selected_season_access.url)
         tracker.set_anilist_mapping("Anime-Sama", series.title, media_id, season.title)
@@ -545,7 +544,7 @@ def _continue_watching_entry(user_id: int, entry: dict):
         if not langs:
             print_warning("No episodes found.")
             return
-            
+
         lang_idx = select_from_list(langs + ["← Back"], "🌍 Select Language:")
         if lang_idx == len(langs):
             return
@@ -586,13 +585,13 @@ def _continue_watching_entry(user_id: int, entry: dict):
 def _search_and_select_series(scraper, media_title, romaji_title):
     scraper.get_website_url()
     cleaned_title = clean_title(media_title)
-    
+
     # Try to extract a clean name for printing without 'autoflix_cli.scraping.'
     scraper_name = scraper.__name__.split('.')[-1]
     if scraper_name == "anime_sama": scraper_name = "Anime-Sama"
     elif scraper_name == "arkanime": scraper_name = "ArkAnime"
     elif scraper_name == "franime": scraper_name = "FRAnime"
-    
+
     print_info(f"Searching for '{media_title}' on {scraper_name}...")
     results = scraper.search(media_title)
 
@@ -712,7 +711,7 @@ def _auto_select_season(series_seasons, media_title, romaji_title):
 
     if target_season_num is not None:
         print_info(f"AniList suggests [bold]Season {target_season_num}[/bold].")
-    
+
     return series_seasons[season_idx]
 
 

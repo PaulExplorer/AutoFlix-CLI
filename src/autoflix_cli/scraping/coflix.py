@@ -1,20 +1,21 @@
-from curl_cffi import requests as cffi_requests
-from bs4 import BeautifulSoup
-from .objects import (
-    SearchResult,
-    CoflixSeason,
-    CoflixSeries,
-    EpisodeAccess,
-    Episode,
-    Player,
-    CoflixMovie,
-)
-from .utils import parse_episodes_from_js
-from .botblocker import is_check_page, solve
 import base64
 import json
 import re
+
+from bs4 import BeautifulSoup
+from curl_cffi import requests as cffi_requests
+
 from ..proxy import DNS_OPTIONS
+from .botblocker import is_check_page, solve
+from .objects import (
+    CoflixMovie,
+    CoflixSeason,
+    CoflixSeries,
+    Episode,
+    EpisodeAccess,
+    Player,
+    SearchResult,
+)
 
 website_origin = ""
 scraper = cffi_requests.Session(impersonate="chrome", curl_options=DNS_OPTIONS, allow_redirects=True)
@@ -171,7 +172,7 @@ def get_episode(url: str) -> Episode:
     soup = BeautifulSoup(content, "html5lib")
 
     title: str = soup.find("h1").text
-    
+
     players = _parse_cfservers(content)
     if len(players) > 0 and "lecteurvideo.com" in players[0].url:
         players = get_players(players[0].url)
@@ -220,7 +221,7 @@ def get_season_name(soup, id):
         if season.attrs["data-season"] == id:
             title = season.get_text(strip=True)
             span_text = season.find('span', class_='cf-server-tab-lang').get_text(strip=True)
-            
+
             title = title.replace(span_text, "")
             result = f"{title} ({span_text})"
 
@@ -228,7 +229,7 @@ def get_season_name(soup, id):
 
     try:
         return "Saison" + (int(id) + 1)
-    except: 
+    except:
         return "Saison Inconnu"
 
 def get_series(url: str) -> CoflixSeries:

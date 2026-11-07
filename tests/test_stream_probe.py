@@ -6,7 +6,6 @@ import pytest
 from autoflix_cli.scraping import stream_probe as sp
 from autoflix_cli.scraping.objects import Player
 
-
 MASTER = """#EXTM3U
 #EXT-X-STREAM-INF:BANDWIDTH=4000000,RESOLUTION=1920x1080,CODECS="avc1.640028"
 1080/index.m3u8

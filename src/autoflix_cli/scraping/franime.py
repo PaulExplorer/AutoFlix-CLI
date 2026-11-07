@@ -23,10 +23,10 @@ from dataclasses import dataclass, field
 
 from curl_cffi import requests as cffi_requests
 
-from .objects import Player, SamaSeason, SamaSeries, SearchResult, SeasonAccess
-from .utils import NoEpisodesFoundError
 from ..cli_utils import print_error, print_warning
 from ..proxy import DNS_OPTIONS
+from .objects import Player, SamaSeason, SamaSeries, SearchResult, SeasonAccess
+from .utils import NoEpisodesFoundError
 
 API_URL = "https://api.franime.fr/api/"
 website_origin = "https://franime.fr"

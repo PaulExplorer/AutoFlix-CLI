@@ -1,22 +1,21 @@
-from ..cli_utils import (
-    select_from_list,
-    print_info,
-    print_warning,
-    print_error,
-    print_success,
-    print_divider,
-    console,
-)
-from ..player_manager import play_video
-from ..tracker import tracker
-from ..scraping import player
-from ..scraping import stream_probe
-from ..scraping.player import PLAYER_EXTRACTORS, test_all_scrapers_verbose
-from ..scraping.objects import Player
-from .subtitle_prompt import parse_number, parse_season, prompt_extra_subtitles
-from rich.progress import Progress, SpinnerColumn, TextColumn
 import json
 
+from rich.progress import Progress, SpinnerColumn, TextColumn
+
+from ..cli_utils import (
+    console,
+    print_divider,
+    print_info,
+    print_success,
+    print_warning,
+    select_from_list,
+)
+from ..player_manager import play_video
+from ..scraping import player, stream_probe
+from ..scraping.objects import Player
+from ..scraping.player import test_all_scrapers_verbose
+from ..tracker import tracker
+from .subtitle_prompt import parse_number, parse_season, prompt_extra_subtitles
 
 AUTO_OPTION = "⚡ Auto - test all sources"
 

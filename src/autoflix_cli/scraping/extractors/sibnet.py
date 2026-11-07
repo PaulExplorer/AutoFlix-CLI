@@ -1,5 +1,6 @@
 from .common import get_scraper
 
+
 def get_hls_link_sibnet(url: str, headers: dict = None, config: dict = None) -> str:
     """
     Extract video link from sibnet.

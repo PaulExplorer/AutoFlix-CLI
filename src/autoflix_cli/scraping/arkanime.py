@@ -1,6 +1,7 @@
-from .objects import ArkSeries, Player, ArkSeason, ArkMovie, SearchResult, SamaSeries, Episode
 from curl_cffi import requests as cffi_requests
+
 from ..proxy import DNS_OPTIONS
+from .objects import ArkMovie, ArkSeason, ArkSeries, Episode, Player, SearchResult
 
 website_origin = ""
 
@@ -48,7 +49,7 @@ def get_content(url: str):
         for season in content["seasons"]:
             id = season["id"]
             season_title = season["title"]
-            
+
             episodes: list[Episode] = []
             if season["episodes"]:
                 for episode in season["episodes"]:
@@ -75,7 +76,7 @@ def get_content(url: str):
             seasons.append(ArkSeason(id, season_title, episodes))
 
         return ArkSeries(id=url, title=title, img=img, genres=genres, seasons=seasons)
-    
+
     elif content["movie"]:
         players = [
             Player("montmyoboky (default)", "montmyoboky_movie:" + str(content["movie"]["id"]))

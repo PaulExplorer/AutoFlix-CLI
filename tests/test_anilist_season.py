@@ -1,7 +1,5 @@
 """Tests for Roman numeral season detection in the AniList handler."""
-import pytest
-from autoflix_cli.handlers.anilist import _parse_roman, _ROMAN_TO_INT, _TRAILING_ROMAN
-
+from autoflix_cli.handlers.anilist import _parse_roman
 
 # ---------------------------------------------------------------------------
 # _parse_roman

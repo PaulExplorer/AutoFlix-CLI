@@ -2,6 +2,7 @@ import re
 
 from .common import get_scraper
 
+
 def get_hls_link_veev(url, headers: dict = None, config: dict = None):
     """
     Extract HLS link from Veev players.

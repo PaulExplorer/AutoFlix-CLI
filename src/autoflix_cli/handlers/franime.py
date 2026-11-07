@@ -1,21 +1,18 @@
-from ..scraping import franime
-from ..scraping.utils import NoEpisodesFoundError
 from ..cli_utils import (
-    select_from_list,
+    get_user_input,
+    pause,
+    print_error,
     print_header,
     print_info,
-    print_warning,
     print_success,
-    print_error,
-    get_user_input,
-    console,
-    pause,
+    print_warning,
+    select_from_list,
 )
-from ..player_manager import play_video
+from ..scraping import franime
+from ..scraping.utils import NoEpisodesFoundError
 from ..tracker import tracker
-from .playback import play_episode_flow
 from .anilist_update import _update_anilist_progress
-
+from .playback import play_episode_flow
 
 # On FRAnime the catalogue exposes exactly two languages: "vo" (original
 # with subtitles) and "vf" (French dub). The season episodes dict keys them

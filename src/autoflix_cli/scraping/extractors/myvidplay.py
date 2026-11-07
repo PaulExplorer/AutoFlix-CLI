@@ -1,5 +1,6 @@
 from .common import get_scraper
 
+
 def get_hls_link_myvidplay(url: str, headers: dict, config: dict = None) -> str:
     """
     Extract HLS link from myvidplay players.

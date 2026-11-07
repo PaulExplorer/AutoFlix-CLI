@@ -1,8 +1,8 @@
 from autoflix_cli.cli_utils import (
+    _is_disabled,
+    _truncate,
     clean_title,
     print_error,
-    _truncate,
-    _is_disabled,
 )
 
 
