@@ -822,7 +822,11 @@ def proxy_mpx(token, scheme, p):
     except Exception:
         return "Bad header token", 400
 
-    return _serve_segment_body(f"{scheme}://{p}", headers, "video/mp4")
+    url = f"{scheme}://{p}"
+    content_type = SEGMENT_CONTENT_TYPES.get(
+        _segment_extension(url), "video/mp4"
+    )
+    return _serve_segment_body(url, headers, content_type)
 
 
 # ---------------------------------------------------------------------------
