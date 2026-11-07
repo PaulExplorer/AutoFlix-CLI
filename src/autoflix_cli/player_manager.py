@@ -1,27 +1,27 @@
-import shutil
-import platform
-import os
-import shlex
-import subprocess
 import json
-import urllib.parse
+import os
+import platform
+import shlex
+import shutil
+import subprocess
 import time
+import urllib.parse
 import webbrowser
+from typing import Dict
+
 from rich.progress import Progress, SpinnerColumn, TextColumn
+
+from . import proxy
 from .cli_utils import (
-    select_from_list,
-    print_info,
+    console,
     print_error,
+    print_info,
     print_success,
     print_warning,
-    console,
+    select_from_list,
 )
-from .scraping import player
-from .scraping import stream_probe
-from . import proxy
-from typing import Dict, Any
+from .scraping import player, stream_probe
 from .tracker import tracker
-
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0"
@@ -84,9 +84,10 @@ def _download_subtitles(subtitle_items) -> list:
     Returns:
         List of local temp file paths.
     """
-    from curl_cffi import requests
-    import tempfile
     import lzma
+    import tempfile
+
+    from curl_cffi import requests
 
     paths = []
     for item in subtitle_items:
@@ -698,7 +699,7 @@ def _play_via_proxy(
         hint = _player_exit_hint(e.returncode)
         if hint:
             print_error(f"Error running player via proxy: {e} ({hint}).")
-            raise _PlaybackAborted()
+            raise _PlaybackAborted() from e
         print_error(f"Error running player via proxy: {e}")
     except Exception as e:
         print_error(f"Error running player via proxy: {e}")
@@ -748,7 +749,7 @@ def _play_direct(
         hint = _player_exit_hint(e.returncode)
         if hint:
             print_error(f"Error running player: {e} ({hint}).")
-            raise _PlaybackAborted()
+            raise _PlaybackAborted() from e
         print_error(f"Error running player: {e}")
     except Exception as e:
         print_error(f"An unexpected error occurred: {e}")

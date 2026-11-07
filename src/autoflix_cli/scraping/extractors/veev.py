@@ -2,6 +2,7 @@ import re
 
 from .common import get_scraper
 
+
 def get_hls_link_veev(url, headers: dict = None, config: dict = None):
     """
     Extract HLS link from Veev players.
@@ -92,7 +93,7 @@ def get_hls_link_veev(url, headers: dict = None, config: dict = None):
         dl_url = f"https://veev.to/dl?op=player_api&cmd=gi&file_code={media_id}&r=https://veev.to&ch={ch}&ie=1"
         try:
             resp = get_scraper().get(dl_url, impersonate="chrome").json()
-        except:
+        except Exception:
             continue
 
         file_obj = resp.get("file")

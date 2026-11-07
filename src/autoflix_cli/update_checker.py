@@ -1,7 +1,8 @@
-import urllib.request
+import importlib.metadata
 import json
 import re
-import importlib.metadata
+import urllib.request
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text

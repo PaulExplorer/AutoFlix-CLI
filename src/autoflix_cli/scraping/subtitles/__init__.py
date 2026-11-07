@@ -19,12 +19,12 @@ from .providers import (
 )
 
 __all__ = [
-    "SubtitleExtractor",
-    "subtitle_extractor",
-    "default_providers",
-    "Subtitle",
-    "SubtitleQuery",
-    "SubtitleProvider",
-    "StremioSubtitleProvider",
     "AnimeToshoProvider",
+    "StremioSubtitleProvider",
+    "Subtitle",
+    "SubtitleExtractor",
+    "SubtitleProvider",
+    "SubtitleQuery",
+    "default_providers",
+    "subtitle_extractor",
 ]

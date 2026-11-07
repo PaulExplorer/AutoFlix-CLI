@@ -1,14 +1,14 @@
 import re
 
+from ..anilist import anilist_client
 from ..cli_utils import (
-    select_from_list,
-    print_info,
-    print_warning,
-    print_success,
     print_error,
+    print_info,
+    print_success,
+    print_warning,
+    select_from_list,
 )
 from ..tracker import tracker
-from ..anilist import anilist_client
 
 
 def _update_anilist_progress(provider_name, series, season, selected_episode):

@@ -19,22 +19,22 @@ from rich.text import Text
 console = Console(highlight=False)
 
 __all__ = [
-    "console",
-    "clear_screen",
-    "print_banner",
-    "print_header",
-    "print_success",
-    "print_error",
-    "print_info",
-    "print_warning",
-    "print_step",
-    "print_divider",
-    "status",
-    "get_user_input",
-    "confirm",
-    "pause",
-    "select_from_list",
     "clean_title",
+    "clear_screen",
+    "confirm",
+    "console",
+    "get_user_input",
+    "pause",
+    "print_banner",
+    "print_divider",
+    "print_error",
+    "print_header",
+    "print_info",
+    "print_step",
+    "print_success",
+    "print_warning",
+    "select_from_list",
+    "status",
 ]
 
 _HIDE_CURSOR = "\x1b[?25l"
@@ -351,7 +351,7 @@ def get_user_input(prompt: str, default: str | None = None) -> str | None:
         value = input().strip()
     except (EOFError, KeyboardInterrupt):
         console.print()
-        raise KeyboardInterrupt("Input cancelled by user")
+        raise KeyboardInterrupt("Input cancelled by user") from None
     return value or (default or "")
 
 
@@ -390,7 +390,7 @@ def confirm(prompt: str, default: bool = True) -> bool:
         value = input().strip().lower()
     except (EOFError, KeyboardInterrupt):
         console.print()
-        raise KeyboardInterrupt("Input cancelled by user")
+        raise KeyboardInterrupt("Input cancelled by user") from None
     if not value:
         return default
     return value in ("y", "yes", "o", "oui")
@@ -403,7 +403,7 @@ def pause(message: str = "Press Enter to continue...") -> None:
         input()
     except (EOFError, KeyboardInterrupt):
         console.print()
-        raise KeyboardInterrupt("Paused action cancelled by user")
+        raise KeyboardInterrupt("Paused action cancelled by user") from None
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +448,7 @@ def _fallback_select(options: Sequence[str], prompt: str, default_index: int) ->
             raw = input(f"Choice [1-{len(options)}] (default {default_index + 1}): ").strip()
         except (EOFError, KeyboardInterrupt):
             console.print()
-            raise KeyboardInterrupt("Menu cancelled by user")
+            raise KeyboardInterrupt("Menu cancelled by user") from None
         if not raw:
             return default_index
         if raw.isdigit() and 1 <= int(raw) <= len(options):
@@ -764,7 +764,7 @@ def select_from_list(
             try:
                 key = _read_key()
             except KeyboardInterrupt:
-                raise KeyboardInterrupt("Menu cancelled by user")
+                raise KeyboardInterrupt("Menu cancelled by user") from None
 
             enter_key = getattr(readchar.key, "ENTER", "\r")
             if key in ("\r", "\n", enter_key):

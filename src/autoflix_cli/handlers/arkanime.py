@@ -1,20 +1,18 @@
-from ..scraping import arkanime, player
-from ..scraping.objects import ArkMovie, ArkSeries
 from ..cli_utils import (
-    select_from_list,
-    print_success,
+    console,
+    get_user_input,
+    pause,
+    print_error,
     print_header,
     print_info,
-    print_error,
     print_warning,
-    get_user_input,
-    console,
-    pause,
+    select_from_list,
 )
-from ..player_manager import play_video
+from ..scraping import arkanime, player
+from ..scraping.objects import ArkMovie
 from ..tracker import tracker
-from .playback import play_episode_flow
 from .anilist_update import _update_anilist_progress
+from .playback import play_episode_flow
 
 
 def open_result(selection):
@@ -119,8 +117,8 @@ def open_result(selection):
             season_url=str(season.id), # Using id for season url
             logo_url=series.img,
             headers=headers,
-            anilist_callback=lambda: _update_anilist_progress(
-                "ArkAnime", series, season, selected_episode
+            anilist_callback=lambda episode=selected_episode: _update_anilist_progress(
+                "ArkAnime", series, season, episode
             ),
         )
 
@@ -277,8 +275,8 @@ def resume_arkanime(data):
             season_url=str(season.id),
             logo_url=data.get("logo_url"),
             headers=headers,
-            anilist_callback=lambda: _update_anilist_progress(
-                "ArkAnime", series_dummy, season, selected_episode
+            anilist_callback=lambda episode=selected_episode: _update_anilist_progress(
+                "ArkAnime", series_dummy, season, episode
             ),
         )
 

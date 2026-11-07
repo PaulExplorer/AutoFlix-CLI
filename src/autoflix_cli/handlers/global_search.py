@@ -20,15 +20,13 @@ from ..cli_utils import (
     select_from_list,
 )
 from ..providers_registry import registry
-from ..tracker import tracker
-
 from ..scraping import anime_sama as anime_sama_scraper
 from ..scraping import arkanime as arkanime_scraper
 from ..scraping import coflix as coflix_scraper
 from ..scraping import franime as franime_scraper
 from ..scraping import french_stream as french_stream_scraper
+from ..tracker import tracker
 from . import anime_sama, arkanime, coflix, franime, french_stream
-
 
 # provider key -> search/open entry points
 _SOURCES = {

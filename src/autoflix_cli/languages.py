@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict
 
 LANGUAGES: Dict[str, Dict[str, str]] = {
     "fr": {"display": "Français", "label": "French", "flag": "🇫🇷"},

@@ -1,14 +1,14 @@
-from ..scraping import french_stream, player
-from ..scraping.objects import FrenchStreamMovie, FrenchStreamSeason
 from ..cli_utils import (
-    select_from_list,
+    console,
+    get_user_input,
+    pause,
     print_header,
     print_info,
     print_warning,
-    get_user_input,
-    console,
-    pause,
+    select_from_list,
 )
+from ..scraping import french_stream, player
+from ..scraping.objects import FrenchStreamMovie, FrenchStreamSeason
 from ..tracker import tracker
 from .playback import play_episode_flow
 
@@ -247,9 +247,6 @@ def resume_french_stream(data):
             selected_episode = episodes[ep_idx]
             if not selected_episode.players:
                 return
-            supported = [
-                p for p in selected_episode.players if player.is_supported(p.url)
-            ]
 
             success = play_episode_flow(
                 provider_name="French-Stream",

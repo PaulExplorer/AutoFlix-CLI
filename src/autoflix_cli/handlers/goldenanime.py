@@ -1,23 +1,22 @@
-from ..scraping.goldenanime import goldenanime
-from ..scraping.subtitles import subtitle_extractor
+import re
+
+from ..anilist import anilist_client
 from ..cli_utils import (
-    select_from_list,
-    print_header,
-    print_info,
-    print_warning,
-    print_success,
     get_user_input,
     pause,
-    console,
+    print_header,
+    print_info,
+    print_success,
+    print_warning,
+    select_from_list,
 )
-from ..player_manager import play_video
-from ..tracker import tracker
 from ..languages import get_language_label
-from ..anilist import anilist_client
+from ..player_manager import play_video
 from ..scraping import player as player_scraper
+from ..scraping.goldenanime import goldenanime
+from ..scraping.subtitles import subtitle_extractor
+from ..tracker import tracker
 from .subtitle_prompt import resolve_imdb_id
-
-import re
 
 
 def handle_goldenanime():

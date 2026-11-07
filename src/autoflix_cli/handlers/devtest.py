@@ -3,6 +3,7 @@ import os
 import time
 from urllib.parse import urlparse
 
+from .. import player_manager as pm
 from ..cli_utils import (
     confirm,
     get_user_input,
@@ -14,9 +15,8 @@ from ..cli_utils import (
     print_success,
     print_warning,
 )
-from ..scraping.player import PLAYER_EXTRACTORS, test_all_scrapers_verbose
 from ..scraping import arkanime
-from .. import player_manager as pm
+from ..scraping.player import PLAYER_EXTRACTORS, test_all_scrapers_verbose
 
 
 def handle_dev_scraper_test() -> None:

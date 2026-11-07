@@ -1,7 +1,9 @@
-from typing import Optional, Union, List
-import re, json
+import re
+from typing import List, Optional, Union
+
 from bs4 import BeautifulSoup
-from .objects import Player, Episode
+
+from .objects import Episode, Player
 
 
 class NoEpisodesFoundError(Exception):
@@ -59,7 +61,7 @@ def parse_episodes_from_js(js_code: str) -> List[Episode]:
     episodes = []
     for i in range(max_episodes):
         players = []
-        for name, urls in zip(lecteur_names, lecteurs.values()):
+        for name, urls in zip(lecteur_names, lecteurs.values(), strict=False):
             url = urls[i] if i < len(urls) else None
             if url:
                 players.append(Player(name, url))

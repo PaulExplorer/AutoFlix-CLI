@@ -1,6 +1,6 @@
 from .. import arkanime
-
 from .common import get_scraper
+
 
 def get_hls_link_montmyoboky(url, headers, config: dict = None):
     if "movie" in url:

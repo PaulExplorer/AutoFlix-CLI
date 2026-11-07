@@ -22,23 +22,23 @@ Typical flow::
         stream = af.extract(content.players[0])
 """
 
-from urllib.parse import quote
 import json
 import urllib.parse
+from urllib.parse import quote
 
-from .scraping.player import get_hls_link as _get_hls_link
-from .scraping.player import is_supported as _is_supported
+from . import proxy as _proxy
 from .scraping import anime_sama, arkanime, coflix, french_stream
 from .scraping import franime as franime_scraper
 from .scraping.goldenanime import goldenanime
 from .scraping.goldenms import goldenms_extractor
-from . import proxy as _proxy
+from .scraping.player import get_hls_link as _get_hls_link
+from .scraping.player import is_supported as _is_supported
 
 __all__ = [
+    "PROVIDERS",
     "Content",
     "Episode",
     "Player",
-    "PROVIDERS",
     "Result",
     "Season",
     "anime",

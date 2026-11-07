@@ -1,9 +1,11 @@
-from curl_cffi import requests as cffi_requests
-from bs4 import BeautifulSoup
-from .objects import SearchResult, SamaSeason, SamaSeries, SeasonAccess, Episode
-from .utils import parse_episodes_from_js, NoEpisodesFoundError
-from ..proxy import DNS_OPTIONS
 from random import randint
+
+from bs4 import BeautifulSoup
+from curl_cffi import requests as cffi_requests
+
+from ..proxy import DNS_OPTIONS
+from .objects import Episode, SamaSeason, SamaSeries, SearchResult, SeasonAccess
+from .utils import NoEpisodesFoundError, parse_episodes_from_js
 
 website_origin = ""
 

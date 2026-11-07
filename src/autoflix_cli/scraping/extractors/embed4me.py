@@ -7,6 +7,7 @@ from Crypto.Util.Padding import unpad
 
 from .common import get_scraper
 
+
 def get_hls_link_embed4me(embed_url: str, headers: dict = None, config: dict = None) -> str:
     """
     Extract HLS link from embed4me player.

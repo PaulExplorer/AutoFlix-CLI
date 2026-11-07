@@ -1,5 +1,6 @@
 from .common import extract_hls_url, get_scraper
 
+
 def get_hls_link_vidmoly(url: str, headers: dict, config: dict = None) -> str:
     """
     Dedicated parser for Vidmoly to bypass transitional page.

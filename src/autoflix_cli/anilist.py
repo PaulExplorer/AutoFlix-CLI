@@ -1,6 +1,6 @@
-import json
+from typing import Any, Dict, List, Optional
+
 from curl_cffi import requests
-from typing import Optional, Dict, Any, List
 
 from .log import log
 

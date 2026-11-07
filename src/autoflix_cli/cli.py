@@ -8,7 +8,6 @@ menus. With no flags at all, the classic interactive interface runs instead
 import argparse
 import importlib.metadata
 import json
-import sys
 
 from . import api
 from .cli_utils import console, print_error

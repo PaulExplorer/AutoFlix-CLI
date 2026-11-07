@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 
 from .common import get_scraper
 
+
 def get_hls_link_sendvid(url: str, headers: dict = None, config: dict = None) -> str:
     """
     Extract video link from sendvid using Open Graph meta tag.

@@ -19,8 +19,8 @@ def test_is_blocked_page():
 
 
 def test_is_allowed_subtitle_path(tmp_path):
-    import tempfile
     import os
+    import tempfile
 
     fd, allowed = tempfile.mkstemp(prefix="autoflix_sub_", suffix=".srt")
     os.close(fd)
@@ -280,7 +280,9 @@ def test_xs_xor_filter_recovers_json():
     plain = json.dumps(manifest).encode()
     payload = bytes(
         b ^ d
-        for b, d in zip(plain, xs._xs_xor_filter(bytes(len(plain)), data_id, token))
+        for b, d in zip(
+            plain, xs._xs_xor_filter(bytes(len(plain)), data_id, token), strict=False
+        )
     )
     assert json.loads(xs._xs_xor_filter(payload, data_id, token)) == manifest
 

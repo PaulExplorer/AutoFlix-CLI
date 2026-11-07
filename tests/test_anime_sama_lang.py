@@ -1,7 +1,7 @@
 import pytest
 
+from autoflix_cli.handlers.anime_sama import _select_language, pick_language_auto
 from autoflix_cli.tracker import tracker
-from autoflix_cli.handlers.anime_sama import pick_language_auto, _select_language
 
 
 @pytest.fixture

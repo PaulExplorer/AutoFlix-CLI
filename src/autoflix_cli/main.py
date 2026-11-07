@@ -1,48 +1,43 @@
+import importlib.metadata
+import sys
+
+from . import cli, history_ui, proxy
 from .cli_utils import (
     clear_screen,
-    select_from_list,
-    print_header,
-    print_success,
-    print_error,
-    print_info,
-    print_warning,
+    console,
     get_user_input,
     pause,
-    console,
-)
-from .update_checker import check_update
-from .tracker import tracker
-from .providers_registry import registry
-from .languages import LANGUAGES, get_language_display, get_all_languages
-from .player_manager import (
-    PLAYERS,
-    get_player_display,
-    get_all_players,
-    is_custom_player,
-    slugify_custom_name,
+    print_error,
+    print_header,
+    print_success,
+    print_warning,
+    select_from_list,
 )
 from .handlers import (
-    anime_sama,
-    coflix,
-    french_stream,
     anilist,
+    anime_sama,
+    arkanime,
+    coflix,
+    franime,
+    french_stream,
     global_search,
     goldenanime,
     goldenms,
-    arkanime,
-    franime,
 )
-from . import history_ui
-from . import proxy
 from .handlers.devtest import (
     handle_dev_playback_mode_test,
     handle_dev_scraper_test,
 )
+from .languages import get_all_languages, get_language_display
 from .log import apply_developer_logging, setup_logging
-from . import cli
-import sys
-import importlib.metadata
-
+from .player_manager import (
+    get_all_players,
+    get_player_display,
+    slugify_custom_name,
+)
+from .providers_registry import registry
+from .tracker import tracker
+from .update_checker import check_update
 
 _GITHUB_URL = "https://github.com/PaulExplorer/AutoFlix-CLI"
 _ISSUES_URL = "https://github.com/PaulExplorer/AutoFlix-CLI/issues"

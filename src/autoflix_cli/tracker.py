@@ -1,10 +1,10 @@
 import json
-import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any
-from platformdirs import user_data_dir
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
+
+from platformdirs import user_data_dir
 
 from .log import log
 

@@ -1,20 +1,20 @@
-from .tracker import tracker
 from .cli_utils import (
     clear_screen,
     print_header,
+    print_success,
     print_warning,
     select_from_list,
-    print_success,
 )
 from .handlers import (
     anime_sama,
+    arkanime,
     coflix,
+    franime,
     french_stream,
     goldenanime,
     goldenms,
-    arkanime,
-    franime,
 )
+from .tracker import tracker
 
 
 def handle_resume(data):

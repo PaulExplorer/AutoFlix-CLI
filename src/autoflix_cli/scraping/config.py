@@ -1,5 +1,6 @@
 import os
-from ..config_loader import load_remote_jsonc, load_local_jsonc
+
+from ..config_loader import load_local_jsonc, load_remote_jsonc
 from ..defaults import DEFAULT_SOURCE_PORTAL
 
 # Paths
