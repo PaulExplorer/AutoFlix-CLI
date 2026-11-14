@@ -207,14 +207,16 @@ def _flow_goldenanime_stream(
         pause()
         return
 
-    # Filter: only keep direct streams (m3u8 / mp4) or supported embedded players
+    # Filter: only keep direct streams (m3u8 / mpd / mp4) or supported
+    # embedded players.
     def _is_valid(r):
         url = r.get("url", "")
         rtype = (r.get("type") or "").lower()
         return (
-            rtype in ("m3u8", "hls", "mp4")
+            rtype in ("m3u8", "hls", "mpd", "mp4")
             or ".m3u8" in url
             or ".m3u" in url
+            or ".mpd" in url.lower()
             or "master" in url.lower()
             or player_scraper.is_supported(url)
         )
@@ -351,10 +353,11 @@ def _flow_goldenanime_stream(
 
         final_url = selection["url"]
 
+        selection_type = selection["type"].lower()
         is_direct = (
-            selection["type"].lower() == "m3u8"
+            selection_type in ("m3u8", "mpd", "mp4")
             or "m3u8" in final_url
-            or selection["type"].lower() == "mp4"
+            or ".mpd" in final_url.lower()
         )
 
         success = play_video(
