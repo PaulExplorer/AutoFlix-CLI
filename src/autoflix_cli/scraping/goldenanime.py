@@ -53,6 +53,8 @@ class AnimeExtractor:
     # The /episodes endpoint is slow (~30s / multi-MB payload); requests
     # with the default 20s timeout always fail.
     EPISODES_TIMEOUT = 60
+    # /watch is usually fast, but animegg regularly lands just past 20s.
+    WATCH_TIMEOUT = 40
 
     def __init__(self):
         self.bases = [
@@ -269,7 +271,9 @@ class AnimeExtractor:
             if not ep_id:
                 continue
 
-            watch_data = self._get_json("/" + ep_id.lstrip("/"))
+            watch_data = self._get_json(
+                "/" + ep_id.lstrip("/"), timeout=self.WATCH_TIMEOUT
+            )
             if not watch_data:
                 continue
 
