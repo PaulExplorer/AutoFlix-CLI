@@ -152,7 +152,7 @@ def _anilist_ids(anilist_id: int) -> tuple[str | None, int | None]:
     return (imdb_id or None), (mappings.get("anidbId") or None)
 
 
-def _describe_subtitle(subtitle: dict) -> str:
+def describe_subtitle(subtitle: dict) -> str:
     label = subtitle.get("label") or subtitle.get("lang") or "?"
     title = (subtitle.get("title") or "").strip()
     tags = []
@@ -222,7 +222,7 @@ def prompt_extra_subtitles(
         return []
 
     shown = results[:_MAX_RESULTS]
-    options = [_describe_subtitle(sub) for sub in shown] + ["← Cancel"]
+    options = [describe_subtitle(sub) for sub in shown] + ["← Cancel"]
     index = select_from_list(options, "📝 Select subtitle track:")
     if index >= len(shown):
         return []

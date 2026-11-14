@@ -14,7 +14,7 @@ from ..scraping import player as player_scraper
 from ..scraping.goldenanime import goldenanime
 from ..scraping.subtitles import subtitle_extractor
 from ..tracker import tracker
-from .subtitle_prompt import _describe_subtitle, resolve_imdb_id
+from .subtitle_prompt import describe_subtitle, resolve_imdb_id
 
 
 def _mapping_ids(anilist_id: int | None) -> dict:
@@ -258,7 +258,7 @@ def _flow_goldenanime_stream(
 
                     if subs:
                         shown = subs[:6]
-                        sub_choices = [_describe_subtitle(s) for s in shown] + [
+                        sub_choices = [describe_subtitle(s) for s in shown] + [
                             "← Back",
                             "None",
                         ]

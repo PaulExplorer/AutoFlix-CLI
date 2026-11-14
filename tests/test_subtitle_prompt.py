@@ -30,7 +30,7 @@ def test_parse_season_requires_a_marker():
 
 
 def test_describe_subtitle():
-    text = subtitle_prompt._describe_subtitle(
+    text = subtitle_prompt.describe_subtitle(
         {"source": "OpenSubtitles (Homes)", "label": "French", "title": "Movie"}
     )
     assert "OpenSubtitles (Homes)" in text and "French" in text and "Movie" in text
