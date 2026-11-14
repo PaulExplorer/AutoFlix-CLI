@@ -20,7 +20,7 @@
 
 ## 🎥 Demo
 
-https://github.com/user-attachments/assets/bf95885f-b7b2-4bfc-b607-eb9939cc64d9
+https://github.com/user-attachments/assets/99759b2c-b4c1-4565-b1b8-536ba12b5f4d
 
 > [!NOTE]
 > The video above shows AutoFlix in action: language selection, provider choice, title search and stream launch.
