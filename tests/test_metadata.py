@@ -79,3 +79,58 @@ def test_resolve_imdb_returns_the_best_match(monkeypatch):
 def test_resolve_imdb_returns_none_without_results(monkeypatch):
     monkeypatch.setattr(metadata, "search_titles", lambda *a, **k: [])
     assert metadata.resolve_imdb("Nothing") == (None, None)
+
+
+def test_find_tmdb_id_prefers_the_requested_media_type(monkeypatch):
+    payload = {
+        "movie_results": [{"id": 10}],
+        "tv_results": [{"id": 20}],
+    }
+    monkeypatch.setattr(metadata, "_tmdb_get", lambda path, params=None: payload)
+
+    assert metadata.find_tmdb_id("tt0113799", is_movie=True) == 10
+    assert metadata.find_tmdb_id("tt0113799", is_movie=False) == 20
+    assert metadata.find_tmdb_id("tt0113799") == 10
+
+
+def test_find_tmdb_id_returns_none_on_failure(monkeypatch):
+    def boom(path, params=None):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(metadata, "_tmdb_get", boom)
+    assert metadata.find_tmdb_id("tt0113799") is None
+    assert metadata.find_tmdb_id("") is None
+
+
+def test_tmdb_seasons_ignores_specials(monkeypatch):
+    monkeypatch.setattr(
+        metadata,
+        "_tmdb_get",
+        lambda path, params=None: {
+            "seasons": [
+                {"season_number": 0},
+                {"season_number": 2},
+                {"season_number": 1},
+            ]
+        },
+    )
+    assert metadata.tmdb_seasons(42) == [1, 2]
+
+
+def test_tmdb_season_episodes_returns_names(monkeypatch):
+    monkeypatch.setattr(
+        metadata,
+        "_tmdb_get",
+        lambda path, params=None: {
+            "episodes": [
+                {"episode_number": 2, "name": "Second"},
+                {"episode_number": 1, "name": ""},
+                {"episode_number": None, "name": "Broken"},
+            ]
+        },
+    )
+
+    assert metadata.tmdb_season_episodes(42, 1) == [
+        {"episode": 2, "name": "Second"},
+        {"episode": 1, "name": "Episode 1"},
+    ]

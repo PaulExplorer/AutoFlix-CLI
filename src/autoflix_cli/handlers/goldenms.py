@@ -14,10 +14,12 @@ from ..cli_utils import (
 )
 from ..languages import get_language_label
 from ..player_manager import play_video
+from ..scraping import metadata
 from ..scraping import player as player_scraper
 from ..scraping.goldenms import goldenms_extractor
 from ..scraping.subtitles import subtitle_extractor
 from ..tracker import tracker
+from .subtitle_prompt import describe_subtitle
 
 
 def search_cinemeta(title: str, is_movie: bool):
@@ -32,6 +34,75 @@ def search_cinemeta(title: str, is_movie: bool):
     except Exception as e:
         print_warning(f"Error fetching Cinemeta search data: {e}")
         return []
+
+
+def _normalize_candidate(candidate: dict) -> dict:
+    """One display/search shape for TMDB and Cinemeta candidates."""
+    name = candidate.get("name") or candidate.get("title") or "Unknown Title"
+    year = candidate.get("year")
+    if isinstance(year, str):
+        year = int(year[:4]) if year[:4].isdigit() else None
+    imdb_id = candidate.get("imdb_id") or candidate.get("id") or ""
+    return {
+        "name": name,
+        "title": name,
+        "year": year,
+        "releaseInfo": str(year) if year else "Unknown",
+        "imdb_id": imdb_id,
+        "tmdb_id": candidate.get("tmdb_id"),
+        "is_movie": candidate.get("is_movie"),
+        "poster": candidate.get("poster"),
+    }
+
+
+def search_titles(title: str, is_movie: bool, year: int | None = None) -> list[dict]:
+    """Search through the keyless TMDB proxy, falling back to Cinemeta.
+
+    TMDB knows the exact media type and resolves localized titles, which is
+    what Cinemeta alone cannot do. Cinemeta stays the fallback when the proxy
+    is down or returns nothing.
+    """
+    candidates = metadata.search_titles(title, is_movie, year)
+    if not candidates:
+        candidates = metadata.cinemeta_candidates(title, is_movie, year)
+    return [_normalize_candidate(candidate) for candidate in candidates]
+
+
+def _season_map_from_videos(videos) -> dict[int, list[tuple[int, str]]]:
+    """Cinemeta ``videos`` -> ``{season: [(episode, name)]}`` (no specials)."""
+    season_map: dict[int, list[tuple[int, str]]] = {}
+    for video in videos or []:
+        if not isinstance(video, dict):
+            continue
+        try:
+            season = int(video.get("season"))
+            episode = int(video.get("episode"))
+        except (TypeError, ValueError):
+            continue
+        if season <= 0 or episode <= 0:
+            continue
+        name = video.get("name") or f"Episode {episode}"
+        season_map.setdefault(season, []).append((episode, name))
+    for episodes in season_map.values():
+        episodes.sort(key=lambda item: item[0])
+    return season_map
+
+
+def _season_map_from_tmdb(tmdb_id: int) -> dict[int, list[tuple[int, str]]]:
+    """TMDB episode lists -> ``{season: [(episode, name)]}`` (no specials)."""
+    season_map: dict[int, list[tuple[int, str]]] = {}
+    if not tmdb_id:
+        return season_map
+    for season in metadata.tmdb_seasons(tmdb_id):
+        if season <= 0:
+            continue
+        episodes = metadata.tmdb_season_episodes(tmdb_id, season)
+        season_map[season] = [
+            (episode["episode"], episode.get("name") or f"Episode {episode['episode']}")
+            for episode in episodes
+            if episode.get("episode")
+        ]
+    return season_map
 
 
 def get_cinemeta_details(imdb_id: str, is_movie: bool):
@@ -76,8 +147,8 @@ def handle_goldenms():
     if not title:
         return
 
-    print_info(f"Searching Cinemeta for '{title}'...")
-    metas = search_cinemeta(title, is_movie)
+    print_info(f"Searching TMDB for '{title}'...")
+    metas = search_titles(title, is_movie)
 
     if not metas:
         print_warning("No results found.")
@@ -87,8 +158,8 @@ def handle_goldenms():
     # User select result
     display_options = []
     for m in metas:
-        year = m.get("releaseInfo", "Unknown")
-        name = m.get("name", "Unknown Title")
+        year = m.get("year") or "Unknown"
+        name = m.get("name") or "Unknown Title"
         display_options.append(f"{name} ({year})")
 
     display_options.append("← Cancel")
@@ -98,37 +169,35 @@ def handle_goldenms():
         return
 
     selected_meta = metas[selection_idx]
-    media_title = selected_meta.get("name", title)
-    imdb_id = selected_meta.get("id", "")
+    media_title = selected_meta.get("name") or title
+    imdb_id = selected_meta.get("imdb_id") or ""
 
-    # Fetch full details to get TMDB ID
+    # Cinemeta still carries the poster and, for series, the episode list.
     print_info("Fetching full metadata...")
-    full_meta = get_cinemeta_details(imdb_id, is_movie)
+    full_meta = get_cinemeta_details(imdb_id, is_movie) if imdb_id else {}
 
-    tmdb_id = full_meta.get("moviedb_id")
+    tmdb_id = selected_meta.get("tmdb_id") or full_meta.get("moviedb_id")
+    if not tmdb_id and imdb_id:
+        tmdb_id = metadata.find_tmdb_id(imdb_id, is_movie)
     if not tmdb_id:
-        print_warning("TMDB ID not found in Cinemeta, some sources might degrade.")
+        print_warning("TMDB ID not found, some sources might degrade.")
 
-    release_year = full_meta.get(
-        "year", selected_meta.get("releaseInfo", "").split("-")[0]
+    release_year = (
+        full_meta.get("year")
+        or selected_meta.get("year")
+        or metadata.year_from_title(title)
     )
 
     season = None
     episode = None
 
     if not is_movie:
-        videos = full_meta.get("videos", [])
+        season_map = _season_map_from_videos(full_meta.get("videos"))
+        if not season_map and tmdb_id:
+            print_info("Fetching episode list from TMDB...")
+            season_map = _season_map_from_tmdb(tmdb_id)
 
-        if videos:
-            season_map = {}
-            for video in videos:
-                s = video.get("season", 0)
-                ep = video.get("episode", 0)
-                name = video.get("name", f"Episode {ep}")
-                if s not in season_map:
-                    season_map[s] = []
-                season_map[s].append((ep, name))
-
+        if season_map:
             sorted_seasons = sorted(season_map.keys())
 
             season_options = [f"Season {s}" for s in sorted_seasons] + ["Manual Input", "← Back"]
@@ -266,6 +335,9 @@ def _flow_goldenms_stream(
                 if current_imdb_id:
                     sub_season = season if not is_movie else None
                     sub_ep = episode if not is_movie else None
+                    release = selection.get("release") or (
+                        f"{title} ({year})" if year else title
+                    )
 
                     print_info(f"Searching for {lang_name} subtitles...")
                     subs = subtitle_extractor.search(
@@ -273,12 +345,14 @@ def _flow_goldenms_stream(
                         season=sub_season,
                         episode=sub_ep,
                         lang_filter=user_lang,
+                        release=release,
                     )
 
                     if subs:
-                        sub_opts = [
-                            f"{s['source']} - {s.get('lang', lang_name)}" for s in subs
-                        ] + ["← Back", "Skip Subtitles"]
+                        sub_opts = [describe_subtitle(s) for s in subs] + [
+                            "← Back",
+                            "Skip Subtitles",
+                        ]
                         sub_choice = select_from_list(sub_opts, "Select Subtitle:")
                         if sub_choice < len(subs):
                             subtitle_tracks = [subs[sub_choice]]

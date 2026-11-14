@@ -212,6 +212,82 @@ def resolve_imdb(
     return best.get("imdb_id"), best.get("is_movie")
 
 
+def find_tmdb_id(imdb_id: str, is_movie: bool | None = None) -> int | None:
+    """Resolve a TMDB id from an IMDB id through the ``find`` endpoint."""
+    if not imdb_id:
+        return None
+    try:
+        payload = _tmdb_get(
+            f"find/{imdb_id}", {"external_source": "imdb_id"}
+        )
+    except Exception as exc:  # noqa: BLE001 - callers fall back on Cinemeta
+        log.debug("TMDB find failed for %s: %s", imdb_id, exc)
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    buckets = ["movie_results", "tv_results"]
+    if is_movie is True:
+        buckets = ["movie_results"]
+    elif is_movie is False:
+        buckets = ["tv_results"]
+    for bucket in buckets:
+        results = payload.get(bucket) or []
+        if not isinstance(results, list):
+            continue
+        for result in results:
+            tmdb_id = result.get("id") if isinstance(result, dict) else None
+            if tmdb_id:
+                return tmdb_id
+    return None
+
+
+def tmdb_seasons(tmdb_id: int) -> list[int]:
+    """Real season numbers of a series (specials/season 0 excluded)."""
+    if not tmdb_id:
+        return []
+    try:
+        payload = _tmdb_get(f"tv/{tmdb_id}", {"language": "fr-FR"})
+    except Exception as exc:  # noqa: BLE001
+        log.debug("TMDB seasons failed for %s: %s", tmdb_id, exc)
+        return []
+    seasons = payload.get("seasons") if isinstance(payload, dict) else None
+    numbers = set()
+    for season in seasons or []:
+        number = season.get("season_number") if isinstance(season, dict) else None
+        if isinstance(number, int) and number > 0:
+            numbers.add(number)
+    return sorted(numbers)
+
+
+def tmdb_season_episodes(tmdb_id: int, season: int) -> list[dict]:
+    """Episodes of one season as ``{"episode": n, "name": ...}``."""
+    if not tmdb_id or season is None:
+        return []
+    try:
+        payload = _tmdb_get(
+            f"tv/{tmdb_id}/season/{int(season)}", {"language": "fr-FR"}
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.debug("TMDB season %s of %s failed: %s", season, tmdb_id, exc)
+        return []
+    episodes = payload.get("episodes") if isinstance(payload, dict) else None
+    result = []
+    for episode in episodes or []:
+        if not isinstance(episode, dict):
+            continue
+        number = episode.get("episode_number")
+        if not isinstance(number, int):
+            continue
+        result.append(
+            {
+                "episode": number,
+                "name": episode.get("name") or f"Episode {number}",
+            }
+        )
+    return result
+
+
 def tmdb_number_of_seasons(tmdb_id: int) -> int | None:
     """Season count for a series, used to build an honest season menu."""
     if not tmdb_id:
