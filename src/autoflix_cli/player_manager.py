@@ -66,9 +66,9 @@ DEFAULT_DIRECT_MPV_OPTIONS = (
 
 def _guess_subtitle_ext(url: str) -> str:
     """Guess a subtitle file extension from its URL (.ass/.vtt/.srt...)."""
-    path = url.split("?")[0].lower()
+    path = url.split("?")[0].lower().rstrip("/")
     if path.endswith(".xz"):
-        path = path[:-3]
+        path = path[:-3].rstrip("/")
     for ext in (".ass", ".srt", ".vtt", ".ssa", ".sub"):
         if path.endswith(ext):
             return ext
@@ -77,17 +77,21 @@ def _guess_subtitle_ext(url: str) -> str:
 
 def _download_subtitles(subtitle_items) -> list:
     """
-    Download subtitle file(s) to local temp files (handles .xz compression).
+    Download subtitle file(s) and normalize them to clean UTF-8 SRT.
+
+    Handles .xz/.gz/.zip, UTF-16/CP1252 payloads, VTT envelopes, ASS/SSA and
+    the promotional cue injected by the stremio.homes add-on.
 
     Args:
         subtitle_items: List of dicts with a "url" key (or plain URL strings).
     Returns:
         List of local temp file paths.
     """
-    import lzma
     import tempfile
 
     from curl_cffi import requests
+
+    from .scraping.subtitles import normalize
 
     paths = []
     for item in subtitle_items:
@@ -101,23 +105,19 @@ def _download_subtitles(subtitle_items) -> list:
             if r.status_code != 200:
                 print_error(f"Subtitle fetch failed ({r.status_code}): {url[:80]}")
                 continue
+            content = normalize.decompress(content, url)
             # Reject HTML error pages served with a 200 (they save to a
             # text track file the player refuses to open).
-            head = content[:200].lstrip().lower()
-            if content and (
-                head.startswith(b"<!doctype html")
-                or head.startswith(b"<html")
-                or b"<body" in head
-            ):
+            if not normalize.looks_like_subtitle(content):
                 print_error(f"Subtitle fetch returned an HTML page: {url[:80]}")
                 continue
-            ext = _guess_subtitle_ext(url)
-            if url.lower().endswith(".xz"):
-                content = lzma.decompress(content)
-                ext = _guess_subtitle_ext(url[:-3])
-            fd, temp_path = tempfile.mkstemp(suffix=ext, prefix="autoflix_sub_")
-            with os.fdopen(fd, "wb") as f:
-                f.write(content)
+            text = normalize.to_srt(content, url)
+            if not text.strip():
+                print_error(f"Subtitle file is empty or unreadable: {url[:80]}")
+                continue
+            fd, temp_path = tempfile.mkstemp(suffix=".srt", prefix="autoflix_sub_")
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
             paths.append(temp_path)
         except Exception as e:
             print_error(f"Failed to download subtitle: {e}")
@@ -506,6 +506,18 @@ def _extra_player_options(player_config: dict) -> list:
     return [str(option) for option in extra]
 
 
+def _mpv_subtitle_options() -> list:
+    """Auto-select the user's language among embedded/attached tracks.
+
+    ``--sub-auto=fuzzy`` picks up sidecar files the extractor downloaded and
+    embedded tracks whose language tag is only approximate; ``--slang`` makes
+    French (the configured language) win over the default English track.
+    """
+    language = tracker.get_language() or "fr"
+    codes = [language] if language == "en" else [language, "en"]
+    return [f"--slang={','.join(codes)}", "--sub-auto=fuzzy"]
+
+
 def _build_proxy_command(
     stream_url: str,
     headers: dict,
@@ -535,6 +547,8 @@ def _build_proxy_command(
         # its own requests: on rate-limiting CDNs (VidLink...) that doubles
         # the upstream load for nothing. Raw proxy URLs need yt-dl anyway.
         cmd.append("--ytdl=no")
+        if player_code == "mpv":
+            cmd += _mpv_subtitle_options()
 
     for path in subtitle_paths:
         cmd.append(f"--sub-file={path}")
@@ -569,6 +583,8 @@ def _build_direct_command(
         ]
         cmd += list(DEFAULT_DIRECT_MPV_OPTIONS)
         cmd += _extra_player_options(player_config)
+        if player_code == "mpv":
+            cmd += _mpv_subtitle_options()
 
     for path in subtitle_paths:
         cmd.append(f"--sub-file={path}")

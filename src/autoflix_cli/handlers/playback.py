@@ -1,4 +1,5 @@
 import json
+import re
 
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
@@ -19,7 +20,14 @@ from .subtitle_prompt import parse_number, parse_season, prompt_extra_subtitles
 
 AUTO_OPTION = "⚡ Auto - test all sources"
 
-_MOVIE_SEASON_LABELS = {"movie", "film"}
+# Labels used by the providers for a movie's "season". Compared token by
+# token so "Movie", "Film (VF)" and "Film" all match.
+_MOVIE_TOKENS = {"movie", "film", "films"}
+
+
+def _is_movie_label(label: str | None) -> bool:
+    tokens = re.findall(r"[a-z]+", str(label or "").lower())
+    return any(token in _MOVIE_TOKENS for token in tokens)
 
 
 def _run_auto_probe(players: list, headers: dict) -> list:
@@ -157,13 +165,16 @@ def _collect_extra_subtitles(
     episode: object,
     season_number: int | None,
     episode_number: int | None,
+    is_movie: bool | None = None,
+    year: int | None = None,
+    release: str | None = None,
 ) -> list:
     """Work out the season/episode numbers, then run the subtitle prompt."""
     if not ask:
         return []
 
-    is_movie = str(season_title or "").strip().lower() in _MOVIE_SEASON_LABELS
-    if is_movie:
+    movie = is_movie if is_movie is not None else _is_movie_label(season_title)
+    if movie:
         season, episode_no = None, None
     else:
         season = (
@@ -173,11 +184,18 @@ def _collect_extra_subtitles(
         )
         if season is None:
             season = 1
-        episode_no = (
-            episode_number
-            if episode_number is not None
-            else parse_number(getattr(episode, "title", None))
-        )
+        if episode_number is not None:
+            episode_no = episode_number
+        else:
+            episode_no = parse_number(getattr(episode, "title", None))
+            # A year or an episode number read from a movie title is not an
+            # episode; fall back to the first one only for real series.
+            if episode_no is not None and (
+                episode_no > 999 or (year and episode_no == year)
+            ):
+                episode_no = None
+        if episode_no is None:
+            episode_no = 1
 
     return prompt_extra_subtitles(
         title=title,
@@ -186,7 +204,9 @@ def _collect_extra_subtitles(
         anilist_id=anilist_id,
         season=season,
         episode=episode_no,
-        is_movie=is_movie,
+        is_movie=movie,
+        year=year,
+        release=release,
     )
 
 
@@ -206,6 +226,9 @@ def play_episode_flow(
     anilist_id: int = None,
     season_number: int = None,
     episode_number: int = None,
+    is_movie: bool | None = None,
+    year: int | None = None,
+    release: str | None = None,
     ask_subtitles: bool = True,
 ) -> bool:
     """
@@ -251,6 +274,9 @@ def play_episode_flow(
         episode=episode,
         season_number=season_number,
         episode_number=episode_number,
+        is_movie=is_movie,
+        year=year,
+        release=release,
     )
 
     # Sources already played, so a retry moves on to the next one instead of

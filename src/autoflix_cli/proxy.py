@@ -1095,23 +1095,15 @@ def proxy_player_subtitle():
         with open(sub_path, "rb") as f:
             content = f.read()
 
-        # Standardize SRT to WebVTT for HTML5 video <track> compatibility
-        if sub_path.lower().endswith(".srt"):
-            text = content.decode("utf-8", errors="ignore")
-            # Replace timestamps ',' with '.' for VTT format e.g: 00:00:10,500 -> 00:00:10.500
-            import re
-
-            vtt_content = "WEBVTT\n\n" + re.sub(
-                r"(\d{2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", text
-            )
-            return Response(
-                vtt_content,
-                mimetype="text/vtt",
-                headers={"Access-Control-Allow-Origin": "*"},
-            )
+        # Always serve a single-header WebVTT document: the homes add-on
+        # wraps SRT in a VTT envelope (two WEBVTT headers, one ad cue) and a
+        # browser <track> rejects the duplicated header.
+        from .scraping.subtitles.normalize import to_vtt
 
         return Response(
-            content, mimetype="text/vtt", headers={"Access-Control-Allow-Origin": "*"}
+            to_vtt(content, sub_path),
+            mimetype="text/vtt",
+            headers={"Access-Control-Allow-Origin": "*"},
         )
     except Exception as e:
         return f"Error loading subtitle: {e}", 500

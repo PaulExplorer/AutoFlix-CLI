@@ -130,7 +130,7 @@ def test_no_results_returns_empty(monkeypatch):
 
 def test_resolves_imdb_from_title_when_missing(monkeypatch):
     monkeypatch.setattr(
-        subtitle_prompt, "resolve_imdb_id", lambda title, is_movie=None: ("tt99", False)
+        subtitle_prompt, "resolve_imdb_id", lambda title, is_movie=None, year=None: ("tt99", False)
     )
     seen = {}
     monkeypatch.setattr(
@@ -149,7 +149,7 @@ def test_resolves_imdb_from_title_when_missing(monkeypatch):
 
 def test_movie_resolution_drops_season_and_episode(monkeypatch):
     monkeypatch.setattr(
-        subtitle_prompt, "resolve_imdb_id", lambda title, is_movie=None: ("tt7", True)
+        subtitle_prompt, "resolve_imdb_id", lambda title, is_movie=None, year=None: ("tt7", True)
     )
     seen = {}
     monkeypatch.setattr(
@@ -187,27 +187,27 @@ def test_gives_up_without_any_identifier(monkeypatch):
     assert searched["n"] == 0
 
 
-# --- Cinemeta / AniList resolution -----------------------------------------
+# --- TMDB / Cinemeta resolution --------------------------------------------
 
 
 def test_resolve_imdb_id_lists_matches(monkeypatch):
-    def fake_get(url, **kwargs):
-        if "/series/" in url:
-            return _Response(
-                {"metas": [{"name": "Show", "year": 2020, "type": "series", "imdb_id": "tt123"}]}
-            )
-        return _Response(
-            {"metas": [{"name": "Show Movie", "year": 2021, "type": "movie", "imdb_id": "tt456"}]}
-        )
-
-    monkeypatch.setattr(subtitle_prompt.requests, "get", fake_get)
+    candidates = [
+        {"imdb_id": "tt123", "title": "Show", "year": 2020, "is_movie": False},
+        {"imdb_id": "tt456", "title": "Show Movie", "year": 2021, "is_movie": True},
+    ]
+    monkeypatch.setattr(
+        subtitle_prompt.metadata, "search_titles", lambda *a, **k: candidates
+    )
     _scripted(monkeypatch, [1])  # pick the movie entry
 
     assert subtitle_prompt.resolve_imdb_id("Show") == ("tt456", True)
 
 
 def test_resolve_imdb_id_falls_back_to_manual(monkeypatch):
-    monkeypatch.setattr(subtitle_prompt.requests, "get", lambda *a, **k: _Response({"metas": []}))
+    monkeypatch.setattr(subtitle_prompt.metadata, "search_titles", lambda *a, **k: [])
+    monkeypatch.setattr(
+        subtitle_prompt.metadata, "cinemeta_candidates", lambda *a, **k: []
+    )
     monkeypatch.setattr(subtitle_prompt, "get_user_input", lambda prompt: "tt999")
     assert subtitle_prompt.resolve_imdb_id("Nothing") == ("tt999", False)
 
@@ -215,28 +215,30 @@ def test_resolve_imdb_id_falls_back_to_manual(monkeypatch):
 def test_resolve_imdb_id_restricts_to_the_requested_catalog(monkeypatch):
     seen = []
 
-    def fake_get(url, **kwargs):
-        seen.append(url)
-        return _Response(
-            {"metas": [{"name": "X", "type": "movie", "imdb_id": "tt1"}]}
-        )
+    def fake_search(title, is_movie=None, year=None, **kwargs):
+        seen.append((title, is_movie, year))
+        return [{"imdb_id": "tt1", "title": "X", "year": None, "is_movie": True}]
 
-    monkeypatch.setattr(subtitle_prompt.requests, "get", fake_get)
+    monkeypatch.setattr(subtitle_prompt.metadata, "search_titles", fake_search)
     _scripted(monkeypatch, [0])
 
     subtitle_prompt.resolve_imdb_id("French title", is_movie=True)
 
-    assert len(seen) == 1 and "/movie/" in seen[0]
+    assert seen == [("French title", True, None)]
 
 
 def test_cinemeta_matches_for_series_only(monkeypatch):
+    from autoflix_cli.scraping import metadata
+
     seen = []
 
     def fake_get(url, **kwargs):
         seen.append(url)
-        return _Response({"metas": [{"name": "Show", "type": "series", "imdb_id": "tt1"}]})
+        return _Response(
+            {"metas": [{"name": "Show", "type": "series", "imdb_id": "tt1"}]}
+        )
 
-    monkeypatch.setattr(subtitle_prompt.requests, "get", fake_get)
+    monkeypatch.setattr(metadata.requests, "get", fake_get)
 
     matches = subtitle_prompt._cinemeta_matches("Show", is_movie=False)
 
@@ -336,6 +338,52 @@ def test_collect_extra_subtitles_disabled_skips_prompt(monkeypatch):
         episode_number=None,
     )
     assert result == [] and called["n"] == 0
+
+
+def test_movie_label_detection_is_token_based():
+    assert playback._is_movie_label("Movie") is True
+    assert playback._is_movie_label("Film (VF)") is True
+    assert playback._is_movie_label("Saison 2") is False
+
+
+def test_explicit_movie_flag_wins_over_the_label(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        playback, "prompt_extra_subtitles", lambda **kw: seen.update(kw) or []
+    )
+    playback._collect_extra_subtitles(
+        ask=True,
+        title="Memories",
+        imdb_id="tt0113799",
+        anidb_id=None,
+        anilist_id=None,
+        season_title="Memories (1995)",
+        episode=Episode("Memories 1995", []),
+        season_number=None,
+        episode_number=None,
+        is_movie=True,
+    )
+    assert seen["season"] is None and seen["episode"] is None
+
+
+def test_year_is_never_used_as_an_episode_number(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        playback, "prompt_extra_subtitles", lambda **kw: seen.update(kw) or []
+    )
+    playback._collect_extra_subtitles(
+        ask=True,
+        title="Show",
+        imdb_id="tt1",
+        anidb_id=None,
+        anilist_id=None,
+        season_title="The 100",
+        episode=Episode("Memories 1995", []),
+        season_number=None,
+        episode_number=None,
+        year=1995,
+    )
+    assert seen["episode"] == 1
 
 
 PLAYER = Player("uqload", "https://uqload.vc/embed-1.html")

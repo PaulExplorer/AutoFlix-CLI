@@ -12,8 +12,16 @@ _FORMAT_BY_SUFFIX = {
     "vtt": "vtt",
 }
 
-# Extensions that end a URL path (optionally followed by a query string).
-_SUFFIX_RE = re.compile(r"\.([a-z0-9]{2,4})(?:[?#].*)?$", re.IGNORECASE)
+# Extensions that end a URL path, optionally followed by a slash (the
+# stremio.homes add-on serves ``/sub.vtt/?sub_id=...``), query or fragment.
+_SUFFIX_RE = re.compile(r"\.([a-z0-9]{2,4})(?:[/?#].*)?$", re.IGNORECASE)
+
+# Multi-part subtitle uploads: only the first CD is useless on its own.
+_INCOMPLETE_RE = re.compile(
+    r"(?:^|[^a-z0-9])(?:cd\s*1|1\s*cd|part\s*1|disc\s*1|dvd\s*1)(?:[^a-z0-9]|$)",
+    re.IGNORECASE,
+)
+_QUALITY_RE = re.compile(r"\b(2160p|1080p|720p|480p|bluray|blu-ray|webrip|web-dl|hdtv|dvdrip)\b", re.IGNORECASE)
 
 
 def matches_episode(name: str, episode: int | None, season: int | None = None) -> bool:
@@ -25,7 +33,7 @@ def matches_episode(name: str, episode: int | None, season: int | None = None) -
     pinned = str(episode).zfill(2)
     plain = str(episode)
 
-    if season:
+    if season is not None:
         # Prefer explicit SxxEyy patterns (e.g. s01e05, 1x05).
         for season_token in (str(season).zfill(2), str(season)):
             for episode_token in (pinned, plain):
@@ -51,6 +59,34 @@ def is_batch(name: str) -> bool:
     return bool(re.search(r"\bs\d{1,2}\b", lowered)) or any(
         tag in lowered for tag in ("batch", "complete", "collection")
     )
+
+
+def is_incomplete(name: str) -> bool:
+    """Whether an upload only carries the first CD/part of the movie."""
+    return bool(_INCOMPLETE_RE.search(name or ""))
+
+
+def release_similarity(release: str | None, name: str | None) -> float:
+    """How well a subtitle filename matches the release being played.
+
+    A same-release subtitle is already in sync, so it should win over a
+    generic upload even when both come from the same provider. Only cheap,
+    reliable signals are used: quality tag and release group tokens.
+    """
+    if not release or not name:
+        return 0.0
+    wanted = release.lower()
+    candidate = name.lower()
+    score = 0.0
+    wanted_quality = {match.group(1).lower() for match in _QUALITY_RE.finditer(wanted)}
+    candidate_quality = {match.group(1).lower() for match in _QUALITY_RE.finditer(candidate)}
+    if wanted_quality and wanted_quality & candidate_quality:
+        score += 0.5
+    # Release groups are the token after the last dot/dash in scene names.
+    wanted_group = re.split(r"[.\-]", wanted.rstrip("]"))[-1]
+    if len(wanted_group) > 2 and wanted_group in candidate:
+        score += 0.5
+    return score
 
 
 def guess_format(url: str) -> str:

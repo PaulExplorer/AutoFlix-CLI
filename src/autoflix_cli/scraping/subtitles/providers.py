@@ -11,14 +11,20 @@ from curl_cffi import requests
 
 from ...log import log
 from .language_tags import language_label, normalize_language
-from .matching import guess_format, is_batch, matches_episode
+from .matching import guess_format, is_batch, is_incomplete, matches_episode
 from .models import Subtitle, SubtitleQuery
 
 REQUEST_TIMEOUT = 15
 
 # Language prefix used by the stremio.homes add-on when the caller gave no
-# preference: a broad set keeps French (and others) in the result set.
-DEFAULT_LANGUAGES = ("en", "hi", "de", "ar", "tr", "es", "ta", "te", "ru", "ko")
+# preference. The add-on caps the list at 10 languages, so French goes first
+# and the rest is a broad set that keeps other languages in the result set.
+DEFAULT_LANGUAGES = ("fr", "en", "hi", "de", "ar", "tr", "es", "ta", "te", "ru")
+
+# Options accepted by the stremio.homes route. ``ai-translated=true`` widens
+# the catalogue with machine-translated tracks (labelled [AI] by the
+# extractor) instead of silently dropping them.
+HOMES_OPTIONS = "ai-translated=true|from=all|auto-adjustment=true"
 
 _session: requests.Session | None = None
 
@@ -102,18 +108,20 @@ class StremioSubtitleProvider(SubtitleProvider):
             resource = f"movie/{query.imdb_id}"
         if self.language_scoped:
             scope = self._language_scope(query.language)
-            return f"{self.base_url}/{scope}/ai-translated=false|from=all/subtitles/{resource}.json"
+            return f"{self.base_url}/{scope}/{HOMES_OPTIONS}/subtitles/{resource}.json"
         return f"{self.base_url}/subtitles/{resource}.json"
 
     def _language_scope(self, language: str | None) -> str:
-        # No preference: fall back to a broad set so every language stays in
-        # the result set (the caller filters afterwards).
-        if not language:
-            return "|".join(self.default_languages)
-        codes = [language]
-        if "en" not in codes:
-            codes.append("en")
-        return "|".join(codes)
+        # A requested language is scoped to itself + English: the add-on
+        # accepts at most 10 languages and returns a limited result set, so a
+        # broad list could push the wanted language out. No preference keeps
+        # the broad default set.
+        if language:
+            codes = [language]
+            if language != "en":
+                codes.append("en")
+            return "|".join(codes)
+        return "|".join(self.default_languages[:10])
 
     def _parse(self, entry: dict) -> Subtitle:
         code = normalize_language(
@@ -126,6 +134,12 @@ class StremioSubtitleProvider(SubtitleProvider):
                 title = value.strip()
                 break
         url = entry.get("url") or ""
+        sub_id = entry.get("sub_id") or entry.get("id") or ""
+        fps = entry.get("fpsMilli")
+        if isinstance(fps, (int, float)) and fps:
+            fps = round(float(fps) / 1000, 3) if fps > 100 else float(fps)
+        else:
+            fps = None
         return Subtitle(
             url=url,
             source=self.name,
@@ -134,6 +148,14 @@ class StremioSubtitleProvider(SubtitleProvider):
             title=title,
             fmt=guess_format(url),
             priority=self.priority,
+            sub_id=str(sub_id),
+            trusted=bool(entry.get("from_trusted")),
+            ai_translated=bool(entry.get("ai_translated")),
+            hearing_impaired=bool(
+                entry.get("hearing_impaired") or entry.get("hi")
+            ),
+            fps=fps,
+            incomplete=is_incomplete(title),
         )
 
 
@@ -165,7 +187,14 @@ class AnimeToshoProvider(SubtitleProvider):
         subtitles: list[Subtitle] = []
         seen: set[str] = set()
         for release in candidates:
-            subtitles.extend(self._release_subtitles(release, query, seen, release.get("id") == trusted_id))
+            subtitles.extend(
+                self._release_subtitles(
+                    release,
+                    query,
+                    seen,
+                    release.get("id") == trusted_id,
+                )
+            )
         return subtitles
 
     def _search(self, anidb_id: int) -> list[dict]:
@@ -181,7 +210,7 @@ class AnimeToshoProvider(SubtitleProvider):
         batch: list[dict] = []
         for release in releases:
             name = release.get("torrent_name") or release.get("title") or ""
-            if matches_episode(name, episode or 1, season):
+            if matches_episode(name, episode if episode is not None else 1, season):
                 exact.append(release)
             elif is_batch(name):
                 batch.append(release)
@@ -198,7 +227,9 @@ class AnimeToshoProvider(SubtitleProvider):
         subtitles: list[Subtitle] = []
         for file in data.get("files") or []:
             name = file.get("name") or file.get("filename") or ""
-            if not allow_unmatched and not matches_episode(name, query.episode or 1, query.season):
+            if not allow_unmatched and not matches_episode(
+                name, query.episode if query.episode is not None else 1, query.season
+            ):
                 continue
             for attachment in file.get("attachments") or []:
                 if attachment.get("type") != "subtitle":

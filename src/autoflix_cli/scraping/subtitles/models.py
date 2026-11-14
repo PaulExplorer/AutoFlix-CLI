@@ -16,10 +16,15 @@ class SubtitleQuery:
     # Canonical ISO 639-1 code (see :mod:`language_tags`), or ``None``.
     language: str | None = None
     anidb_id: int | None = None
+    # Release label of the stream being played, used to prefer a subtitle
+    # uploaded for the same release (same group / resolution).
+    release: str | None = None
 
     @property
     def is_episode(self) -> bool:
-        return bool(self.season and self.episode)
+        # Season/episode 0 are valid (specials, prologues): test for presence,
+        # not truthiness.
+        return self.season is not None and self.episode is not None
 
 
 @dataclass(frozen=True)
@@ -38,6 +43,14 @@ class Subtitle:
     fmt: str = "srt"
     priority: int = 100
     headers: dict[str, str] = field(default_factory=dict)
+    # Provider-side identity, used to de-duplicate the same upload surfaced by
+    # several add-ons (OpenSubtitles ``sub_id``).
+    sub_id: str = ""
+    trusted: bool = False
+    ai_translated: bool = False
+    hearing_impaired: bool = False
+    fps: float | None = None
+    incomplete: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         """Mapping form consumed by the players and the CLI handlers."""
@@ -51,4 +64,16 @@ class Subtitle:
         }
         if self.headers:
             data["headers"] = dict(self.headers)
+        if self.sub_id:
+            data["sub_id"] = self.sub_id
+        if self.trusted:
+            data["trusted"] = True
+        if self.ai_translated:
+            data["ai_translated"] = True
+        if self.hearing_impaired:
+            data["hi"] = True
+        if self.fps:
+            data["fps"] = self.fps
+        if self.incomplete:
+            data["incomplete"] = True
         return data
