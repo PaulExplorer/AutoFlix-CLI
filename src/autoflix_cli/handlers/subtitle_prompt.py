@@ -11,9 +11,6 @@ subtitles? On yes, the track is searched through the keyless providers of
 from __future__ import annotations
 
 import re
-import urllib.parse
-
-from curl_cffi import requests
 
 from ..cli_utils import (
     get_user_input,
@@ -23,11 +20,9 @@ from ..cli_utils import (
     select_from_list,
 )
 from ..languages import get_language_label
+from ..scraping import metadata
 from ..scraping.subtitles import subtitle_extractor
 from ..tracker import tracker
-
-CINEMETA_SERIES = "https://v3-cinemeta.strem.io/catalog/series/top/search={query}.json"
-CINEMETA_MOVIE = "https://v3-cinemeta.strem.io/catalog/movie/top/search={query}.json"
 
 _ANY_NUMBER = re.compile(r"\d+")
 # Explicit episode markers, tried before any loose number so a title that
@@ -84,31 +79,16 @@ def parse_season(value) -> int | None:
     return int(match.group(1) or match.group(2))
 
 
-def _cinemeta_matches(title: str, is_movie: bool | None = None) -> list[dict]:
-    """Cinemeta (Stremio, keyless) catalogue entries matching ``title``.
+def _cinemeta_matches(
+    title: str, is_movie: bool | None = None, year: int | None = None
+) -> list[dict]:
+    """Cinemeta (Stremio, keyless) entries matching ``title``, best first.
 
-    ``is_movie`` narrows the search to the right catalog. This matters for
-    French titles: searching both at once buries the movie results under the
-    (irrelevant) series ones, so a movie could never be picked.
+    Unlike a raw catalogue query, every result is scored against the title,
+    year and media type: a movie named "Memories" must beat the dozen series
+    sharing the word. The list is only truncated *after* ranking.
     """
-    if is_movie is True:
-        endpoints = (CINEMETA_MOVIE,)
-    elif is_movie is False:
-        endpoints = (CINEMETA_SERIES,)
-    else:
-        endpoints = (CINEMETA_SERIES, CINEMETA_MOVIE)
-
-    metas: list[dict] = []
-    for endpoint in endpoints:
-        url = endpoint.format(query=urllib.parse.quote(title))
-        try:
-            payload = requests.get(
-                url, timeout=8, impersonate="chrome", allow_redirects="safe"
-            ).json()
-        except Exception:
-            continue
-        metas.extend(payload.get("metas") or [])
-    return [meta for meta in metas if meta.get("imdb_id")][:7]
+    return metadata.cinemeta_candidates(title, is_movie, year)
 
 
 def _ask_manual_imdb_id() -> str | None:
@@ -116,28 +96,42 @@ def _ask_manual_imdb_id() -> str | None:
     return value or None
 
 
+def _candidate_label(candidate: dict) -> str:
+    kind = "movie" if candidate.get("is_movie") else "series"
+    year = candidate.get("year") or "?"
+    return f"{candidate.get('title') or '?'} ({year}) - {kind}"
+
+
 def resolve_imdb_id(
-    title: str, is_movie: bool | None = None
+    title: str,
+    is_movie: bool | None = None,
+    year: int | None = None,
 ) -> tuple[str | None, bool]:
     """Let the user pick the IMDB entry matching ``title``.
 
-    ``is_movie`` restricts the catalog to search; when ``None`` both are
-    queried. Returns ``(imdb_id, is_movie)``; ``(None, False)`` when skipped.
+    TMDB is tried first (it ranks localized titles and knows the exact media
+    type), then Cinemeta as a keyless fallback. Returns ``(imdb_id,
+    is_movie)``; ``(None, False)`` when skipped.
     """
-    matches = _cinemeta_matches(title, is_movie)
+    matches: list[dict] = []
+    try:
+        matches = metadata.search_titles(title, is_movie, year)
+    except Exception:  # noqa: BLE001 - fall back to Cinemeta
+        matches = []
+    if not matches:
+        matches = _cinemeta_matches(title, is_movie, year)
+    matches = matches[:8]
+
     if not matches:
         return _ask_manual_imdb_id(), False
 
-    options = [
-        f"{meta.get('name')} ({meta.get('year', '?')}) - {meta.get('type', 'series')}"
-        for meta in matches
-    ]
+    options = [_candidate_label(meta) for meta in matches]
     options += ["Enter manually", "Skip subtitles", "← Back"]
     index = select_from_list(options, f"Select IMDB match for '{title}':")
 
     if index < len(matches):
         meta = matches[index]
-        return meta["imdb_id"], meta.get("type") == "movie"
+        return meta["imdb_id"], bool(meta.get("is_movie"))
     if index == len(matches):
         return _ask_manual_imdb_id(), False
     return None, False
@@ -158,10 +152,20 @@ def _anilist_ids(anilist_id: int) -> tuple[str | None, int | None]:
     return (imdb_id or None), (mappings.get("anidbId") or None)
 
 
-def _describe_subtitle(subtitle: dict) -> str:
+def describe_subtitle(subtitle: dict) -> str:
     label = subtitle.get("label") or subtitle.get("lang") or "?"
     title = (subtitle.get("title") or "").strip()
-    base = f"{subtitle.get('source', '?')} · {label}"
+    tags = []
+    if subtitle.get("trusted"):
+        tags.append("trusted")
+    if subtitle.get("ai_translated"):
+        tags.append("AI")
+    if subtitle.get("incomplete"):
+        tags.append("CD1")
+    if subtitle.get("hi"):
+        tags.append("HI")
+    suffix = "".join(f" [{tag}]" for tag in tags)
+    base = f"{subtitle.get('source', '?')} · {label}{suffix}"
     return f"{base} · {title[:45]}" if title else base
 
 
@@ -175,6 +179,8 @@ def prompt_extra_subtitles(
     episode: int | None = None,
     language: str | None = None,
     is_movie: bool | None = None,
+    year: int | None = None,
+    release: str | None = None,
 ) -> list[dict]:
     """Ask whether to add external subtitles and return the chosen track(s).
 
@@ -195,7 +201,7 @@ def prompt_extra_subtitles(
         anidb_id = anidb_id or mapped_anidb
 
     if not imdb_id and not anidb_id and title:
-        imdb_id, is_movie = resolve_imdb_id(title, is_movie)
+        imdb_id, is_movie = resolve_imdb_id(title, is_movie, year)
         if is_movie:
             season, episode = None, None
 
@@ -209,13 +215,14 @@ def prompt_extra_subtitles(
         episode=episode,
         lang_filter=user_lang,
         anidb_id=anidb_id,
+        release=release,
     )
     if not results:
         print_warning(f"No {lang_name} subtitles found.")
         return []
 
     shown = results[:_MAX_RESULTS]
-    options = [_describe_subtitle(sub) for sub in shown] + ["← Cancel"]
+    options = [describe_subtitle(sub) for sub in shown] + ["← Cancel"]
     index = select_from_list(options, "📝 Select subtitle track:")
     if index >= len(shown):
         return []

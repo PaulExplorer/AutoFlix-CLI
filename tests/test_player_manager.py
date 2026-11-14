@@ -386,6 +386,16 @@ def test_build_direct_command_mpv_options():
     )
     assert "--tls-verify=no" in cmd
     assert "--demuxer-max-bytes=64MiB" in cmd
+    assert any(option.startswith("--slang=") for option in cmd)
+    assert "--sub-auto=fuzzy" in cmd
+
+
+def test_vlc_does_not_receive_mpv_subtitle_options():
+    cmd = pm._build_direct_command(
+        "https://cdn/f.mp4", {}, {}, "", "cdn", "vlc", "vlc", "T", []
+    )
+    assert not any(option.startswith("--slang=") for option in cmd)
+    assert "--sub-auto=fuzzy" not in cmd
 
 
 def test_build_direct_command_vlc():

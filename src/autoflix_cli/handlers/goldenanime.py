@@ -1,5 +1,3 @@
-import re
-
 from ..anilist import anilist_client
 from ..cli_utils import (
     get_user_input,
@@ -16,7 +14,105 @@ from ..scraping import player as player_scraper
 from ..scraping.goldenanime import goldenanime
 from ..scraping.subtitles import subtitle_extractor
 from ..tracker import tracker
-from .subtitle_prompt import resolve_imdb_id
+from .subtitle_prompt import describe_subtitle, resolve_imdb_id
+
+
+def _mapping_ids(anilist_id: int | None) -> dict:
+    """AniList cross-platform ids (imdbId/anidbId/format/defaultTvdbSeason)."""
+    if not anilist_id:
+        return {}
+    try:
+        return goldenanime.get_mappings(anilist_id) or {}
+    except Exception:  # noqa: BLE001 - mapping API is best-effort
+        return {}
+
+
+def _mapping_season(mappings: dict) -> int:
+    for key in ("defaultTvdbSeason", "tmdbSeason"):
+        value = mappings.get(key)
+        try:
+            season = int(value)
+        except (TypeError, ValueError):
+            continue
+        if season > 0:
+            return season
+    return 1
+
+
+def _episode_offset(mappings: dict) -> int:
+    """Episodes to add to an AniList number to match TVDB/OpenSubtitles.
+
+    OpenSubtitles names its files after the TVDB season, which does not always
+    restart at 1 for a new AniList entry: a split cour is a separate AniList
+    entry but one continuous TVDB season. ``episodeOffset`` is authoritative
+    when the mapping provides it; otherwise the offset is rebuilt from the
+    franchise's prequels that share the same TVDB season.
+    """
+    if not mappings:
+        return 0
+    raw = mappings.get("episodeOffset")
+    if raw is not None and str(raw).strip() != "":
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            pass
+    return _prequel_offset(mappings)
+
+
+def _prequel_offset(mappings: dict) -> int:
+    """Sum the episodes of the prequels that share this TVDB season."""
+    season = _mapping_season(mappings)
+    tvdb_id = mappings.get("thetvdbId")
+    if not tvdb_id:
+        return 0
+
+    total = 0
+    seen: set[int] = set()
+    for entry in mappings.get("franchise") or []:
+        if not isinstance(entry, dict) or entry.get("relation") != "PREQUEL":
+            continue
+        if (entry.get("format") or "").upper() not in ("TV", "ONA"):
+            continue
+        anilist_id = entry.get("anilistId")
+        if not anilist_id or anilist_id in seen:
+            continue
+        seen.add(anilist_id)
+
+        prequel = _mapping_ids(anilist_id)
+        if not prequel or prequel.get("thetvdbId") != tvdb_id:
+            continue
+        if _mapping_season(prequel) != season:
+            continue
+        try:
+            total += int(prequel.get("episodes") or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def _subtitle_episode(
+    episode: int, season: int | None, default_season: int, mappings: dict
+) -> int:
+    """TVDB episode number to query, offsetting only the mapped season.
+
+    A season the user picked by hand has no known offset, so it is used as-is.
+    """
+    if season != default_season:
+        return episode
+    return episode + _episode_offset(mappings)
+
+
+def _ask_subtitle_season(default: int) -> int | None:
+    """Ask for a season without pretending there are always ten of them."""
+    options = [f"Season {default}", "Other season…", "← Back"]
+    index = select_from_list(options, "Select season for the subtitle lookup:")
+    if index == 0:
+        return default
+    if index == 1:
+        value = get_user_input(f"Season number (default {default})")
+        return int(value) if value and value.isdigit() else default
+    return None
+
 
 
 def handle_goldenanime():
@@ -92,6 +188,15 @@ def _flow_goldenanime_stream(
     title: str, anilist_id: int, episode: int, cover_url: str = None
 ):
     """Common logic for searching streams, subtitles, and playing."""
+    mappings = _mapping_ids(anilist_id)
+    mapped_imdb = mappings.get("imdbId")
+    if mapped_imdb and not str(mapped_imdb).startswith("tt"):
+        mapped_imdb = f"tt{mapped_imdb}"
+    mapped_anidb = mappings.get("anidbId")
+    mapping_format = (mappings.get("format") or mappings.get("type") or "").upper()
+    is_movie = True if mapping_format == "MOVIE" else (False if mapping_format else None)
+    default_season = _mapping_season(mappings)
+
     print_info("Searching for streams...")
     results = goldenanime.extract_vo(
         title=title, anilist_id=anilist_id, episode=episode
@@ -179,72 +284,61 @@ def _flow_goldenanime_stream(
             if want_subs == 2:
                 continue
             if want_subs == 0:
-                imdb_id = None
-                is_movie = False
-                if search_title:
-                    imdb_id, is_movie = resolve_imdb_id(search_title)
-                else:
+                # The AniList mapping is authoritative when present: it knows
+                # the IMDB/AniDB ids and whether the entry is a movie, so no
+                # Cinemeta guessing and no fake season menu.
+                imdb_id = mapped_imdb
+                anidb_id = mapped_anidb
+                movie = is_movie
+                if not imdb_id and not anidb_id and search_title:
+                    imdb_id, resolved_movie = resolve_imdb_id(
+                        search_title, is_movie
+                    )
+                    if is_movie is None:
+                        movie = bool(resolved_movie)
+                elif not imdb_id and not anidb_id:
                     imdb_id = get_user_input(
                         "Enter IMDB ID manually (e.g. tt0388629, leave blank to skip)"
                     )
 
-                if imdb_id:
+                if imdb_id or anidb_id:
                     season = None
-                    if not is_movie:
-                        # Detect season from title for smart default
-                        default_season_idx = 0
-                        if search_title:
-                            match = re.search(r"Season\s+(\d+)", search_title, re.IGNORECASE)
-                            if match:
-                                detected_season = int(match.group(1))
-                                # Range 1-10 mapped to 0-9 index
-                                if 1 <= detected_season <= 10:
-                                    default_season_idx = detected_season - 1
-
-                        season_options = [f"Season {i}" for i in range(1, 11)] + [
-                            "Manual Input",
-                            "← Back",
-                        ]
-                        s_idx = select_from_list(
-                            season_options,
-                            "Select Season (for subtitles mapping):",
-                            default_index=default_season_idx,
-                        )
-                        if s_idx < 10:
-                            season = s_idx + 1
-                        elif s_idx == 10:
-                            season_input = get_user_input("Season number (default 1)")
-                            season = (
-                                int(season_input)
-                                if season_input and season_input.isdigit()
-                                else 1
-                            )
-                        else:
+                    sub_episode = None
+                    if not movie:
+                        season = _ask_subtitle_season(default_season)
+                        if season is None:
                             continue
+                        sub_episode = _subtitle_episode(
+                            episode, season, default_season, mappings
+                        )
+                        if sub_episode != episode:
+                            print_info(
+                                f"TVDB numbering: S{season:02d}E{sub_episode:02d} "
+                                f"(AniList episode {episode})"
+                            )
 
                     print_info(f"Searching for {lang_name} subtitles...")
-                    anidb_id = None
-                    if anilist_id:
-                        mappings = goldenanime.get_mappings(anilist_id)
-                        anidb_id = mappings.get("anidbId")
                     subs = subtitle_extractor.search(
                         imdb_id=imdb_id,
                         season=season,
-                        episode=episode,
+                        episode=sub_episode,
                         lang_filter=user_lang,
                         anidb_id=anidb_id,
                     )
 
                     if subs:
-                        # Show a shortened list to make it faster
-                        sub_choices = [
-                            f"{s['source']} - {s.get('lang', lang_name)}" for s in subs[:6]
-                        ] + ["← Back", "None"]
+                        shown = subs[:6]
+                        sub_choices = [describe_subtitle(s) for s in shown] + [
+                            "← Back",
+                            "None",
+                        ]
                         sub_idx = select_from_list(sub_choices, "📝 Select Subtitle:")
-                        if sub_idx < len(subs[:6]):
-                            subtitle_tracks = [subs[sub_idx]]
-                            print_info(f"Selected subtitle from: {subs[sub_idx]['source']}")
-                        elif sub_idx == len(subs[:6]):
+                        if sub_idx < len(shown):
+                            subtitle_tracks = [shown[sub_idx]]
+                            print_info(
+                                f"Selected subtitle from: {shown[sub_idx]['source']}"
+                            )
+                        elif sub_idx == len(shown):
                             continue
                     else:
                         print_warning(f"No {lang_name} subtitles found.")

@@ -125,7 +125,7 @@ def test_stremio_provider_builds_scoped_series_url(monkeypatch):
     subs = provider.fetch(SubtitleQuery(imdb_id="tt1", language="fr"))
 
     assert calls == [
-        "https://homes.example/fr|en/ai-translated=false|from=all/subtitles/movie/tt1.json"
+        "https://homes.example/fr|en/ai-translated=true|from=all|auto-adjustment=true/subtitles/movie/tt1.json"
     ]
     assert [s.language for s in subs] == ["fr", "fr"]
     assert subs[0].priority == 1
@@ -155,7 +155,7 @@ def test_stremio_provider_uses_default_languages_without_preference(monkeypatch)
     )
     provider.fetch(SubtitleQuery(imdb_id="tt1"))
     assert calls == [
-        "https://homes.example/en|fr/ai-translated=false|from=all/subtitles/movie/tt1.json"
+        "https://homes.example/en|fr/ai-translated=true|from=all|auto-adjustment=true/subtitles/movie/tt1.json"
     ]
 
 
@@ -287,3 +287,72 @@ def test_global_extractor_is_importable():
     from autoflix_cli.scraping.subtitles import subtitle_extractor
 
     assert isinstance(subtitle_extractor, SubtitleExtractor)
+
+
+def test_guess_format_handles_vtt_envelope_routes():
+    assert guess_format("https://x/sub.vtt/?lang_code=fr&sub_id=1") == "vtt"
+
+
+def test_is_episode_accepts_zero_season_and_episode():
+    assert SubtitleQuery(imdb_id="tt1", season=0, episode=0).is_episode is True
+    assert SubtitleQuery(imdb_id="tt1", season=1, episode=None).is_episode is False
+
+
+def test_stremio_provider_parses_quality_metadata(monkeypatch):
+    def fake_fetch_json(url, session=None):
+        return {
+            "subtitles": [
+                {
+                    "sub_id": 42,
+                    "lang_code": "fr",
+                    "title": "Movie-1cd",
+                    "url": "https://x/fr.srt",
+                    "from_trusted": True,
+                    "ai_translated": True,
+                    "fpsMilli": 25000,
+                }
+            ]
+        }
+
+    monkeypatch.setattr(providers, "fetch_json", fake_fetch_json)
+    provider = StremioSubtitleProvider("Homes", "https://homes.example", language_scoped=True)
+    sub = provider.fetch(SubtitleQuery(imdb_id="tt1", language="fr"))[0]
+
+    assert sub.sub_id == "42"
+    assert sub.trusted is True
+    assert sub.ai_translated is True
+    assert sub.incomplete is True
+    assert sub.fps == 25.0
+
+
+def test_extractor_prefers_complete_human_tracks():
+    provider = _FakeProvider(
+        "A",
+        1,
+        [
+            Subtitle(
+                url="cd1", source="A", language="fr", title="Movie-1cd", incomplete=True
+            ),
+            Subtitle(
+                url="ai", source="A", language="fr", title="Movie.AI", ai_translated=True
+            ),
+            Subtitle(url="human", source="A", language="fr", title="Movie"),
+        ],
+    )
+
+    results = SubtitleExtractor([provider]).search("tt1", lang_filter="fr")
+
+    assert [r["url"] for r in results] == ["human", "ai", "cd1"]
+
+
+def test_extractor_dedupes_by_sub_id_across_providers():
+    first = _FakeProvider(
+        "First", 1, [Subtitle(url="a", source="First", language="fr", sub_id="42")]
+    )
+    second = _FakeProvider(
+        "Second", 2, [Subtitle(url="b", source="Second", language="fr", sub_id="42")]
+    )
+
+    results = SubtitleExtractor([first, second]).search("tt1", lang_filter="fr")
+
+    assert len(results) == 1 and results[0]["source"] == "First"
