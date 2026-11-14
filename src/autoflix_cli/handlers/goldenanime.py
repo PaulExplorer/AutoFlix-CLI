@@ -39,6 +39,69 @@ def _mapping_season(mappings: dict) -> int:
     return 1
 
 
+def _episode_offset(mappings: dict) -> int:
+    """Episodes to add to an AniList number to match TVDB/OpenSubtitles.
+
+    OpenSubtitles names its files after the TVDB season, which does not always
+    restart at 1 for a new AniList entry: a split cour is a separate AniList
+    entry but one continuous TVDB season. ``episodeOffset`` is authoritative
+    when the mapping provides it; otherwise the offset is rebuilt from the
+    franchise's prequels that share the same TVDB season.
+    """
+    if not mappings:
+        return 0
+    raw = mappings.get("episodeOffset")
+    if raw is not None and str(raw).strip() != "":
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            pass
+    return _prequel_offset(mappings)
+
+
+def _prequel_offset(mappings: dict) -> int:
+    """Sum the episodes of the prequels that share this TVDB season."""
+    season = _mapping_season(mappings)
+    tvdb_id = mappings.get("thetvdbId")
+    if not tvdb_id:
+        return 0
+
+    total = 0
+    seen: set[int] = set()
+    for entry in mappings.get("franchise") or []:
+        if not isinstance(entry, dict) or entry.get("relation") != "PREQUEL":
+            continue
+        if (entry.get("format") or "").upper() not in ("TV", "ONA"):
+            continue
+        anilist_id = entry.get("anilistId")
+        if not anilist_id or anilist_id in seen:
+            continue
+        seen.add(anilist_id)
+
+        prequel = _mapping_ids(anilist_id)
+        if not prequel or prequel.get("thetvdbId") != tvdb_id:
+            continue
+        if _mapping_season(prequel) != season:
+            continue
+        try:
+            total += int(prequel.get("episodes") or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def _subtitle_episode(
+    episode: int, season: int | None, default_season: int, mappings: dict
+) -> int:
+    """TVDB episode number to query, offsetting only the mapped season.
+
+    A season the user picked by hand has no known offset, so it is used as-is.
+    """
+    if season != default_season:
+        return episode
+    return episode + _episode_offset(mappings)
+
+
 def _ask_subtitle_season(default: int) -> int | None:
     """Ask for a season without pretending there are always ten of them."""
     options = [f"Season {default}", "Other season…", "← Back"]
@@ -245,7 +308,14 @@ def _flow_goldenanime_stream(
                         season = _ask_subtitle_season(default_season)
                         if season is None:
                             continue
-                        sub_episode = episode
+                        sub_episode = _subtitle_episode(
+                            episode, season, default_season, mappings
+                        )
+                        if sub_episode != episode:
+                            print_info(
+                                f"TVDB numbering: S{season:02d}E{sub_episode:02d} "
+                                f"(AniList episode {episode})"
+                            )
 
                     print_info(f"Searching for {lang_name} subtitles...")
                     subs = subtitle_extractor.search(
