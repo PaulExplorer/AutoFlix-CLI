@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
@@ -23,6 +24,45 @@ class Player:
 class Episode:
     title: str
     players: list[Player]
+
+
+@dataclass
+class SamaLinkContext:
+    """State shared by the episodes of one Anime-Sama season page.
+
+    ``jeton`` is the page token required by ``/api/lien.php`` and can be
+    refreshed in place when it expires.
+    """
+
+    referer: str
+    jeton: str
+
+
+@dataclass
+class SamaEpisode(Episode):
+    """Episode whose players are resolved on demand.
+
+    Anime-Sama season pages only carry ``lien:<id>`` references. Resolving
+    every episode at once would hit the API rate limit, so the references
+    stay here until the episode is selected.
+    """
+
+    links: list[Optional[str]] = field(default_factory=list)
+    link_context: Optional[SamaLinkContext] = None
+
+
+@dataclass
+class SamaSeasonPage:
+    """Episode references parsed from an Anime-Sama season page.
+
+    ``episodes`` holds one list per episode, with the raw entry of each
+    player column (empty string when that player has no link).
+    """
+
+    episodes: list[list[str]]
+    jeton: str = ""
+    langs: list[str] = field(default_factory=list)
+    ordre_final: bool = True
 
 
 @dataclass
