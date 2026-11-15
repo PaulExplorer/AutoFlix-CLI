@@ -17,6 +17,7 @@ from ..player_manager import play_video
 from ..scraping import metadata
 from ..scraping import player as player_scraper
 from ..scraping.goldenms import goldenms_extractor
+from ..scraping.meowtv import meowtv_extractor
 from ..scraping.subtitles import subtitle_extractor
 from ..tracker import tracker
 from .subtitle_prompt import describe_subtitle
@@ -271,6 +272,14 @@ def _flow_goldenms_stream(
         episode=episode,
     )
 
+    # MeowTV speaks JSON and only needs the TMDB id resolved above: it keeps
+    # answering when VidLink's signed manifests stop playing.
+    try:
+        meowtv_results = meowtv_extractor.streams(tmdb_id, season, episode)
+    except Exception:  # noqa: BLE001 - optional source
+        meowtv_results = []
+    results = results + meowtv_results
+
     valid_results = [r for r in results if _is_valid(r)]
 
     if not valid_results:
@@ -304,12 +313,13 @@ def _flow_goldenms_stream(
 
         embedded_tracks = selection.get("subtitles") or []
         if embedded_tracks:
-            langs_preview = ", ".join(
-                sorted({t.get("lang", "?") for t in embedded_tracks})
-            )
+            labels = sorted({t.get("lang", "?") for t in embedded_tracks})
+            preview = ", ".join(labels[:6])
+            if len(labels) > 6:
+                preview += f"… (+{len(labels) - 6})"
             use_embedded = select_from_list(
                 [
-                    f"Yes (load {len(embedded_tracks)} tracks: {langs_preview})",
+                    f"Yes (load {len(embedded_tracks)} tracks: {preview})",
                     "No (search external subtitles)",
                     "← Back",
                 ],

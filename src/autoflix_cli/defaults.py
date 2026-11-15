@@ -165,6 +165,7 @@ DEFAULT_SOURCE_PORTAL = {
     "opensubtitles-stremio": "https://opensubtitles-v3.strem.io",
     "vidlink": "https://vidlink.pro",
     "megaplay": "https://megaplay.buzz",
+    "meowtv": "https://api.meowtv.ru",
     "tmdb": "https://theemoviedb.hexa.su/api/tmdb",
     "hexa": "https://theemoviedb.hexa.su",
     "hexa-referer": "https://hexa.su",
