@@ -1,3 +1,6 @@
+import time
+from typing import NamedTuple
+
 from ..anilist import anilist_client
 from ..cli_utils import (
     get_user_input,
@@ -7,14 +10,55 @@ from ..cli_utils import (
     print_success,
     print_warning,
     select_from_list,
+    supports_live_refresh,
 )
 from ..languages import get_language_label
 from ..player_manager import play_video
 from ..scraping import player as player_scraper
-from ..scraping.goldenanime import goldenanime
+from ..scraping.goldenanime import goldenanime, probe_direct_stream
+from ..scraping.megaplay import megaplay_extractor
 from ..scraping.subtitles import subtitle_extractor
 from ..tracker import tracker
 from .subtitle_prompt import describe_subtitle, resolve_imdb_id
+
+# Seconds to wait for a first stream before showing the menu anyway. Below
+# that the list is often empty on a cold title, above it the user stares at
+# a blank screen while the fastest providers have already answered.
+FIRST_STREAM_WAIT = 10
+
+
+def _wait_for_remaining(search, timeout: float = 30.0, report_every: float = 8.0):
+    """Wait for the background search, reporting the sources as they land.
+
+    Sources keep arriving on their own: this only blocks so the user can see
+    the final list without playing first. Bounded so a slow instance cannot
+    trap the user in a silent wait.
+    """
+    print_info(
+        "Still looking for a first source..."
+        if not search.snapshot()
+        else "Waiting for the remaining sources..."
+    )
+    deadline = time.monotonic() + timeout
+    count = len(search.snapshot())
+    last_report = time.monotonic()
+    while not search.is_done() and time.monotonic() < deadline:
+        search.wait(1)
+        found = len(search.snapshot())
+        now = time.monotonic()
+        if found != count or now - last_report >= report_every:
+            count = found
+            last_report = now
+            print_info(
+                f"{found} source(s) so far, {search.pending()} still loading"
+            )
+    found = len(search.snapshot())
+    if search.is_done():
+        print_info(f"Search finished: {found} source(s).")
+    else:
+        print_info(
+            f"Still searching: {found} source(s), {search.pending()} still loading."
+        )
 
 
 def _mapping_ids(anilist_id: int | None) -> dict:
@@ -184,6 +228,134 @@ def handle_goldenanime():
     )
 
 
+def _merge_streams(*groups):
+    """Concatenate stream lists, dropping duplicate URLs (first one wins)."""
+    merged = []
+    seen = set()
+    for group in groups:
+        for entry in group or []:
+            url = entry.get("url")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            merged.append(entry)
+    return merged
+
+
+def _is_direct(entry) -> bool:
+    """True for a link a player opens directly (as opposed to an embed page)."""
+    return (entry.get("type") or "").lower() in ("m3u8", "hls", "mpd", "mp4")
+
+
+def _probe_failed(entry) -> bool:
+    """True once the background check reported this link as unreachable."""
+    probe = entry.get("probe") or {}
+    return probe.get("ok") is False
+
+
+def _probe_reason(error) -> str:
+    """Condense a probe error into a few characters for the menu."""
+    text = str(error or "unreachable").strip()
+    lowered = text.lower()
+    if text.startswith("HTTP "):
+        text = text[5:]
+    elif "timed out" in lowered or "timeout" in lowered:
+        text = "timeout"
+    elif text == "not a playlist":
+        text = "no playlist"
+    return text[:16]
+
+
+def _probe_marker(entry) -> str:
+    """Verdict suffix shown after a source (" ✓", " ✗ 403").
+
+    Rows are never reordered or hidden: the menu tells the user what the
+    background check saw, and picking a flagged link still tries it.
+    """
+    probe = entry.get("probe")
+    if not probe:
+        return ""
+    if probe.get("ok"):
+        return " ✓"
+    return f" ✗ {_probe_reason(probe.get('error'))}"
+
+
+def _is_playable(entry) -> bool:
+    """True for a direct stream or an embedded player we know how to extract."""
+    url = entry.get("url", "")
+    rtype = (entry.get("type") or "").lower()
+    return (
+        rtype in ("m3u8", "hls", "mpd", "mp4")
+        or ".m3u8" in url
+        or ".m3u" in url
+        or ".mpd" in url.lower()
+        or "master" in url.lower()
+        or player_scraper.is_supported(url)
+    )
+
+
+class _StreamMenu(NamedTuple):
+    """One frame of the source menu, plus the index map the caller needs."""
+
+    options: list[str]
+    prompt: str
+    entries: list[dict]
+    back: int
+    wait: int
+    skipped: int
+
+
+def _stream_menu(
+    megaplay_results, snapshot, *, waiting, pending, live_menu
+) -> _StreamMenu:
+    """Build the source menu from the current search snapshot.
+
+    Rows keep the arrival order of the search: a later link is appended, never
+    inserted, so the highlighted entry does not jump while the search or the
+    link checks finish. The verdict of the background check is appended as a
+    suffix instead of moving or hiding the row.
+    """
+    results = _merge_streams(megaplay_results, snapshot)
+    entries = [entry for entry in results if _is_playable(entry)]
+    rows = [
+        f"{entry['source']} - {entry['quality']} ({entry['type']})"
+        f"{_probe_marker(entry)}"
+        for entry in entries
+    ]
+
+    checking = sum(
+        1 for entry in snapshot if _is_direct(entry) and "probe" not in entry
+    )
+    unreachable = sum(1 for entry in entries if _probe_failed(entry))
+    if not entries and waiting:
+        status = ["searching…"]
+    else:
+        status = [f"{len(entries)} source(s)"]
+        if checking:
+            status.append(f"{checking} checking")
+        if unreachable:
+            status.append(f"{unreachable} unreachable")
+        if waiting:
+            status.append(f"{pending} still loading")
+    prompt = f"📺 Select Stream · {' · '.join(status)}:"
+
+    options = list(rows)
+    wait_index = -1
+    if not live_menu and waiting:
+        wait_index = len(options)
+        options.append(f"⏳ Wait for the remaining sources ({pending} still loading)")
+    options.append("← Back")
+
+    return _StreamMenu(
+        options=options,
+        prompt=prompt,
+        entries=entries,
+        back=len(options) - 1,
+        wait=wait_index,
+        skipped=len(results) - len(entries),
+    )
+
+
 def _flow_goldenanime_stream(
     title: str, anilist_id: int, episode: int, cover_url: str = None
 ):
@@ -198,54 +370,93 @@ def _flow_goldenanime_stream(
     default_season = _mapping_season(mappings)
 
     print_info("Searching for streams...")
-    results = goldenanime.extract_vo(
-        title=title, anilist_id=anilist_id, episode=episode
+    # Progressive: the first streams show up as soon as an instance answers,
+    # and the slower ones are appended while the user browses or watches.
+    # Every direct link is checked in the background so the menu can flag the
+    # ones that will not play, without ever reordering or hiding a row.
+    search = goldenanime.progressive_search(
+        anilist_id, episode, probe=probe_direct_stream
     )
+    search.start()
 
-    if not results:
-        print_warning("No results found.")
-        pause()
-        return
+    # MegaPlay only needs the AniList id, so it keeps working when the
+    # aggregator's providers answer with errors. It runs while the workers
+    # above are already busy.
+    try:
+        megaplay_results = megaplay_extractor.streams(anilist_id, episode)
+    except Exception:  # noqa: BLE001 - optional source
+        megaplay_results = []
+    if not megaplay_results:
+        print_info("[dim]MegaPlay has no entry for this title.[/dim]")
 
-    # Filter: only keep direct streams (m3u8 / mp4) or supported embedded players
-    def _is_valid(r):
-        url = r.get("url", "")
-        rtype = (r.get("type") or "").lower()
-        return (
-            rtype in ("m3u8", "hls", "mp4")
-            or ".m3u8" in url
-            or ".m3u" in url
-            or "master" in url.lower()
-            or player_scraper.is_supported(url)
+    search.wait_for_first(FIRST_STREAM_WAIT)
+
+    # ``state`` holds what the last rendered frame maps to: a live menu can
+    # rebuild the list after this scope, so the index it returns must be read
+    # against the entries of that same frame.
+    live_menu = supports_live_refresh()
+    state = {"entries": [], "back": 0, "wait": -1, "skipped": 0}
+
+    def build_menu():
+        menu = _stream_menu(
+            megaplay_results,
+            search.snapshot(),
+            waiting=not search.is_done(),
+            pending=search.pending(),
+            live_menu=live_menu,
         )
-
-    valid_results = [r for r in results if _is_valid(r)]
-
-    if not valid_results:
-        print_warning(
-            "No supported streams found (no direct M3U8 or recognised players)."
+        state.update(
+            entries=menu.entries,
+            back=menu.back,
+            wait=menu.wait,
+            skipped=menu.skipped,
         )
-        pause()
-        return
+        return menu.options, menu.prompt
 
-    if len(valid_results) < len(results):
-        skipped = len(results) - len(valid_results)
-        print_info(f"[dim]Skipped {skipped} unsupported stream(s).[/dim]")
-
+    reported_skipped = 0
     while True:
-        choice_idx = select_from_list(
-            [
-                f"{r['source']} - {r['quality']} ({r['type']})"
-                for r in valid_results
-            ]
-            + ["← Back"],
-            "📺 Select Stream:",
-        )
+        options, prompt = build_menu()
+        entries = state["entries"]
+        waiting = not search.is_done()
 
-        if choice_idx == len(valid_results):  # Back
+        if not entries and not waiting:
+            print_warning(
+                "No supported streams found (no direct M3U8 or recognised players)."
+            )
+            pause()
             return
 
-        selection = valid_results[choice_idx]
+        if not entries and not live_menu:
+            # No live menu to fill itself: block and report the sources as
+            # they land instead of showing a list with a single "Back" row.
+            _wait_for_remaining(search)
+            continue
+
+        if state["skipped"] and state["skipped"] != reported_skipped:
+            reported_skipped = state["skipped"]
+            print_info(f"[dim]Skipped {reported_skipped} unsupported stream(s).[/dim]")
+
+        choice_idx = select_from_list(
+            options, prompt, refresher=build_menu if live_menu else None
+        )
+
+        # Indices are stable by construction: sources, then the optional
+        # "wait" row, then "Back".
+        if choice_idx == state["back"]:
+            search.stop()
+            return
+        if choice_idx == state["wait"]:
+            _wait_for_remaining(search)
+            continue
+
+        selection = state["entries"][choice_idx]
+
+        if _probe_failed(selection):
+            print_warning(
+                f"{selection['source']} did not answer the check "
+                f"({_probe_reason(selection['probe'].get('error'))}); "
+                "trying anyway."
+            )
 
         # Subtitles logic
         subtitle_tracks = None
@@ -351,10 +562,11 @@ def _flow_goldenanime_stream(
 
         final_url = selection["url"]
 
+        selection_type = selection["type"].lower()
         is_direct = (
-            selection["type"].lower() == "m3u8"
+            selection_type in ("m3u8", "mpd", "mp4")
             or "m3u8" in final_url
-            or selection["type"].lower() == "mp4"
+            or ".mpd" in final_url.lower()
         )
 
         success = play_video(

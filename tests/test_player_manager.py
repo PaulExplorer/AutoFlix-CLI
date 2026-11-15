@@ -132,6 +132,61 @@ def test_guess_subtitle_ext():
     assert pm._guess_subtitle_ext("https://x.com/noext") == ".srt"
 
 
+def test_subtitle_name_parts_uses_the_code_and_the_label():
+    assert pm._subtitle_name_parts({"lang": "en", "label": "English"}) == (
+        "English",
+        "en",
+    )
+    # GoldenAnime ships srclang codes, MegaPlay the English name in both keys.
+    assert pm._subtitle_name_parts({"lang": "fr", "label": "Français"}) == (
+        "Francais",
+        "fr",
+    )
+    assert pm._subtitle_name_parts({"lang": "French", "label": "French"}) == (
+        "French",
+        "fr",
+    )
+
+
+def test_subtitle_name_parts_without_language():
+    assert pm._subtitle_name_parts({"url": "https://x/a.srt"}) == ("", "")
+    assert pm._subtitle_name_parts("https://x/a.srt") == ("", "")
+    # Placeholder labels must not end up in the file name.
+    assert pm._subtitle_name_parts({"lang": "?", "label": "Unknown"}) == ("", "")
+
+
+def test_subtitle_name_parts_keeps_a_region_tag():
+    assert pm._subtitle_name_parts({"lang": "pt-BR", "label": ""}) == ("", "pt-br")
+
+
+def test_downloaded_subtitles_are_named_after_their_language(monkeypatch):
+    import os
+    import pathlib
+
+    import curl_cffi.requests
+
+    class Response:
+        status_code = 200
+        content = b"1\n00:00:01,000 --> 00:00:02,000\nBonjour\n"
+
+    monkeypatch.setattr(curl_cffi.requests, "get", lambda *a, **k: Response())
+
+    paths = pm._download_subtitles(
+        [{"url": "https://cdn/x.srt", "lang": "fr", "label": "Français"}]
+    )
+    try:
+        assert len(paths) == 1
+        name = pathlib.Path(paths[0]).name
+        # Readable in the player's track list, and mpv can match --slang on it.
+        assert name.startswith("autoflix_sub_Francais_")
+        assert name.endswith(".fr.srt")
+        # The proxy only serves files named this way inside the temp dir.
+        assert proxy._is_allowed_subtitle_path(paths[0])
+    finally:
+        for path in paths:
+            os.remove(path)
+
+
 def test_build_upstream_headers():
     headers = {"User-Agent": "ua"}
     config = {

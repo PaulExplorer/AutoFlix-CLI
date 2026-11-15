@@ -35,6 +35,7 @@ __all__ = [
     "print_warning",
     "select_from_list",
     "status",
+    "supports_live_refresh",
 ]
 
 _HIDE_CURSOR = "\x1b[?25l"
@@ -42,6 +43,10 @@ _SHOW_CURSOR = "\x1b[?25h"
 
 _MAX_VISIBLE_ROWS = 20
 _MIN_VISIBLE_ROWS = 5
+
+# How often a live menu asks its refresher for new rows. Fast enough to feel
+# automatic, slow enough not to burn CPU while the user reads.
+REFRESH_INTERVAL = 0.4
 
 
 # ---------------------------------------------------------------------------
@@ -485,7 +490,7 @@ def _decode_key_bytes(fd: int, first: bytes) -> str:
     return bytes(buf).decode("utf-8", errors="replace")
 
 
-def _read_key_posix() -> str:
+def _read_key_posix(timeout: float | None = None) -> str | None:
     """Read a single keypress on POSIX with working lone-Esc support.
 
     ``readchar.readkey()`` blocks waiting for a second byte after ESC,
@@ -493,6 +498,9 @@ def _read_key_posix() -> str:
     This reader switches stdin to cbreak mode, reads one byte, and when
     it is ESC waits briefly for sequence bytes: if none arrive, the user
     pressed Esc alone and ``"\\x1b"`` is returned.
+
+    With ``timeout`` set, the reader returns ``None`` when no key arrives in
+    time: that is what lets a menu redraw itself while the user reads it.
     """
     import select
     import termios
@@ -505,6 +513,8 @@ def _read_key_posix() -> str:
         # TCSANOW (not TCSAFLUSH): never discard queued input, otherwise
         # pasted text or fast typing would lose everything but one byte.
         termios.tcsetattr(fd, termios.TCSANOW, new)
+        if timeout is not None and not select.select([fd], [], [], timeout)[0]:
+            return None
         first = os.read(fd, 1)
         if not first or first == b"\x03":
             # EOF or Ctrl-C (in case ISIG is disabled).
@@ -536,16 +546,28 @@ def _read_key_posix() -> str:
             pass
 
 
-def _read_key() -> str:
+def _read_key(timeout: float | None = None) -> str | None:
     """Read a single keypress.
 
     On POSIX a small custom reader is used so a lone Esc press works
     (``readchar.readkey()`` blocks forever waiting for sequence bytes
     after ESC). On Windows ``readchar`` already handles Esc correctly.
+
+    ``timeout`` (POSIX only) returns ``None`` instead of blocking, so a menu
+    can refresh its contents between two keypresses.
     """
     if os.name == "nt":
         return readchar.readkey()
-    return _read_key_posix()
+    return _read_key_posix(timeout)
+
+
+def supports_live_refresh() -> bool:
+    """True when a menu can redraw itself while it waits for a keypress.
+
+    Only the POSIX reader can poll stdin with a timeout; ``readchar`` blocks
+    on Windows, so those menus keep the explicit "wait" entry instead.
+    """
+    return os.name != "nt" and _is_interactive()
 
 
 def _discard_typeahead() -> None:
@@ -563,6 +585,39 @@ def _discard_typeahead() -> None:
         pass
 
 
+def _refresh_cursor(
+    items: list[str], filtered: list[int], cursor: int, label: str | None
+) -> int:
+    """Cursor position in ``filtered`` for the row selected before a refresh.
+
+    Rows can be appended, relabelled or removed between two renders (a source
+    that turns out dead, a probe that lands). Tracking the label rather than
+    the index keeps the highlight on the row the user was about to pick.
+    """
+    if not filtered:
+        return 0
+    cursor = max(0, min(cursor, len(filtered) - 1))
+    if label is None:
+        return cursor
+    if items[filtered[cursor]] == label:
+        return cursor
+    if label in items:
+        index = items.index(label)
+        if index in filtered:
+            return filtered.index(index)
+    return cursor
+
+
+def _run_refresher(refresher):
+    """Ask a menu refresher for new rows; a broken callback keeps the old ones."""
+    if refresher is None:
+        return None
+    try:
+        return refresher()
+    except Exception:  # noqa: BLE001 - stale rows beat a crashed menu
+        return None
+
+
 def select_from_list(
     options: list[str] | Sequence[str],
     prompt: str,
@@ -570,6 +625,7 @@ def select_from_list(
     *,
     allow_filter: bool = True,
     is_disabled: Callable[[str], bool] | None = None,
+    refresher: Callable[[], tuple[Sequence[str], str] | None] | None = None,
 ) -> int:
     """Let the user pick one option with arrow keys (stable, lightweight).
 
@@ -592,9 +648,17 @@ def select_from_list(
         allow_filter: Enable type-to-filter for lists with more than 4 items.
         is_disabled: Optional predicate marking non-selectable rows.
             Defaults to detecting empty / ``──`` separator rows.
+        refresher: Optional callback returning ``(options, prompt)`` for the
+            next frame. It is polled while waiting for a keypress, so a list
+            fed by a background search (or by link checks) updates itself
+            instead of freezing until the user presses something. The
+            highlight follows the label it was on. POSIX only; ignored
+            elsewhere.
 
     Returns:
-        Index of the selected option in the original ``options`` list.
+        Index of the selected option in the current ``options`` list, i.e. the
+        last one returned by ``refresher`` when it changed. A caller feeding a
+        live menu must therefore keep that list next to the objects it maps.
     """
     items = list(options)
     if not items:
@@ -762,9 +826,37 @@ def select_from_list(
 
         while True:
             try:
-                key = _read_key()
+                key = _read_key(REFRESH_INTERVAL if refresher else None)
             except KeyboardInterrupt:
                 raise KeyboardInterrupt("Menu cancelled by user") from None
+
+            if key is None:
+                # No keypress: ask the refresher for the next frame. The
+                # highlighted row is remembered by label so appending a
+                # source (or marking one dead) never moves the cursor.
+                updated = _run_refresher(refresher)
+                if updated is None:
+                    continue
+                new_options, new_prompt = updated
+                new_items = list(new_options)
+                if not new_items:
+                    continue  # never replace a usable menu with an empty one
+                current_label = (
+                    items[filtered[cursor % len(filtered)]] if filtered else None
+                )
+                changed = new_items != items
+                if changed:
+                    items[:] = new_items
+                    is_off[:] = [disabled(option) for option in items]
+                    filter_enabled = allow_filter and len(items) > 4
+                    filtered = visible_indices()
+                    cursor = _refresh_cursor(items, filtered, cursor, current_label)
+                    if filtered and is_off[filtered[cursor]]:
+                        cursor = jump_to_edge(filtered, True)
+                if changed or new_prompt != prompt:
+                    prompt = new_prompt
+                    live.update(render_menu(filtered), refresh=True)
+                continue
 
             enter_key = getattr(readchar.key, "ENTER", "\r")
             if key in ("\r", "\n", enter_key):
