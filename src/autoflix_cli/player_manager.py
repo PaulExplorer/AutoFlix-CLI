@@ -1,10 +1,12 @@
 import json
 import os
 import platform
+import re
 import shlex
 import shutil
 import subprocess
 import time
+import unicodedata
 import urllib.parse
 import webbrowser
 from typing import Dict
@@ -75,6 +77,51 @@ def _guess_subtitle_ext(url: str) -> str:
     return ".srt"
 
 
+# A bare language tag ("en", "pt-BR") can go in the file extension, where mpv
+# reads it back to match --slang.
+_LANG_TAG = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z]{2,4})?$")
+_NAME_UNSAFE = re.compile(r"[^0-9A-Za-z]+")
+
+
+def _ascii_name(value: str) -> str:
+    """``Français`` -> ``Francais``: file names stay portable."""
+    decomposed = unicodedata.normalize("NFKD", value)
+    return decomposed.encode("ascii", "ignore").decode("ascii")
+
+
+def _subtitle_name_parts(item) -> tuple:
+    """``(label, code)`` used to name a downloaded subtitle file.
+
+    Players list attached tracks by file name, so ``autoflix_sub_<random>.srt``
+    left several languages indistinguishable. Providers are inconsistent:
+    some put a code in ``lang`` and the English name in ``label``, MegaPlay puts
+    the name in both. Both cases must give ``("English", "en")``.
+    """
+    if not isinstance(item, dict):
+        return "", ""
+    raw_lang = str(
+        item.get("lang") or item.get("language") or item.get("srclang") or ""
+    ).strip()
+    label = str(item.get("label") or item.get("title") or "").strip()
+
+    code = ""
+    if _LANG_TAG.match(raw_lang):
+        code = raw_lang.lower()
+    elif raw_lang and not label:
+        label = raw_lang
+
+    if not code and label:
+        from .languages import get_language_aliases
+
+        code = {
+            name: value for value, name in get_language_aliases().items()
+        }.get(label.lower(), "")
+
+    if label.lower() in ("", "?", "unknown") or label.lower() == code:
+        label = ""
+    return _NAME_UNSAFE.sub("_", _ascii_name(label)).strip("_")[:24], code
+
+
 def _download_subtitles(subtitle_items) -> list:
     """
     Download subtitle file(s) and normalize them to clean UTF-8 SRT.
@@ -115,7 +162,10 @@ def _download_subtitles(subtitle_items) -> list:
             if not text.strip():
                 print_error(f"Subtitle file is empty or unreadable: {url[:80]}")
                 continue
-            fd, temp_path = tempfile.mkstemp(suffix=".srt", prefix="autoflix_sub_")
+            label, code = _subtitle_name_parts(item)
+            prefix = f"autoflix_sub_{label}_" if label else "autoflix_sub_"
+            suffix = f".{code}.srt" if code else ".srt"
+            fd, temp_path = tempfile.mkstemp(suffix=suffix, prefix=prefix)
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
                 f.write(text)
             paths.append(temp_path)
