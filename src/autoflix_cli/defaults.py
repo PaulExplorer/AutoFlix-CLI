@@ -162,7 +162,7 @@ DEFAULT_SOURCE_PORTAL = {
     "aniwatch-fallback": "https://anivexa-api-navy.vercel.app",
     "aniwatch-fallback2": "https://bashapi.tech",
     "aniwatch-referer": "https://anizone.to",
-    "animetosho": "https://feed.animetosho.xyz",
+    "animetosho": "https://feed.animetosho.net",
     "opensubtitles-stremio": "https://opensubtitles-v3.strem.io",
     "vidlink": "https://vidlink.pro",
     "megaplay": "https://megaplay.buzz",
