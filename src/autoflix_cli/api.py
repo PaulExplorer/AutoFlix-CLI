@@ -430,7 +430,7 @@ def _franime_episode(anime_id, season_index: int, lang: str, episode_index: int)
 
 def _sama_season(url: str, name: str):
     """Load an Anime-Sama season page and merge its languages."""
-    season = anime_sama.get_season(url)
+    season = anime_sama.get_season(url, resolve_links=True)
     multi = len(season.lang) > 1
     seasons = [
         Season(

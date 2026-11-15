@@ -537,7 +537,9 @@ def _continue_watching_entry(user_id: int, entry: dict):
             return
 
         print_info(f"Loading [cyan]{selected_season_access.title}[/cyan]...")
-        season = anime_sama_scraper.get_season(selected_season_access.url)
+        season = anime_sama_scraper.get_season(
+            selected_season_access.url, resolve_links=False
+        )
         tracker.set_anilist_mapping("Anime-Sama", series.title, media_id, season.title)
 
         langs = list(season.episodes.keys())
@@ -561,6 +563,8 @@ def _continue_watching_entry(user_id: int, entry: dict):
         ep_idx = start_ep_idx
         while True:
             selected_episode = episodes[ep_idx]
+            if not anime_sama_handler._resolve_episode_players(selected_episode):
+                break
             success = play_episode_flow(
                 provider_name="Anime-Sama",
                 series_title=series.title,

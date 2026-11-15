@@ -3,16 +3,15 @@ from typing import List, Optional, Union
 
 from bs4 import BeautifulSoup
 
-from .objects import Episode, Player
+from .objects import Episode, Player, SamaSeasonPage
 
 
 class NoEpisodesFoundError(Exception):
     """Raised when an episode list contains no playable links.
 
     On Anime-Sama, a catalogue entry can exist before its content is
-    released: the pages exist but ``episodes.js`` is empty (no player
-    links), which means the content has probably not aired / been
-    released yet.
+    released: the pages exist but the season data carries no player link,
+    which means the content has probably not aired / been released yet.
     """
 
     def __init__(self, message: str | None = None):
@@ -68,6 +67,61 @@ def parse_episodes_from_js(js_code: str) -> List[Episode]:
         episodes.append(Episode(title=f"Épisode {i+1}", players=players))
 
     return episodes
+
+
+def parse_season_page(html: str) -> Optional[SamaSeasonPage]:
+    """Parse an Anime-Sama season page into its episode references.
+
+    The page stores the episode list in a ``<script data-source="bdd">``
+    block: ``eps1``..``epsN`` are the player columns, each episode holding
+    either ``lien:<id>`` (resolved later through :func:`anime_sama.resolve_players`),
+    a direct URL, or an empty string. ``epsJeton`` is the API token and
+    ``languesDispo`` lists the available languages.
+
+    Returns ``None`` when the page does not carry the inline block (older
+    mirrors still serve the legacy ``episodes.js`` file).
+    """
+    soup = BeautifulSoup(html, "html5lib")
+    script = soup.find("script", {"data-source": "bdd"})
+    if script is None:
+        return None
+
+    code = script.string or script.get_text()
+    columns = {}
+    for number, content in re.findall(
+        r"var\s+eps(\d+)\s*=\s*\[(.*?)\]\s*;", code, re.DOTALL
+    ):
+        columns[int(number)] = re.findall(r"""['"]([^'"]*)['"]""", content)
+
+    if not columns:
+        return None
+
+    ordered = [columns[number] for number in sorted(columns)]
+
+    ordre_final = True
+    match = re.search(r"var\s+epsOrdreFinal\s*=\s*(true|false)", code)
+    if match:
+        ordre_final = match.group(1) == "true"
+
+    if not ordre_final and len(ordered) >= 2:
+        # The site swaps the two first players when the page is not final.
+        ordered[0], ordered[1] = ordered[1], ordered[0]
+
+    jeton_match = re.search(r"""var\s+epsJeton\s*=\s*['"]([^'"]*)['"]""", code)
+    jeton = jeton_match.group(1) if jeton_match else ""
+
+    langs: list[str] = []
+    langs_match = re.search(r"var\s+languesDispo\s*=\s*\[(.*?)\]", html, re.DOTALL)
+    if langs_match:
+        langs = re.findall(r"""['"]([^'"]+)['"]""", langs_match.group(1))
+
+    size = max(len(column) for column in ordered)
+    episodes = [
+        [column[index] if index < len(column) else "" for column in ordered]
+        for index in range(size)
+    ]
+
+    return SamaSeasonPage(episodes, jeton, langs, ordre_final)
 
 
 def get_value_by_key(ul_html: Union[str, BeautifulSoup], key: str) -> Optional[str]:
