@@ -260,13 +260,18 @@ class AnimeExtractor:
             return 0.0
 
     def progressive_search(
-        self, anilist_id, episode, lang="sub", deadline_seconds=75
+        self, anilist_id, episode, lang="sub", deadline_seconds=75, probe=None
     ):
         """Start resolving one episode in the background.
 
         The returned :class:`ProgressiveSearch` exposes ``snapshot()`` which
         grows as instances and providers answer, so the caller can show the
         first streams immediately and keep appending the rest.
+
+        ``probe`` is an optional ``(url, headers) -> dict`` callable applied
+        to every direct stream while the search continues. It is off by
+        default: the blocking API has nowhere to show a verdict and should
+        not pay for the extra requests.
         """
         return ProgressiveSearch(
             self,
@@ -274,6 +279,7 @@ class AnimeExtractor:
             episode,
             lang=lang,
             deadline_seconds=deadline_seconds,
+            probe=probe,
         )
 
     def extract_vo(self, title=None, anilist_id=None, episode=1, lang="sub"):
@@ -315,6 +321,14 @@ class ProgressiveSearch:
     # the extra requests are only sent when the first base is really slow.
     HEDGE_DELAY = 1.5
 
+    # Direct links are the ones that hang a player: an embedded player either
+    # yields a link at extraction time or fails in under a second, while a
+    # playlist whose segments are blocked keeps mpv on a black window.
+    PROBE_TYPES = ("M3U8", "MP4", "MPD")
+    PROBE_WORKERS = 6
+    # A probe still queued after this long is pointless: the menu has moved on.
+    PROBE_WAIT = 15
+
     def __init__(
         self,
         extractor,
@@ -323,6 +337,7 @@ class ProgressiveSearch:
         lang="sub",
         max_workers=8,
         deadline_seconds=75,
+        probe=None,
     ):
         self._extractor = extractor
         self.anilist_id = int(anilist_id)
@@ -345,6 +360,10 @@ class ProgressiveSearch:
         # ``start()`` is still spawning workers: a worker reaching zero must
         # not declare the search finished before the last one is queued.
         self._open = True
+        # Optional (url, headers) -> verdict callable, and the ceiling that
+        # keeps a dozen probes from hammering the same CDN.
+        self._probe = probe
+        self._probe_slots = threading.Semaphore(self.PROBE_WORKERS)
 
     # -- public API ---------------------------------------------------
     def start(self):
@@ -536,7 +555,49 @@ class ProgressiveSearch:
                 self._entries.append((priority, self._arrival, entry))
                 self._arrival += 1
                 self._ready.set()
+            self._start_probe(entry)
+
+    def _start_probe(self, entry):
+        """Check a direct link in the background, without blocking the search."""
+        if not self._probe or self._stop.is_set():
+            return
+        if (entry.get("type") or "").upper() not in self.PROBE_TYPES:
+            return
+        threading.Thread(
+            target=self._probe_worker, args=(entry,), daemon=True
+        ).start()
+
+    def _probe_worker(self, entry):
+        """Attach the verdict to the entry, where the menu reads it.
+
+        The result lands in the same dict ``snapshot()`` returns, so a render
+        that happens before the probe finishes simply shows no marker yet.
+        A probe never raises: a broken check must not kill the search.
+        """
+        if not self._probe_slots.acquire(timeout=self.PROBE_WAIT):
+            return
+        try:
+            if self._stop.is_set():
+                return
+            try:
+                verdict = self._probe(entry["url"], entry.get("headers") or {})
+            except Exception as e:  # noqa: BLE001 - the search must survive
+                verdict = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+            entry["probe"] = verdict
+        finally:
+            self._probe_slots.release()
 
 
 # Instantiate a global instance for easy use
 goldenanime = AnimeExtractor()
+
+
+def probe_direct_stream(url, headers):
+    """Check one direct stream with the headers playback will use.
+
+    Imported lazily: ``stream_probe`` pulls the proxy configuration, and the
+    extractor must stay importable without it.
+    """
+    from . import stream_probe
+
+    return stream_probe.probe_stream(url, headers, direct=True)

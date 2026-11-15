@@ -186,3 +186,109 @@ def test_the_deadline_stops_the_long_tail(monkeypatch):
     assert search.wait(3) is True
     assert search.snapshot() == []
     assert [path for path in calls if not path.startswith("/episodes/")] == []
+
+
+def _wait_for_probes(search, timeout=2.0):
+    """Poll until every entry carries a verdict (probes run in the background)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        entries = search.snapshot()
+        if entries and all("probe" in entry for entry in entries):
+            return entries
+        time.sleep(0.01)
+    return search.snapshot()
+
+
+def test_probes_run_while_the_search_continues(monkeypatch):
+    extractor = _extractor(["https://a"])
+    monkeypatch.setattr(
+        extractor,
+        "_request_json",
+        lambda base, path, timeout=20: (
+            _episodes("mkissa")
+            if path.startswith("/episodes/")
+            else _watch("https://cdn/x.m3u8")
+        ),
+    )
+    probed = []
+
+    def probe(url, headers):
+        probed.append(url)
+        return {"ok": True, "kind": "hls_master"}
+
+    search = extractor.progressive_search(1, 1, probe=probe).start()
+    search.wait(3)
+    entries = _wait_for_probes(search)
+
+    assert probed == ["https://cdn/x.m3u8"]
+    assert entries[0]["probe"] == {"ok": True, "kind": "hls_master"}
+
+
+def test_a_broken_probe_marks_the_stream_instead_of_raising(monkeypatch):
+    extractor = _extractor(["https://a"])
+    monkeypatch.setattr(
+        extractor,
+        "_request_json",
+        lambda base, path, timeout=20: (
+            _episodes("mkissa")
+            if path.startswith("/episodes/")
+            else _watch("https://cdn/x.m3u8")
+        ),
+    )
+
+    def probe(url, headers):
+        raise RuntimeError("boom")
+
+    search = extractor.progressive_search(1, 1, probe=probe).start()
+    search.wait(3)
+    entries = _wait_for_probes(search)
+
+    assert entries[0]["probe"]["ok"] is False
+    assert "boom" in entries[0]["probe"]["error"]
+
+
+def test_embedded_players_are_not_probed(monkeypatch):
+    extractor = _extractor(["https://a"])
+
+    def request_json(base, path, timeout=20):
+        if path.startswith("/episodes/"):
+            return _episodes("mkissa")
+        return {
+            "sources": [
+                {"name": "Embed", "url": "https://embed.tld/e/1", "type": "embed"}
+            ]
+        }
+
+    monkeypatch.setattr(extractor, "_request_json", request_json)
+    probed = []
+
+    search = extractor.progressive_search(
+        1, 1, probe=lambda url, headers: probed.append(url) or {"ok": True}
+    ).start()
+    search.wait(3)
+
+    assert search.snapshot()[0]["type"] == "Player"
+    # An embed either yields a link or fails fast; probing the page itself
+    # says nothing about playback, so the search leaves it alone.
+    assert probed == []
+
+
+def test_probing_is_off_by_default(monkeypatch):
+    extractor = _extractor(["https://a"])
+    monkeypatch.setattr(
+        extractor,
+        "_request_json",
+        lambda base, path, timeout=20: (
+            _episodes("mkissa")
+            if path.startswith("/episodes/")
+            else _watch("https://cdn/x.m3u8")
+        ),
+    )
+
+    search = extractor.progressive_search(1, 1).start()
+    search.wait(3)
+
+    assert "probe" not in search.snapshot()[0]
+    # The blocking API consumes ``extract_vo`` and has nowhere to show a
+    # verdict, so it must not spawn probe requests.
+    assert "probe" not in extractor.extract_vo(anilist_id=1, episode=1)[0]
