@@ -42,6 +42,7 @@ class AnimeExtractor:
         "animenosub",
         "animedunya",
         "animeonsen",
+        "anipm",
         "senshi",
         "kaa",
         "reanime",
@@ -50,29 +51,46 @@ class AnimeExtractor:
         "2dhive",
     ]
 
-    # The /episodes endpoint is slow (~30s / multi-MB payload); requests
-    # with the default 20s timeout always fail.
-    EPISODES_TIMEOUT = 60
+    # /episodes aggregates a dozen providers, so a cold id takes 20-30s and a
+    # loaded instance can need 80s+. The budget is a compromise: long enough
+    # for the usual cold answer (Vercel needs ~21s), short enough that a hung
+    # base does not block the fallbacks for minutes.
+    EPISODES_TIMEOUT = 30
     # /watch is usually fast, but animegg regularly lands just past 20s.
-    WATCH_TIMEOUT = 40
+    # 25s also bounds MKissa's slow 403 on instances it blocks; the failure is
+    # remembered, so only the first episode of a session pays it.
+    WATCH_TIMEOUT = 25
 
     def __init__(self):
         self.bases = [
-            portals.get("aniwatch", "https://anivexa-api-tu4a.onrender.com"),
-            portals.get("aniwatch-fallback", "https://anivexa-api-navy.vercel.app"),
+            portals.get("aniwatch", "https://anivexa.otakunaija.name.ng"),
+            portals.get(
+                "aniwatch-fallback", "https://anivexa-api-navy.vercel.app"
+            ),
+            portals.get("aniwatch-fallback2", "https://bashapi.tech"),
         ]
         self.referer = portals.get("aniwatch-referer", "https://anizone.to")
         self._episodes_cache = {}
+        # (provider, base) pairs that already failed in this session, so a
+        # blocked provider is not retried on every episode.
+        self._watch_failures = set()
+
+    def _request_json(self, base, path, timeout=20):
+        """GET a JSON payload from one base, or ``None`` on any failure."""
+        try:
+            r = scraper.get(base + path, timeout=timeout)
+            if r.status_code == 200:
+                return r.json()
+        except Exception:
+            return None
+        return None
 
     def _get_json(self, path, timeout=20):
         """GET a JSON payload from the first base that answers."""
         for base in self.bases:
-            try:
-                r = scraper.get(base + path, timeout=timeout)
-                if r.status_code == 200:
-                    return r.json()
-            except Exception:
-                continue
+            data = self._request_json(base, path, timeout=timeout)
+            if data is not None:
+                return data
         return None
 
     def get_mappings(self, anilist_id):
@@ -96,22 +114,31 @@ class AnimeExtractor:
             pass
         return None
 
+    @staticmethod
+    def _has_episodes(data):
+        """True when a payload carries at least one provider episode list."""
+        return isinstance(data, dict) and any(
+            isinstance(v, dict) and isinstance(v.get("episodes"), dict)
+            for v in data.values()
+        )
+
     def get_episodes(self, anilist_id):
-        """Episode lists per provider for a given AniList ID (cached in memory)."""
+        """Episode lists per provider for a given AniList ID (cached in memory).
+
+        A base can answer 200 with a degraded payload (every provider in an
+        ``{error, stack}`` object), so the validation happens per base and a
+        useless answer falls through to the next instance.
+        """
         cached = self._episodes_cache.get(anilist_id)
         if cached is not None:
             return cached
-        data = self._get_json(
-            f"/episodes/{anilist_id}", timeout=self.EPISODES_TIMEOUT
-        )
-        if data and isinstance(data, dict) and any(
-            isinstance(v, dict) and isinstance(v.get("episodes"), dict)
-            for v in data.values()
-        ):
-            # Only cache payloads that actually contain episode lists so a
-            # transient failure triggers a fresh request next time.
-            self._episodes_cache[anilist_id] = data
-            return data
+        for base in self.bases:
+            data = self._request_json(
+                base, f"/episodes/{anilist_id}", timeout=self.EPISODES_TIMEOUT
+            )
+            if self._has_episodes(data):
+                self._episodes_cache[anilist_id] = data
+                return data
         return {}
 
     @staticmethod
@@ -233,6 +260,26 @@ class AnimeExtractor:
         except (TypeError, ValueError):
             return 0.0
 
+    def _watch(self, ep_id, provider):
+        """First base that actually returns streams for this provider.
+
+        Providers are not reachable from every instance (MKissa answers 500
+        or 403 on most of them), and a base can answer 200 with an
+        ``{error, stack}`` payload. Failed pairs are remembered so the next
+        episode goes straight to the base that works.
+        """
+        path = "/" + ep_id.lstrip("/")
+        for base in self.bases:
+            if (provider, base) in self._watch_failures:
+                continue
+            data = self._request_json(
+                base, path, timeout=self.WATCH_TIMEOUT
+            )
+            if data and any(True for _ in self._watch_streams(data)):
+                return data
+            self._watch_failures.add((provider, base))
+        return None
+
     def extract_vo(self, title=None, anilist_id=None, episode=1, lang="sub"):
         """
         Search, deduplication, and sorting.
@@ -271,9 +318,7 @@ class AnimeExtractor:
             if not ep_id:
                 continue
 
-            watch_data = self._get_json(
-                "/" + ep_id.lstrip("/"), timeout=self.WATCH_TIMEOUT
-            )
+            watch_data = self._watch(ep_id, provider)
             if not watch_data:
                 continue
 

@@ -20,7 +20,9 @@ def _extractor(monkeypatch, provider, episode_id, watch_payload):
             }
         },
     )
-    monkeypatch.setattr(extractor, "_get_json", lambda path, timeout=20: watch_payload)
+    monkeypatch.setattr(
+        extractor, "_request_json", lambda base, path, timeout=20: watch_payload
+    )
     return extractor
 
 
