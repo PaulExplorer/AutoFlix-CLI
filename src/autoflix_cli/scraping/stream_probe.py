@@ -37,7 +37,12 @@ KIND_LABELS = {
 }
 
 # A probe that outlives this is worthless: the user is waiting on a menu.
-DEFAULT_TIMEOUT = 8.0
+DEFAULT_TIMEOUT = 8
+
+# A probe only needs the head of the response: the MP4 header box or the first
+# lines of a playlist. Some CDNs ignore ``Range`` and stream the whole file,
+# which used to download hundreds of megabytes until the probe timed out.
+MAX_PROBE_BYTES = 512 * 1024
 
 # Consecutive embeds are resolved in parallel. A dozen workers would only
 # queue requests behind the same CDN rate limiter.
@@ -182,17 +187,36 @@ def _default_fetch(
         request_headers["Range"] = "bytes=0-65535"
 
     session = requests.Session(curl_options=DNS_OPTIONS, allow_redirects="safe")
+    chunks = []
+    total = 0
     try:
         response = session.get(
-            url, headers=request_headers, impersonate="chrome", timeout=timeout
+            url,
+            headers=request_headers,
+            impersonate="chrome",
+            timeout=timeout,
+            stream=True,
         )
+        try:
+            # Stop reading as soon as the verdict is decidable. A host that
+            # ignores Range would otherwise send the whole episode before the
+            # probe gets a chance to answer.
+            for chunk in response.iter_content(65536):
+                if not chunk:
+                    continue
+                chunks.append(chunk)
+                total += len(chunk)
+                if total >= MAX_PROBE_BYTES:
+                    break
+        finally:
+            response.close()
     finally:
         session.close()
 
     return ProbeResponse(
         status=response.status_code,
         headers=dict(response.headers),
-        content=response.content,
+        content=b"".join(chunks),
     )
 
 
@@ -202,6 +226,20 @@ def _looks_blocked(response: ProbeResponse) -> bool:
     if not head:
         return True
     return head.startswith((b"<html", b"<!doctype", b"<script", b"<head", b"<body"))
+
+
+def _playlist_error(text: str) -> str:
+    """Error string when the body is not a manifest, "" when it is.
+
+    A 200 with the right ``Content-Type`` proves nothing: some hosts answer
+    ``application/vnd.apple.mpegurl`` with an encrypted blob (flixcloud) or a
+    JSON error, and mpv then fails to open a "valid" playlist. DASH manifests
+    are accepted too, since the proxy serves them as well.
+    """
+    head = (text or "").lstrip("\ufeff \t\r\n")
+    if head.startswith("#EXTM3U") or "<MPD" in head[:2048]:
+        return ""
+    return "not a playlist"
 
 
 def _first_uri(text: str, base: str = "") -> str:
@@ -243,14 +281,22 @@ def _deep_check_hls(master_text, stream_url, request_headers, fetch, timeout) ->
     return ""
 
 
-def _probe_referer(stream_url: str, player_config: dict = None) -> str:
+def _probe_referer(
+    stream_url: str, player_config: dict = None, direct: bool = False
+) -> str:
     """The Referer the proxy would send for this stream ("" = keep as-is).
 
     The proxy derives the Referer from the player config and the embed host,
     not from the source site. Some embeds reject the site's own Referer
     (xtremestream answers 403 to anything but its own domain), so probing
     with the site's headers mis-scores those sources as dead.
+
+    Direct streams are the exception: ``play_video`` hands mpv the headers
+    the extractor found, so the probe must use them untouched (MegaPlay
+    answers 403 to its own host, and only the payload knows the player).
     """
+    if direct:
+        return ""
     setting = (player_config or {}).get("referrer")
     if setting == "full":
         # "full" needs the embed page URL, which the probe does not carry.
@@ -270,17 +316,21 @@ def probe_stream(
     player_config: dict = None,
     fetch=None,
     timeout: float = DEFAULT_TIMEOUT,
+    direct: bool = False,
 ) -> dict:
     """Check a resolved link and report its kind, size and available heights.
 
     Returns a dict with ``ok``, ``kind``, ``heights`` and ``size``. A link that
     answers 403, times out or serves a challenge page is reported as not ok
     rather than raised, so one dead embed never hides the others.
+
+    ``direct`` marks a stream played with the extractor's own headers (the
+    source menu), instead of an embed the proxy re-derives headers for.
     """
     fetch = fetch or _default_fetch
     kind = guess_kind(stream_url, player_config)
     request_headers = dict(headers or {})
-    probe_referer = _probe_referer(stream_url, player_config)
+    probe_referer = _probe_referer(stream_url, player_config, direct=direct)
     if probe_referer:
         request_headers["Referer"] = probe_referer
     result = {"ok": False, "kind": KIND_DEAD, "heights": [], "bandwidths": [], "size": 0}
@@ -318,6 +368,12 @@ def probe_stream(
     if _looks_blocked(response):
         result["error"] = "blocked"
         return result
+
+    if kind in (KIND_HLS_MASTER, KIND_HLS_MEDIA):
+        playlist_error = _playlist_error(response.text)
+        if playlist_error:
+            result["error"] = playlist_error
+            return result
 
     if kind == KIND_HLS_MASTER and "#EXT-X-STREAM-INF" in response.text:
         deep_error = _deep_check_hls(

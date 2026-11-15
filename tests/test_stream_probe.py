@@ -214,6 +214,70 @@ def test_probe_forwards_timeout_to_the_fetcher():
     assert seen["timeout"] == 3.5
 
 
+def test_probe_mp4_host_ignoring_range_is_still_playable():
+    # The CDN answers 200 with the whole file instead of 206: the probe must
+    # read the header it needs and keep the source (a 334 MB file used to time
+    # out and be reported dead although mpv opens it in 1.5s).
+    response = sp.ProbeResponse(
+        200, {"Content-Length": "334019938", "Content-Type": "application/octet-stream"}, mp4_head()
+    )
+    result = sp.probe_stream(
+        "https://cdn.tld/stream/1", {}, {"ext": "mp4"}, fetch=fetch_returning(response)
+    )
+    assert result["ok"] is True
+    assert result["kind"] == sp.KIND_MP4
+    assert result["size"] == 334019938
+
+
+def test_probe_hls_body_that_is_not_a_playlist_is_dead():
+    # flixcloud answers 200 application/vnd.apple.mpegurl with a base64 blob
+    # that only the embed's WASM can decrypt: mpv fails on it.
+    blob = b"IuyjnOO8cjmCNDKG51QdURyw2k9yD4hKJTDimFGG8uJM7L+B77VzavE0V5Of"
+    response = sp.ProbeResponse(
+        200, {"Content-Type": "application/vnd.apple.mpegurl"}, blob
+    )
+    result = sp.probe_stream(
+        "https://cdn.tld/master.m3u8", {}, fetch=fetch_returning(response)
+    )
+    assert result["ok"] is False
+    assert result["error"] == "not a playlist"
+
+
+def test_probe_json_error_is_dead():
+    response = sp.ProbeResponse(200, {}, b'{"error":"expired"}')
+    result = sp.probe_stream(
+        "https://cdn.tld/master.m3u8", {}, fetch=fetch_returning(response)
+    )
+    assert result["ok"] is False
+    assert result["error"] == "not a playlist"
+
+
+def test_playlist_error_accepts_bom_and_leading_blank_lines():
+    assert sp._playlist_error("\ufeff\n  #EXTM3U\n#EXTINF:4,\na.ts") == ""
+    assert sp._playlist_error('<?xml version="1.0"?><MPD></MPD>') == ""
+    assert sp._playlist_error("") == "not a playlist"
+
+
+def test_probe_direct_stream_keeps_the_extractor_referer():
+    seen = {}
+
+    def _fetch(url, headers, range_bytes=False, timeout=None):
+        seen.update(headers)
+        return sp.ProbeResponse(200, {}, MASTER.encode())
+
+    sp.probe_stream(
+        "https://megaplay.buzz/stream/1/master.m3u8",
+        {"Referer": "https://megaplay.buzz/", "X-Payload": "1"},
+        {"referrer": "path"},
+        fetch=_fetch,
+        direct=True,
+    )
+    # play_video hands mpv these headers as-is for a direct stream; the probe
+    # must judge the link with the same Referer (MegaPlay 403s otherwise).
+    assert seen["Referer"] == "https://megaplay.buzz/"
+    assert seen["X-Payload"] == "1"
+
+
 # --- referer ----------------------------------------------------------------
 
 
