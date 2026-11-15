@@ -12,6 +12,7 @@ from ..languages import get_language_label
 from ..player_manager import play_video
 from ..scraping import player as player_scraper
 from ..scraping.goldenanime import goldenanime
+from ..scraping.megaplay import megaplay_extractor
 from ..scraping.subtitles import subtitle_extractor
 from ..tracker import tracker
 from .subtitle_prompt import describe_subtitle, resolve_imdb_id
@@ -184,6 +185,20 @@ def handle_goldenanime():
     )
 
 
+def _merge_streams(*groups):
+    """Concatenate stream lists, dropping duplicate URLs (first one wins)."""
+    merged = []
+    seen = set()
+    for group in groups:
+        for entry in group or []:
+            url = entry.get("url")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            merged.append(entry)
+    return merged
+
+
 def _flow_goldenanime_stream(
     title: str, anilist_id: int, episode: int, cover_url: str = None
 ):
@@ -201,6 +216,15 @@ def _flow_goldenanime_stream(
     results = goldenanime.extract_vo(
         title=title, anilist_id=anilist_id, episode=episode
     )
+
+    # MegaPlay only needs the AniList id, so it keeps working when the
+    # aggregator's providers answer with errors. It goes first: one 1080p
+    # manifest with its own subtitle tracks.
+    try:
+        megaplay_results = megaplay_extractor.streams(anilist_id, episode)
+    except Exception:  # noqa: BLE001 - optional source
+        megaplay_results = []
+    results = _merge_streams(megaplay_results, results)
 
     if not results:
         print_warning("No results found.")

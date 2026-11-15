@@ -133,3 +133,22 @@ def test_payload_level_subtitles_are_attached_to_every_stream(monkeypatch):
 def test_host_referer_is_none_without_a_scheme():
     assert AnimeExtractor._host_referer("not-a-url") is None
     assert AnimeExtractor._host_referer("https://cdn.tld/a.mp4") == "https://cdn.tld/"
+
+
+def test_merge_streams_keeps_the_first_url():
+    from autoflix_cli.handlers.goldenanime import _merge_streams
+
+    merged = _merge_streams(
+        [{"url": "https://cdn/a.m3u8", "source": "MegaPlay"}],
+        [
+            {"url": "https://cdn/a.m3u8", "source": "Anivexa"},
+            {"url": "https://cdn/b.m3u8", "source": "Anivexa"},
+            {"url": None, "source": "Broken"},
+        ],
+    )
+
+    assert [entry["url"] for entry in merged] == [
+        "https://cdn/a.m3u8",
+        "https://cdn/b.m3u8",
+    ]
+    assert merged[0]["source"] == "MegaPlay"

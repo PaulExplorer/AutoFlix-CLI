@@ -164,6 +164,7 @@ DEFAULT_SOURCE_PORTAL = {
     "animetosho": "https://feed.animetosho.xyz",
     "opensubtitles-stremio": "https://opensubtitles-v3.strem.io",
     "vidlink": "https://vidlink.pro",
+    "megaplay": "https://megaplay.buzz",
     "tmdb": "https://theemoviedb.hexa.su/api/tmdb",
     "hexa": "https://theemoviedb.hexa.su",
     "hexa-referer": "https://hexa.su",
