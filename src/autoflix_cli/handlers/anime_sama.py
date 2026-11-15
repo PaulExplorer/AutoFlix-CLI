@@ -4,6 +4,7 @@ from ..cli_utils import (
     print_error,
     print_header,
     print_info,
+    print_success,
     print_warning,
     select_from_list,
 )
@@ -59,6 +60,27 @@ def _select_language(langs, prompt="🌍 Select Language:"):
     if lang_idx == len(langs):
         return None
     return langs[lang_idx]
+
+
+def _resolve_episode_players(selected_episode):
+    """Fill ``selected_episode.players`` with the resolved embed URLs.
+
+    Anime-Sama only stores ``lien:<id>`` references on the season page and
+    resolves them through an API that rate-limits mass requests, so this is
+    deferred until an episode is actually selected. Results are cached on
+    the episode object.
+    """
+    if selected_episode.players:
+        return True
+
+    print_info(f"Resolving sources for [cyan]{selected_episode.title}[/cyan]...")
+    if anime_sama.resolve_players(selected_episode):
+        print_success(f"{len(selected_episode.players)} source(s) resolved.")
+        return True
+
+    print_error("No source could be resolved for this episode.")
+    pause()
+    return False
 
 
 def handle_anime_sama():
@@ -129,7 +151,7 @@ def open_result(selection):
 
     print_info(f"Loading [cyan]{selected_season_access.title}[/cyan]...")
     try:
-        season = anime_sama.get_season(selected_season_access.url)
+        season = anime_sama.get_season(selected_season_access.url, resolve_links=False)
     except NoEpisodesFoundError:
         print_error(
             "No links found for this content: it is probably not released yet."
@@ -159,6 +181,9 @@ def open_result(selection):
 
     while True:
         selected_episode = episodes[ep_idx]
+
+        if not _resolve_episode_players(selected_episode):
+            break
 
         success = play_episode_flow(
             provider_name="Anime-Sama",
@@ -203,7 +228,7 @@ def resume_anime_sama(data):
 
     print_info(f"Loading Season: {season_url}")
     try:
-        season = anime_sama.get_season(season_url)
+        season = anime_sama.get_season(season_url, resolve_links=False)
     except NoEpisodesFoundError:
         print_error(
             "No links found for this content: it is probably not released yet."
@@ -265,6 +290,9 @@ def resume_anime_sama(data):
 
     while True:
         selected_episode = episodes[ep_idx]
+
+        if not _resolve_episode_players(selected_episode):
+            return
 
         success = play_episode_flow(
             provider_name="Anime-Sama",
