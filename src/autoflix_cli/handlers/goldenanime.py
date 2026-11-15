@@ -1,3 +1,5 @@
+import time
+
 from ..anilist import anilist_client
 from ..cli_utils import (
     get_user_input,
@@ -22,8 +24,39 @@ from .subtitle_prompt import describe_subtitle, resolve_imdb_id
 # a blank screen while the fastest providers have already answered.
 FIRST_STREAM_WAIT = 10
 
-# Extra wait when the user asks for the sources still in flight.
-WAIT_MORE_TIMEOUT = 20
+
+def _wait_for_remaining(search, timeout: float = 30.0, report_every: float = 8.0):
+    """Wait for the background search, reporting the sources as they land.
+
+    Sources keep arriving on their own: this only blocks so the user can see
+    the final list without playing first. Bounded so a slow instance cannot
+    trap the user in a silent wait.
+    """
+    print_info(
+        "Still looking for a first source..."
+        if not search.snapshot()
+        else "Waiting for the remaining sources..."
+    )
+    deadline = time.monotonic() + timeout
+    count = len(search.snapshot())
+    last_report = time.monotonic()
+    while not search.is_done() and time.monotonic() < deadline:
+        search.wait(1)
+        found = len(search.snapshot())
+        now = time.monotonic()
+        if found != count or now - last_report >= report_every:
+            count = found
+            last_report = now
+            print_info(
+                f"{found} source(s) so far, {search.pending()} still loading"
+            )
+    found = len(search.snapshot())
+    if search.is_done():
+        print_info(f"Search finished: {found} source(s).")
+    else:
+        print_info(
+            f"Still searching: {found} source(s), {search.pending()} still loading."
+        )
 
 
 def _mapping_ids(anilist_id: int | None) -> dict:
@@ -233,6 +266,8 @@ def _flow_goldenanime_stream(
         megaplay_results = megaplay_extractor.streams(anilist_id, episode)
     except Exception:  # noqa: BLE001 - optional source
         megaplay_results = []
+    if not megaplay_results:
+        print_info("[dim]MegaPlay has no entry for this title.[/dim]")
 
     search.wait_for_first(FIRST_STREAM_WAIT)
 
@@ -263,6 +298,12 @@ def _flow_goldenanime_stream(
             pause()
             return
 
+        if not valid_results:
+            # Nothing to pick yet: an empty menu with only "wait" and "back"
+            # would just hide the fact that the search is still running.
+            _wait_for_remaining(search)
+            continue
+
         skipped = len(results) - len(valid_results)
         if skipped and skipped != reported_skipped:
             print_info(f"[dim]Skipped {skipped} unsupported stream(s).[/dim]")
@@ -273,19 +314,22 @@ def _flow_goldenanime_stream(
         ]
         if waiting:
             options.append(
-                f"⏳ Wait for more sources ({search.pending()} still searching)"
+                f"⏳ Wait for the remaining sources ({search.pending()} still loading)"
             )
         options.append("← Back")
 
-        status = f" · {len(valid_results)} source(s), still searching" if waiting else ""
+        status = (
+            f" · {len(valid_results)} source(s), {search.pending()} still loading"
+            if waiting
+            else f" · {len(valid_results)} source(s)"
+        )
         choice_idx = select_from_list(options, f"📺 Select Stream{status}:")
 
         if choice_idx == len(options) - 1:  # Back
             search.stop()
             return
         if waiting and choice_idx == len(valid_results):
-            print_info("Waiting for the slower sources...")
-            search.wait(WAIT_MORE_TIMEOUT)
+            _wait_for_remaining(search)
             continue
 
         selection = valid_results[choice_idx]
