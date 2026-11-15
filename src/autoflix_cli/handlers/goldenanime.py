@@ -17,6 +17,14 @@ from ..scraping.subtitles import subtitle_extractor
 from ..tracker import tracker
 from .subtitle_prompt import describe_subtitle, resolve_imdb_id
 
+# Seconds to wait for a first stream before showing the menu anyway. Below
+# that the list is often empty on a cold title, above it the user stares at
+# a blank screen while the fastest providers have already answered.
+FIRST_STREAM_WAIT = 10
+
+# Extra wait when the user asks for the sources still in flight.
+WAIT_MORE_TIMEOUT = 20
+
 
 def _mapping_ids(anilist_id: int | None) -> dict:
     """AniList cross-platform ids (imdbId/anidbId/format/defaultTvdbSeason)."""
@@ -213,23 +221,20 @@ def _flow_goldenanime_stream(
     default_season = _mapping_season(mappings)
 
     print_info("Searching for streams...")
-    results = goldenanime.extract_vo(
-        title=title, anilist_id=anilist_id, episode=episode
-    )
+    # Progressive: the first streams show up as soon as an instance answers,
+    # and the slower ones are appended while the user browses or watches.
+    search = goldenanime.progressive_search(anilist_id, episode)
+    search.start()
 
     # MegaPlay only needs the AniList id, so it keeps working when the
-    # aggregator's providers answer with errors. It goes first: one 1080p
-    # manifest with its own subtitle tracks.
+    # aggregator's providers answer with errors. It runs while the workers
+    # above are already busy.
     try:
         megaplay_results = megaplay_extractor.streams(anilist_id, episode)
     except Exception:  # noqa: BLE001 - optional source
         megaplay_results = []
-    results = _merge_streams(megaplay_results, results)
 
-    if not results:
-        print_warning("No results found.")
-        pause()
-        return
+    search.wait_for_first(FIRST_STREAM_WAIT)
 
     # Filter: only keep direct streams (m3u8 / mpd / mp4) or supported
     # embedded players.
@@ -245,31 +250,43 @@ def _flow_goldenanime_stream(
             or player_scraper.is_supported(url)
         )
 
-    valid_results = [r for r in results if _is_valid(r)]
-
-    if not valid_results:
-        print_warning(
-            "No supported streams found (no direct M3U8 or recognised players)."
-        )
-        pause()
-        return
-
-    if len(valid_results) < len(results):
-        skipped = len(results) - len(valid_results)
-        print_info(f"[dim]Skipped {skipped} unsupported stream(s).[/dim]")
-
+    reported_skipped = 0
     while True:
-        choice_idx = select_from_list(
-            [
-                f"{r['source']} - {r['quality']} ({r['type']})"
-                for r in valid_results
-            ]
-            + ["← Back"],
-            "📺 Select Stream:",
-        )
+        results = _merge_streams(megaplay_results, search.snapshot())
+        valid_results = [r for r in results if _is_valid(r)]
+        waiting = not search.is_done()
 
-        if choice_idx == len(valid_results):  # Back
+        if not valid_results and not waiting:
+            print_warning(
+                "No supported streams found (no direct M3U8 or recognised players)."
+            )
+            pause()
             return
+
+        skipped = len(results) - len(valid_results)
+        if skipped and skipped != reported_skipped:
+            print_info(f"[dim]Skipped {skipped} unsupported stream(s).[/dim]")
+            reported_skipped = skipped
+
+        options = [
+            f"{r['source']} - {r['quality']} ({r['type']})" for r in valid_results
+        ]
+        if waiting:
+            options.append(
+                f"⏳ Wait for more sources ({search.pending()} still searching)"
+            )
+        options.append("← Back")
+
+        status = f" · {len(valid_results)} source(s), still searching" if waiting else ""
+        choice_idx = select_from_list(options, f"📺 Select Stream{status}:")
+
+        if choice_idx == len(options) - 1:  # Back
+            search.stop()
+            return
+        if waiting and choice_idx == len(valid_results):
+            print_info("Waiting for the slower sources...")
+            search.wait(WAIT_MORE_TIMEOUT)
+            continue
 
         selection = valid_results[choice_idx]
 

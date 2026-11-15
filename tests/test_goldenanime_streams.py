@@ -10,19 +10,19 @@ from autoflix_cli.scraping.goldenanime import AnimeExtractor
 
 def _extractor(monkeypatch, provider, episode_id, watch_payload):
     extractor = AnimeExtractor()
-    monkeypatch.setattr(
-        extractor,
-        "get_episodes",
-        lambda aid: {
-            provider: {
-                "meta": {},
-                "episodes": {"sub": [{"number": 1, "id": episode_id}]},
-            }
-        },
-    )
-    monkeypatch.setattr(
-        extractor, "_request_json", lambda base, path, timeout=20: watch_payload
-    )
+    episodes = {
+        provider: {
+            "meta": {},
+            "episodes": {"sub": [{"number": 1, "id": episode_id}]},
+        }
+    }
+
+    def request_json(base, path, timeout=20):
+        if path.startswith("/episodes/"):
+            return episodes
+        return watch_payload
+
+    monkeypatch.setattr(extractor, "_request_json", request_json)
     return extractor
 
 

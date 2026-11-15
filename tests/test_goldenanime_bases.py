@@ -37,52 +37,46 @@ def test_render_is_no_longer_a_base():
     assert not any("onrender.com" in base for base in extractor.bases)
 
 
-def test_episodes_skip_a_degraded_payload(monkeypatch):
-    extractor = _extractor()
-    seen = []
+def test_a_degraded_payload_does_not_hide_the_other_bases(monkeypatch):
+    extractor = _extractor(["https://a", "https://b"])
 
     def request_json(base, path, timeout=20):
-        seen.append(base)
-        if base == "https://a":
-            return {"mkissa": {"error": "boom", "stack": "..."}}
-        return EPISODES
+        if path.startswith("/episodes/"):
+            if base == "https://a":
+                return {"mkissa": {"error": "boom", "stack": "..."}}
+            return EPISODES
+        return WATCH_OK
 
     monkeypatch.setattr(extractor, "_request_json", request_json)
 
-    data = extractor.get_episodes(1)
+    search = extractor.progressive_search(1, 1).start()
+    search.wait(3)
 
-    assert seen == ["https://a", "https://b"]
-    assert "mkissa" in data
-
-
-def test_episodes_return_empty_when_no_base_has_a_list(monkeypatch):
-    extractor = _extractor()
-    monkeypatch.setattr(
-        extractor,
-        "_request_json",
-        lambda base, path, timeout=20: {"mkissa": {"error": "boom"}},
-    )
-
-    assert extractor.get_episodes(1) == {}
+    assert [r["url"] for r in search.snapshot()] == ["https://cdn/x.m3u8"]
 
 
-def test_watch_falls_back_to_the_base_that_answers(monkeypatch):
+def test_watch_falls_back_when_the_listing_base_is_blocked(monkeypatch):
     extractor = _extractor()
     calls = []
 
     def request_json(base, path, timeout=20):
+        if path.startswith("/episodes/"):
+            # Only one base lists the provider, so the ordering is fixed.
+            return EPISODES if base == "https://b" else {"mkissa": {"error": "boom"}}
         calls.append(base)
-        if base == "https://a":
+        if base == "https://b":
             return {"error": "blocked", "stack": "..."}
         return WATCH_OK
 
     monkeypatch.setattr(extractor, "_request_json", request_json)
-    monkeypatch.setattr(extractor, "get_episodes", lambda aid: EPISODES)
 
     results = extractor.extract_vo(anilist_id=1, episode=1)
 
     assert [r["url"] for r in results] == ["https://cdn/x.m3u8"]
-    assert calls == ["https://a", "https://b"]
+    # The base that listed the episode is asked first; its fast failure makes
+    # the other instances run in parallel.
+    assert calls[0] == "https://b"
+    assert set(calls) == {"https://a", "https://b", "https://c"}
 
 
 def test_failed_provider_base_pair_is_not_retried(monkeypatch):
@@ -90,18 +84,23 @@ def test_failed_provider_base_pair_is_not_retried(monkeypatch):
     calls = []
 
     def request_json(base, path, timeout=20):
+        if path.startswith("/episodes/"):
+            return EPISODES if base == "https://b" else {"mkissa": {"error": "boom"}}
         calls.append(base)
-        if base == "https://a":
+        if base == "https://b":
             return None
         return WATCH_OK
 
     monkeypatch.setattr(extractor, "_request_json", request_json)
-    monkeypatch.setattr(extractor, "get_episodes", lambda aid: EPISODES)
 
     extractor.extract_vo(anilist_id=1, episode=1)
+    assert calls[0] == "https://b"
+    assert ("mkissa", "https://b") in extractor._watch_failures
+
+    calls.clear()
     extractor.extract_vo(anilist_id=1, episode=2)
 
-    assert calls == ["https://a", "https://b", "https://b"]
+    assert "https://b" not in calls
 
 
 def test_anipm_is_part_of_the_provider_list():
