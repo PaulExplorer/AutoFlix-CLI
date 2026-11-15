@@ -208,6 +208,12 @@ def _default_fetch(
                 total += len(chunk)
                 if total >= MAX_PROBE_BYTES:
                     break
+        except Exception:
+            # A slow CDN can stall after the header. The bytes already read
+            # are enough to judge an MP4 or a playlist, so keep them instead
+            # of turning a working source into a timeout.
+            if not chunks:
+                raise
         finally:
             response.close()
     finally:

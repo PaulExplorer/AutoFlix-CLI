@@ -327,7 +327,8 @@ class ProgressiveSearch:
     PROBE_TYPES = ("M3U8", "MP4", "MPD")
     PROBE_WORKERS = 6
     # A probe still queued after this long is pointless: the menu has moved on.
-    PROBE_WAIT = 15
+    # The wait happens in a daemon thread, so it costs nothing but memory.
+    PROBE_WAIT = 30
 
     def __init__(
         self,
